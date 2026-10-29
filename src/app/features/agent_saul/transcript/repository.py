@@ -182,9 +182,17 @@ def _session_set_values(
     if turn_opened:
         values["turn_count"] = session_row.turn_count + 1
     values["status"] = status
-    if any(
-        _plan_decision_prompt_key(row.source_key) == session_row.pending_plan_decision_key
-        for row in projection.rows
+    if (
+        projection.watermark_checkpoint_id
+        and session_row.pending_plan_decision_checkpoint_id == projection.watermark_checkpoint_id
+        and any(
+            (
+                _plan_decision_prompt_key(row.source_key) is not None
+                and _plan_decision_prompt_key(row.source_key)
+                == session_row.pending_plan_decision_key
+            )
+            for row in projection.rows
+        )
     ):
         values["pending_plan_decision_key"] = None
         values["pending_plan_decision_modified"] = None
@@ -211,6 +219,31 @@ def _valid_plan_decision_key(decision_key: object) -> bool:
 
 def _valid_checkpoint_id(checkpoint_id: object) -> bool:
     return isinstance(checkpoint_id, str) and _CHECKPOINT_ID_RE.fullmatch(checkpoint_id) is not None
+
+
+def _plan_decision_row_is_authorized(
+    row: ProjectedRow,
+    *,
+    session_row: ChatSession,
+    checkpoint_id: str | None,
+) -> bool:
+    """Require the decision row to carry the exact proof written for its prompt.
+
+    A ``decision:<interrupt>`` key is not authority on its own: checkpoint
+    identifiers are generation fences.  This guard lives at the repository
+    boundary as well as in the pure projector because recovery callers can
+    supply a handcrafted projection.
+    """
+    if row.kind != "plan_decision":
+        return True
+    prompt_key = _plan_decision_prompt_key(row.source_key)
+    return bool(
+        prompt_key
+        and session_row.pending_plan_decision_key == prompt_key
+        and session_row.pending_plan_decision_checkpoint_id
+        and checkpoint_id
+        and session_row.pending_plan_decision_checkpoint_id == checkpoint_id
+    )
 
 
 async def _load_session(session: AsyncSession, session_id: str, user_id: str) -> ChatSession | None:
@@ -343,7 +376,7 @@ class ChatTranscriptRepository:
         if (
             not _valid_plan_decision_key(decision_key)
             or type(modified) is not bool
-            or (checkpoint_id is not None and not _valid_checkpoint_id(checkpoint_id))
+            or not _valid_checkpoint_id(checkpoint_id)
         ):
             return Failure(
                 TranscriptSchemaError(
@@ -372,7 +405,7 @@ class ChatTranscriptRepository:
                     return Failure(schema_failure)
                 latest_prompt = (
                     await session.execute(
-                        select(ChatMessage.source_key)
+                        select(ChatMessage.source_key, ChatMessage.source_checkpoint_id)
                         .where(
                             ChatMessage.session_id == session_id,
                             ChatMessage.user_id == session_row.user_id,
@@ -385,11 +418,16 @@ class ChatTranscriptRepository:
                         )
                         .limit(1)
                     )
-                ).scalar_one_or_none()
-                if latest_prompt != decision_key and checkpoint_id is None:
+                ).one_or_none()
+                if (
+                    latest_prompt is None
+                    or latest_prompt[0] != decision_key
+                    or latest_prompt[1] != checkpoint_id
+                    or session_row.last_checkpoint_id != checkpoint_id
+                ):
                     return Failure(
                         TranscriptNotFoundError(
-                            message="current plan prompt not found",
+                            message="current plan prompt evidence is stale",
                             session_id=session_id,
                         )
                     )
@@ -408,10 +446,7 @@ class ChatTranscriptRepository:
                     if (
                         session_row.pending_plan_decision_key == decision_key
                         and session_row.pending_plan_decision_modified == modified
-                        and (
-                            checkpoint_id is None
-                            or session_row.pending_plan_decision_checkpoint_id == checkpoint_id
-                        )
+                        and session_row.pending_plan_decision_checkpoint_id == checkpoint_id
                     ):
                         return Success(True)
                     return Failure(
@@ -509,7 +544,7 @@ class ChatTranscriptRepository:
             return _sanitize_db_error(exc, "record_review_decision_fact")
 
     @trace_layer("repository")
-    async def apply_projection(
+    async def apply_projection(  # noqa: PLR0914 — transaction boundary keeps all lineage locals together
         self,
         projection: Projection,
         *,
@@ -651,7 +686,20 @@ class ChatTranscriptRepository:
 
                 inserted = 0
                 projected_keys: set[str] = set()
-                for row in projection.rows:
+                # A stale projection may contain a decision row derived from
+                # a previous checkpoint generation.  Do not let it become a
+                # durable fact (or clear the newer proof) merely because the
+                # source key happens to match.
+                rows_to_apply = tuple(
+                    row
+                    for row in projection.rows
+                    if _plan_decision_row_is_authorized(
+                        row,
+                        session_row=session_row,
+                        checkpoint_id=projection.watermark_checkpoint_id,
+                    )
+                )
+                for row in rows_to_apply:
                     projected_keys.add(row.source_key)
                     attached_metadata = metadata_for.get(row.source_key)
                     row_extra = dict(row.extra_metadata or {})
@@ -686,7 +734,7 @@ class ChatTranscriptRepository:
 
                 set_values = _session_set_values(
                     session_row,
-                    projection,
+                    projection.model_copy(update={"rows": rows_to_apply}),
                     projection.watermark_checkpoint_id,
                     turn_opened,
                     status=projection.session_status.value,
@@ -868,7 +916,14 @@ class ChatTranscriptRepository:
                     session, session_id, projection.query_source_key, session_row
                 )
                 recoverable = tuple(
-                    row for row in projection.rows if row.kind not in VERDICT_ROW_KINDS
+                    row
+                    for row in projection.rows
+                    if row.kind not in VERDICT_ROW_KINDS
+                    and _plan_decision_row_is_authorized(
+                        row,
+                        session_row=session_row,
+                        checkpoint_id=projection.watermark_checkpoint_id,
+                    )
                 )
                 inserted = 0
                 for row in recoverable:
@@ -882,13 +937,13 @@ class ChatTranscriptRepository:
                         tokens=None,
                     )
                 if any(
-                    _plan_decision_prompt_key(row.source_key)
-                    == session_row.pending_plan_decision_key
-                    and (
-                        session_row.pending_plan_decision_checkpoint_id is None
-                        or session_row.pending_plan_decision_checkpoint_id
-                        == projection.watermark_checkpoint_id
+                    _plan_decision_row_is_authorized(
+                        row,
+                        session_row=session_row,
+                        checkpoint_id=projection.watermark_checkpoint_id,
                     )
+                    and _plan_decision_prompt_key(row.source_key)
+                    == session_row.pending_plan_decision_key
                     for row in recoverable
                 ):
                     # Hole-fill can be the first writer of the decision row

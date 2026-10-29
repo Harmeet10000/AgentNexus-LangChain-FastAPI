@@ -92,7 +92,7 @@ def _assessed_state_with_finding(
     state.update(
         {
             "run_id": "run-1",
-            "checkpoint_id": "checkpoint-1",
+            "evidence_checkpoint_id": "checkpoint-1",
             "allowed_doc_ids": ["doc-1"],
             "evidence_registry": {ref.evidence_id: ref} if ref else {},
             "coverage": coverage or {},

@@ -464,11 +464,13 @@ class TurnRecorder:
                     ),
                     None,
                 )
-            except Exception as exc:  # noqa: BLE001 — resume evidence is fail-open
+            except Exception as exc:  # noqa: BLE001 — malformed evidence fails closed
                 exc.add_note(f"thread_id={self._thread_id}")
                 self.log.warning("plan_resume_evidence_check_failed")
                 await self._register_reconcile_hint()
-                return result
+                return _infra_failure_for(
+                    "plan_decision_fact", "plan resume evidence could not be verified"
+                )
             current_evidence = (
                 PlanResumeEvidence._from_interrupt(
                     current_interrupt,
@@ -485,7 +487,7 @@ class TurnRecorder:
             ):
                 self.log.warning("plan_resume_evidence_stale")
                 await self._register_reconcile_hint()
-                return result
+                return _infra_failure_for("plan_decision_fact", "plan resume evidence is stale")
             if not self.resume_is_allowed():
                 self.log.warning("plan_resume_lock_lost_before_fact")
                 return result
@@ -502,6 +504,16 @@ class TurnRecorder:
             if isinstance(fact, Failure) or (isinstance(fact, Success) and not fact.unwrap()):
                 self.log.warning("plan_decision_fact_not_recorded")
                 await self._register_reconcile_hint()
+                # Unlike transcript projection (which is deliberately
+                # fail-open), the fact is the authorization witness for the
+                # upcoming Command.  Never resume without it.
+                return Failure(
+                    TranscriptInfrastructureError(
+                        message="plan decision fact could not be recorded",
+                        source="chat_transcript_recorder",
+                        operation="plan_decision_fact",
+                    )
+                )
         return result
 
     def resume_is_allowed(self) -> bool:
@@ -518,7 +530,15 @@ class TurnRecorder:
         checkpoint_id: str | None,
     ) -> TranscriptResult[bool]:
         """Append the server-authorized approve/reject audit fact."""
-        return await self._repo.record_review_decision_fact(
+        if not self.resume_is_allowed():
+            return Failure(
+                TranscriptInfrastructureError(
+                    message="thread exclusion was lost before review audit",
+                    source="chat_transcript_recorder",
+                    operation="record_review_decision",
+                )
+            )
+        result = await self._repo.record_review_decision_fact(
             session_id=self._thread_id,
             user_id=self._user_id,
             action=action,
@@ -527,6 +547,15 @@ class TurnRecorder:
             self_reviewed=self_reviewed,
             checkpoint_id=checkpoint_id,
         )
+        if not self.resume_is_allowed():
+            return Failure(
+                TranscriptInfrastructureError(
+                    message="thread exclusion was lost after review audit",
+                    source="chat_transcript_recorder",
+                    operation="record_review_decision",
+                )
+            )
+        return result
 
     # ------------------------------------------------------------------
     # One projection cycle — shared by every boundary
@@ -617,6 +646,8 @@ class TurnRecorder:
         # 4. Apply stays inside the hard deadline in `_project`, but outside
         # the projection degradation catch above. Repository Failure values
         # remain expected; unexpected exceptions remain visible as bugs.
+        if not self.resume_is_allowed():
+            return _infra_failure_for(stage, "thread exclusion was lost before projection")
         applied = await apply_snapshot(
             repo=self._repo,
             prepared=prepared,
@@ -624,6 +655,9 @@ class TurnRecorder:
             session_id=self._thread_id,
             prior_checkpoint_id=context.last_checkpoint_id,
         )
+
+        if not self.resume_is_allowed():
+            return _infra_failure_for(stage, "thread exclusion was lost after projection")
 
         if isinstance(applied, Failure):
             await self._register_reconcile_hint()
@@ -658,6 +692,28 @@ def _infra_failure_for(stage: str, what: str) -> TranscriptResult[ApplyOutcome]:
     )
 
 
+def _plan_steps_from_interrupt(raw_interrupt: object) -> tuple[dict[str, object], ...]:
+    value = (
+        raw_interrupt.get("value", raw_interrupt)
+        if isinstance(raw_interrupt, Mapping)
+        else getattr(raw_interrupt, "value", None)
+    )
+    raw_plan = value.get("plan") if isinstance(value, Mapping) else None
+    if not isinstance(raw_plan, list):
+        return ()
+    steps: list[dict[str, object]] = []
+    for step in raw_plan:
+        if isinstance(step, Mapping):
+            steps.append({str(key): value for key, value in step.items()})
+            continue
+        dump = getattr(step, "model_dump", None)
+        if callable(dump):
+            dumped = dump()
+            if isinstance(dumped, Mapping):
+                steps.append({str(key): value for key, value in dumped.items()})
+    return tuple(steps)
+
+
 def _paused_plan_of(snapshot: StateSnapshot | None) -> tuple[dict[str, object], ...]:
     """The plan the user was shown — lives in the pending interrupt's payload.
 
@@ -665,14 +721,13 @@ def _paused_plan_of(snapshot: StateSnapshot | None) -> tuple[dict[str, object], 
     """
     plan_steps: list[dict[str, object]] = []
     for task in snapshot.tasks if snapshot is not None else ():
-        for interrupt in getattr(task, "interrupts", ()) or ():
-            value = getattr(interrupt, "value", None)
-            raw_plan = value.get("plan") if isinstance(value, dict) else None
-            if not isinstance(raw_plan, list):
-                continue
-            for step in raw_plan:
-                if isinstance(step, dict):
-                    plan_steps.append(step)
-                elif hasattr(step, "model_dump"):
-                    plan_steps.append(dict(step.model_dump()))
+        raw_interrupts = (
+            task.get("interrupts", ())
+            if isinstance(task, Mapping)
+            else getattr(task, "interrupts", ())
+        )
+        if not isinstance(raw_interrupts, list | tuple):
+            continue
+        for interrupt in raw_interrupts:
+            plan_steps.extend(_plan_steps_from_interrupt(interrupt))
     return tuple(plan_steps)

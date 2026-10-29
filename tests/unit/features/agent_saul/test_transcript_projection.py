@@ -473,6 +473,7 @@ def test_project_resume_writes_reply_then_decision() -> None:
         ),
         pending_plan_decision_key="interrupt:i2",
         pending_plan_decision_modified=False,
+        pending_plan_decision_checkpoint_id=CHECKPOINT,
     )
     out = project(
         _view(
@@ -506,6 +507,7 @@ def test_project_modified_plan_decision_label() -> None:
         paused_plan=({"step": "ingest raw", "ordinal": 1},),
         pending_plan_decision_key="interrupt:i2",
         pending_plan_decision_modified=True,
+        pending_plan_decision_checkpoint_id=CHECKPOINT,
     )
     out = project(
         _view(plan_approved=True, plan=({"step": "ingest modified", "ordinal": 1},)),
@@ -743,6 +745,7 @@ def test_decision_slot_reserved_before_followup_prompt() -> None:
         ),
         pending_plan_decision_key="interrupt:i2",
         pending_plan_decision_modified=False,
+        pending_plan_decision_checkpoint_id=CHECKPOINT,
     )
     out = project(
         _view(

@@ -20,7 +20,7 @@ from app.features.agent_saul.transcript.export import (
     TranscriptExportError,
     TranscriptExportRow,
 )
-from app.features.auth.dependencies import get_token_claims
+from app.features.auth.api.http.dependencies import get_token_claims
 from app.security.tokens import TokenClaims
 
 if TYPE_CHECKING:

@@ -647,7 +647,11 @@ _LEGACY_STATE_DEFAULTS: dict[str, Any] = {
     "thread_id": "",
     "correlation_id": "",
     "run_id": "",
-    "checkpoint_id": None,
+    # ``checkpoint_id`` belongs to LangGraph's runtime configurable namespace,
+    # not to application state.  v8 checkpoints may still contain the old
+    # channel; ``hydrate_state`` maps it to this evidence-only channel and
+    # removes the reserved key before the graph sees it.
+    "evidence_checkpoint_id": None,
     "doc_id": "",
     "primary_doc_id": None,
     "allowed_doc_ids": [],
@@ -724,9 +728,23 @@ def hydrate_state(state: dict[str, Any]) -> dict[str, Any]:
             f"(expected {STATE_SCHEMA_VERSION!r})"
         )
         raise StateSchemaVersionError(msg)
-    if recorded == STATE_SCHEMA_VERSION and not isinstance(state.get("budget_ledger"), dict):
+    # ``checkpoint_id`` was accidentally emitted as a state channel by an
+    # earlier v8 writer.  LangGraph reserves that name for its runtime
+    # configurable checkpoint identity, so keep old checkpoints readable but
+    # never return the reserved/unknown key to a graph update.
+    has_legacy_checkpoint_channel = "checkpoint_id" in state
+    if (
+        recorded == STATE_SCHEMA_VERSION
+        and not isinstance(state.get("budget_ledger"), dict)
+        and not has_legacy_checkpoint_channel
+    ):
         return state
     migrated = {**_LEGACY_STATE_DEFAULTS, **state}
+    legacy_checkpoint_id = migrated.pop("checkpoint_id", None)
+    if "evidence_checkpoint_id" not in state and (
+        isinstance(legacy_checkpoint_id, str) or legacy_checkpoint_id is None
+    ):
+        migrated["evidence_checkpoint_id"] = legacy_checkpoint_id
     # v0-v2 only carried one document. Preserve that checkpoint's exact scope
     # rather than treating an absent allowlist as unrestricted retrieval.
     legacy_doc_id = migrated.get("doc_id")
@@ -790,7 +808,10 @@ class LegalAgentState(TypedDict):
     thread_id: str
     correlation_id: str
     run_id: str
-    checkpoint_id: str | None
+    # Application evidence scope.  The LangGraph runtime checkpoint identity
+    # is in ``RunnableConfig.configurable["checkpoint_id"]`` and must never be
+    # modeled as a graph channel.
+    evidence_checkpoint_id: str | None
     schema_version: int  # bump when TypedDict evolves; guards hydration node
 
     # --- Document reference ---

@@ -322,13 +322,13 @@ def _merge_evidence_metadata(
     registry, coverage = _evidence_metadata_from_messages(_agent_messages(result))
     run_id = state.get("run_id") or state.get("correlation_id") or state.get("thread_id", "")
     thread_id = state.get("thread_id", "")
-    checkpoint_id = state.get("checkpoint_id") or f"run:{run_id}"
+    evidence_checkpoint_id = state.get("evidence_checkpoint_id") or f"run:{run_id}"
     registry = {
         evidence_id: ref.model_copy(
             update={
                 "run_id": ref.run_id or run_id,
                 "thread_id": ref.thread_id or thread_id,
-                "checkpoint_id": ref.checkpoint_id or checkpoint_id,
+                "checkpoint_id": ref.checkpoint_id or evidence_checkpoint_id,
             }
         )
         for evidence_id, ref in registry.items()
@@ -344,7 +344,7 @@ def _checkpoint_scope(state: LegalAgentState) -> str:
     """Return the same concrete checkpoint marker used when issuing handles."""
 
     run_id = state.get("run_id") or state.get("correlation_id") or state.get("thread_id", "")
-    return state.get("checkpoint_id") or f"run:{run_id}"
+    return state.get("evidence_checkpoint_id") or f"run:{run_id}"
 
 
 def _agent_structured_response(result: Any, schema: type[BaseModel]) -> BaseModel | None:
@@ -1094,10 +1094,7 @@ def make_ingestion_node() -> ConfiguredStateNode:
             scope_versions = tuple(
                 (document_id, version, None)
                 for document_id, version in sorted(
-                    {
-                        (segment.document_id, segment.document_version)
-                        for segment in segments
-                    }
+                    {(segment.document_id, segment.document_version) for segment in segments}
                 )
             )
             contract_values: dict[tuple[str, int], list[int | None]] = {}
@@ -1567,7 +1564,7 @@ def delegation_pairs_from(messages: list[Any]) -> list[tuple[Any, Any]]:
 def _analysis_tool_context(state: LegalAgentState) -> ToolRuntimeContext:
     """Project only server-owned scope into a nested specialist graph."""
     run_id = state.get("run_id") or state.get("correlation_id") or state["thread_id"]
-    checkpoint_id = state.get("checkpoint_id") or f"run:{run_id}"
+    evidence_checkpoint_id = state.get("evidence_checkpoint_id") or f"run:{run_id}"
     return {
         "user_id": state["user_id"],
         "tenant_id": state.get("tenant_id", ""),
@@ -1577,7 +1574,7 @@ def _analysis_tool_context(state: LegalAgentState) -> ToolRuntimeContext:
         "thread_id": state["thread_id"],
         "step_id": str(state.get("current_step", 0)),
         "run_id": run_id,
-        "checkpoint_id": checkpoint_id,
+        "checkpoint_id": evidence_checkpoint_id,
         "document_versions": tuple(state.get("document_versions", ())),
         "document_contracts": tuple(state.get("document_contracts", ())),
     }
@@ -2714,7 +2711,7 @@ async def _run_scoped_research_step(
             allowed_doc_ids=allowed_doc_ids,
             thread_id=thread_id,
             run_id=state.get("run_id") or state.get("correlation_id") or thread_id,
-            checkpoint_id=state.get("checkpoint_id"),
+            checkpoint_id=state.get("evidence_checkpoint_id"),
             request=EvidenceSearchRequest(query=step.description, limit=5),
             evidence_policy=cast("EvidencePolicy", evidence_policy),
         )

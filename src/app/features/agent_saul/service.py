@@ -69,6 +69,7 @@ from app.features.agent_saul.exceptions import (
     AgentSaulValidationError,
 )
 from app.features.agent_saul.graph.state import (
+    _MIGRATABLE_STATE_SCHEMA_VERSIONS,
     GRAPH_NODE_NAMES,
     STATE_SCHEMA_VERSION,
     HITLInterruptType,
@@ -84,15 +85,16 @@ from app.features.agent_saul.thread_lock import ThreadLock
 from app.features.agent_saul.transcript.projection import PAUSE_WINDOW
 from app.features.agent_saul.transcript.recorder import PlanResumeEvidence, TurnRecorder
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
-from app.features.auth.tenancy import LegalRole
-from app.features.auth.websocket_security import (
+from app.features.auth.api.websocket.security import (
     WebSocketIdleTimeout,
     WebSocketSecurityViolation,
 )
+from app.features.auth.domain.tenancy import LegalRole
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any
 
     from redis.asyncio import Redis
@@ -109,9 +111,11 @@ if TYPE_CHECKING:
     )
     from app.features.agent_saul.exceptions import AgentSaulError, AgentSaulResult
     from app.features.agent_saul.runtime import SaulThreadContext
-    from app.features.auth.account_store import AuthAccountStore
-    from app.features.auth.tenant_repository import TenantMembershipService
-    from app.features.auth.websocket_security import (
+    from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccountStore
+    from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
+        TenantMembershipService,
+    )
+    from app.features.auth.api.websocket.security import (
         WebSocketSecurityContext,
         WebSocketSecurityService,
     )
@@ -549,7 +553,16 @@ class AgentSaulService:
     @staticmethod
     def _interrupts_of(snapshot: StateSnapshot) -> list[Any]:
         """Pending interrupts across tasks (P5a over task objects)."""
-        return [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
+        interrupts: list[Any] = []
+        for task in snapshot.tasks or ():
+            raw = (
+                task.get("interrupts", ())
+                if isinstance(task, Mapping)
+                else getattr(task, "interrupts", ())
+            )
+            if isinstance(raw, list | tuple):
+                interrupts.extend(raw)
+        return interrupts
 
     async def _stream_round_guarded(
         self,
@@ -744,8 +757,30 @@ class AgentSaulService:
         hydrated = await self._hydrate_or_refuse(ws, config, {}, thread_id)
         if hydrated is None:
             return None
+        first_interrupt = interrupts[0]
+        first_value = (
+            first_interrupt.get("value", first_interrupt)
+            if isinstance(first_interrupt, Mapping)
+            else getattr(first_interrupt, "value", None)
+        )
+        if not isinstance(first_value, Mapping):
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node=None,
+                    code="INVALID_INTERRUPT",
+                    message="Saved interrupt payload is malformed",
+                    retryable=False,
+                ).model_dump(),
+            )
+            return None
         await self._emit_hitl_prompt(
-            ws, thread_id, interrupts[0].value, recorder, snapshot, config=config
+            ws,
+            thread_id,
+            {str(key): value for key, value in first_value.items()},
+            recorder,
+            snapshot,
+            config=config,
         )
         return await self._apply_resume(
             first_resume, ws=ws, thread_id=thread_id, recorder=recorder, config=config
@@ -1122,9 +1157,12 @@ class AgentSaulService:
         # another user must be refused before reconciliation can create its
         # discovery row under the connecting user's identity.
         await recorder.reconcile()
+        if not _recorder_resume_alive(recorder):
+            await self._send_lock_lost(ws, thread_id)
+            return False
         snapshot = await self._graph.aget_state(config)
 
-        paused = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
+        paused = self._interrupts_of(snapshot)
         if not paused:
             if first_resume is not None:
                 await self._send_json(
@@ -1214,7 +1252,12 @@ class AgentSaulService:
             return True
 
     async def _persist_budget_resume(
-        self, *, config: RunnableConfig, state_snapshot: object, thread_id: str
+        self,
+        *,
+        config: RunnableConfig,
+        state_snapshot: object,
+        thread_id: str,
+        lease_checker: Callable[[], bool] | None = None,
     ) -> bool:
         """Start a new active segment only after a validated resume."""
         values = getattr(state_snapshot, "values", None)
@@ -1227,7 +1270,11 @@ class AgentSaulService:
             updater = getattr(self._graph, "aupdate_state", None)
             if resumed == ledger or not callable(updater):
                 return True
+            if lease_checker is not None and not lease_checker():
+                return False
             await updater(config, {"budget_ledger": resumed})
+            if lease_checker is not None and not lease_checker():
+                return False
         except Exception as exc:  # noqa: BLE001 — resume must fail closed
             exc.add_note(f"thread_id={thread_id}, operation=budget_resume")
             self._log.bind(thread_id=thread_id).exception("saul_budget_resume_persist_failed")
@@ -1378,7 +1425,10 @@ class AgentSaulService:
             )
             return None
         recorded_version = fresh_values.get("schema_version")
-        if recorded_version not in {1, STATE_SCHEMA_VERSION - 1, STATE_SCHEMA_VERSION}:
+        try:
+            _ = hydrate_state(dict(fresh_values))
+        except StateSchemaVersionError as exc:
+            exc.add_note(f"thread_id={thread_id}")
             await self._send_json(
                 ws,
                 WSErrorFrame(
@@ -1389,6 +1439,19 @@ class AgentSaulService:
                 ).model_dump(),
             )
             return None
+        if (
+            recorded_version != STATE_SCHEMA_VERSION
+            and recorded_version is not None
+            and (
+                type(recorded_version) is not int
+                or recorded_version not in _MIGRATABLE_STATE_SCHEMA_VERSIONS
+            )
+        ):
+            return None
+        # The pending node is resumed directly, so the graph's initial
+        # hydration node is bypassed.  Carry the safe migrated scalar
+        # channels in the Command update for every explicitly supported
+        # predecessor (including v0/missing-version checkpoints).
         fresh_interrupts = self._interrupts_of(fresh_snapshot)
         interrupt_type = _interrupt_type_from_snapshot(fresh_snapshot)
         if (
@@ -1459,6 +1522,9 @@ class AgentSaulService:
         fresh_created = _coerce_ts(getattr(fresh_snapshot, "created_at", None))
         if fresh_created is not None and (datetime.now(tz=UTC) - fresh_created) > PAUSE_WINDOW:
             await recorder.reconcile()  # appends turn_closed(abandoned_expired)
+            if not _recorder_resume_alive(recorder):
+                await self._send_lock_lost(ws, thread_id)
+                return None
             self._log.bind(thread_id=thread_id).info("saul_resume_after_expiry_refused")
             await self._send_json(
                 ws,
@@ -1524,6 +1590,9 @@ class AgentSaulService:
                 self_reviewed=str(session_context.user_id) == str(fresh_values.get("user_id")),
                 checkpoint_id=checkpoint_id,
             )
+            if not _recorder_resume_alive(recorder):
+                await self._send_lock_lost(ws, thread_id)
+                return None
             if isinstance(audit_result, Failure):
                 await self._send_json(
                     ws,
@@ -1542,14 +1611,38 @@ class AgentSaulService:
             await self._send_lock_lost(ws, thread_id)
             return None
         resume_projection = await recorder.prepare_resume(plan_resume=plan_resume)
+        if (
+            isinstance(resume_projection, Failure)
+            and plan_resume is not None
+            and getattr(resume_projection.failure(), "operation", None) == "plan_decision_fact"
+        ):
+            # Plan approval/modify has a second durable witness (the fact
+            # written before Command).  Projection remains fail-open, but a
+            # failed fact must stop the resume explicitly.
+            await self._send_json(
+                ws,
+                WSErrorFrame(
+                    node="planner",
+                    code="PLAN_DECISION_FACT_UNAVAILABLE",
+                    message="Plan decision could not be durably recorded; resume refused",
+                    retryable=True,
+                ).model_dump(),
+            )
+            return None
         if isinstance(resume_projection, Failure):
             self._log.bind(thread_id=thread_id).warning("saul_t1p_before_resume_project_failed")
         if not _recorder_resume_alive(recorder):
             await self._send_lock_lost(ws, thread_id)
             return None
         if not await self._persist_budget_resume(
-            config=config, state_snapshot=fresh_snapshot, thread_id=thread_id
+            config=config,
+            state_snapshot=fresh_snapshot,
+            thread_id=thread_id,
+            lease_checker=lambda: _recorder_resume_alive(recorder),
         ):
+            if not _recorder_resume_alive(recorder):
+                await self._send_lock_lost(ws, thread_id)
+                return None
             await self._send_json(
                 ws,
                 WSErrorFrame(
@@ -1560,11 +1653,20 @@ class AgentSaulService:
                 ).model_dump(),
             )
             return None
+        if not _recorder_resume_alive(recorder):
+            await self._send_lock_lost(ws, thread_id)
+            return None
         legacy_update = (
             _legacy_resume_update(fresh_snapshot, legacy_plan)
-            if recorded_version != STATE_SCHEMA_VERSION
+            if recorded_version != STATE_SCHEMA_VERSION or "checkpoint_id" in fresh_values
             else None
         )
+        # Final fence: no async work may occur between this check and handing
+        # the Command to the graph loop.  A lost lease must never issue a
+        # resume payload that can advance the checkpoint.
+        if not _recorder_resume_alive(recorder):
+            await self._send_lock_lost(ws, thread_id)
+            return None
         return Command(update=legacy_update, resume=resume_payload)
 
     async def _live_authorization(self) -> tuple[tuple[str, ...] | None, bool, int]:
@@ -1742,6 +1844,7 @@ class AgentSaulService:
             "user_id": user_id,
             "thread_id": thread_id,
             "correlation_id": self._correlation_id,
+            "evidence_checkpoint_id": None,
             "schema_version": STATE_SCHEMA_VERSION,
             "doc_id": start_msg.primary_doc_id or start_msg.doc_id or start_msg.allowed_doc_ids[0],
             "primary_doc_id": start_msg.primary_doc_id
@@ -1831,12 +1934,25 @@ def _legacy_planner_proposal(snapshot: StateSnapshot) -> tuple[list[PlanStep] | 
     service must copy that exact displayed proposal into the state update sent
     with ``Command(resume=...)`` or refuse explicitly when it is malformed.
     """
-    values = snapshot.values if isinstance(snapshot.values, dict) else {}
-    if values.get("plan"):
-        return None, None
+    values = snapshot.values if isinstance(snapshot.values, Mapping) else {}
+    raw_state_plan = values.get("plan")
+    # A truthy legacy state plan is already the proposal and must be validated
+    # before it can reach a direct resume.  Treating an arbitrary truthy object
+    # as "present" silently bypasses the schema gate.
+    if raw_state_plan:
+        if not isinstance(raw_state_plan, list):
+            return None, "Saved execution plan is incompatible with this runtime"
+        try:
+            return [PlanStep.model_validate(step) for step in raw_state_plan], None
+        except (TypeError, ValueError):
+            return None, "Saved execution plan is incompatible with this runtime"
     for interrupt in AgentSaulService._interrupts_of(snapshot):
-        value = getattr(interrupt, "value", None)
-        if not isinstance(value, dict):
+        value = (
+            interrupt.get("value", interrupt)
+            if isinstance(interrupt, Mapping)
+            else getattr(interrupt, "value", None)
+        )
+        if not isinstance(value, Mapping):
             continue
         interrupt_type = value.get("type")
         if interrupt_type not in {
@@ -1849,7 +1965,7 @@ def _legacy_planner_proposal(snapshot: StateSnapshot) -> tuple[list[PlanStep] | 
             return None, "Saved planner proposal is missing or empty"
         try:
             return [PlanStep.model_validate(step) for step in raw_plan], None
-        except ValidationError:
+        except (TypeError, ValueError):
             return None, "Saved planner proposal is incompatible with this runtime"
     return None, None
 
@@ -1894,10 +2010,15 @@ def _is_plan_approval_interrupt(interrupt: object) -> bool:
 
 def _interrupt_type_from_snapshot(snapshot: StateSnapshot) -> HITLInterruptType | None:
     """Return the typed HITL kind without trusting client resume fields."""
-    interrupts = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
+    interrupts = AgentSaulService._interrupts_of(snapshot)
     if not interrupts:
         return None
-    value = getattr(interrupts[0], "value", None)
+    interrupt = interrupts[0]
+    value = (
+        interrupt.get("value", interrupt)
+        if isinstance(interrupt, Mapping)
+        else getattr(interrupt, "value", None)
+    )
     raw = value.get("type") if isinstance(value, Mapping) else None
     try:
         return HITLInterruptType(raw)

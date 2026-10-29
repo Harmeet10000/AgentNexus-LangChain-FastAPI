@@ -37,9 +37,11 @@ from langgraph.types import StateSnapshot
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.features.agent_saul.graph.state import (
+    _MIGRATABLE_STATE_SCHEMA_VERSIONS,
     STATE_SCHEMA_VERSION,
     HITLInterruptType,
     StateSchemaVersionError,
+    hydrate_state,
 )
 
 # Doc §3.2 — the databases (0022 CHECK, models.py). Mirror this tuple; a
@@ -292,17 +294,22 @@ def snapshot_to_view(
     values = snapshot.values if isinstance(snapshot.values, dict) else {}
 
     recorded_version = values.get("schema_version")
-    legacy_paused = (
-        allow_legacy_paused
-        and recorded_version in {1, STATE_SCHEMA_VERSION - 1}
-        and _has_supported_interrupt(snapshot)
+    legacy_version = recorded_version is None or (
+        type(recorded_version) is int and recorded_version in _MIGRATABLE_STATE_SCHEMA_VERSIONS
     )
+    legacy_paused = allow_legacy_paused and legacy_version and _has_supported_interrupt(snapshot)
     if recorded_version != STATE_SCHEMA_VERSION and not legacy_paused:
         msg = (
             f"refusing snapshot: schema_version={recorded_version!r} "
             f"cannot be projected by this runtime (expected {STATE_SCHEMA_VERSION!r})"
         )
         raise StateSchemaVersionError(msg)
+    if legacy_paused:
+        # Projection is a second resume boundary: the graph's hydration node
+        # is bypassed when a paused checkpoint is inspected directly.  Hydrate
+        # the copy before reading any legacy channels so every explicitly
+        # migratable predecessor follows the same defaults as Command.resume.
+        values = hydrate_state(dict(values))
 
     metadata = snapshot.metadata if isinstance(snapshot.metadata, dict) else {}
     step_value = metadata.get("step")
@@ -343,11 +350,7 @@ def _has_supported_interrupt(snapshot: StateSnapshot) -> bool:
         if not isinstance(raw_interrupts, list | tuple):
             continue
         for interrupt in raw_interrupts:
-            value = (
-                interrupt.get("value", interrupt)
-                if isinstance(interrupt, Mapping)
-                else getattr(interrupt, "value", None)
-            )
+            value = _raw_interrupt_value(interrupt)
             if not isinstance(value, Mapping):
                 continue
             interrupt_type = value.get("type")
@@ -447,11 +450,23 @@ def _interrupt_views_of(snapshot: StateSnapshot) -> tuple[InterruptView, ...]:
             task_interrupts.extend(raw)
     return tuple(
         InterruptView(
-            id=str(getattr(interrupt, "id", "") or ""),
-            value=_interrupt_value(getattr(interrupt, "value", None)),
+            id=str(_raw_interrupt_id(interrupt) or ""),
+            value=_interrupt_value(_raw_interrupt_value(interrupt)),
         )
         for interrupt in task_interrupts
     )
+
+
+def _raw_interrupt_id(raw: object) -> object:
+    """Read the id from both checkpoint mappings and live task objects."""
+    return raw.get("id") if isinstance(raw, Mapping) else getattr(raw, "id", None)
+
+
+def _raw_interrupt_value(raw: object) -> object:
+    """Normalize LangGraph's mapping/object/direct-payload interrupt shapes."""
+    if isinstance(raw, Mapping):
+        return raw.get("value", raw)
+    return getattr(raw, "value", None)
 
 
 def _final_report_summary(final_report: object) -> str | None:
@@ -479,8 +494,13 @@ def _coerce_checkpoint_ts(raw: object) -> datetime | None:
 
 
 def _interrupt_value(raw: object) -> dict[str, Any]:
-    if isinstance(raw, dict):
+    if isinstance(raw, Mapping):
         return {str(key): value for key, value in raw.items()}
+    model_dump = getattr(raw, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, Mapping):
+            return {str(key): value for key, value in dumped.items()}
     return {"type": type(raw).__name__}
 
 
@@ -634,6 +654,14 @@ def _decision_row(
         # Existing rows (or a crash before the validated resume fact was
         # recorded) cannot prove approval versus modification.  Omitting the
         # row is safer than fabricating approval.
+        return None
+    # The durable proof is bound to the exact checkpoint that displayed the
+    # prompt.  A key by itself is replayable across generations; accepting it
+    # after the checkpoint moved would let a stale approve claim a new turn.
+    if (
+        not turn_rows.pending_plan_decision_checkpoint_id
+        or turn_rows.pending_plan_decision_checkpoint_id != view.checkpoint_id
+    ):
         return None
     was_modified = turn_rows.pending_plan_decision_modified
     if was_modified is None:

@@ -72,6 +72,37 @@ def test_absent_version_key_treated_as_legacy_and_upgraded() -> None:
     assert hydrated["qna_confidence"] == 0
 
 
+def test_v8_checkpoint_id_channel_is_migrated_to_evidence_scope() -> None:
+    """The old v8 state key remains readable but never reaches graph updates."""
+    legacy = {
+        "schema_version": STATE_SCHEMA_VERSION,
+        "checkpoint_id": "cp-legacy-evidence",
+    }
+
+    hydrated = hydrate_state(legacy)
+
+    assert hydrated["evidence_checkpoint_id"] == "cp-legacy-evidence"
+    assert "checkpoint_id" not in hydrated
+    assert "checkpoint_id" not in state_module.legacy_resume_update(legacy)
+
+
+def test_legal_agent_state_compiles_without_reserved_checkpoint_channel() -> None:
+    """LangGraph owns ``checkpoint_id`` in configurable runtime metadata."""
+    from langgraph.graph import END, StateGraph
+
+    from app.features.agent_saul.graph.state import LegalAgentState
+
+    graph = StateGraph(LegalAgentState)
+    graph.add_node("noop", lambda _state: {})
+    graph.set_entry_point("noop")
+    graph.add_edge("noop", END)
+
+    graph.compile()
+
+    assert "checkpoint_id" not in graph.channels
+    assert "evidence_checkpoint_id" in graph.channels
+
+
 def test_unknown_version_refused_naming_both_versions() -> None:
     with pytest.raises(StateSchemaVersionError) as exc_info:
         hydrate_state({"schema_version": 99})

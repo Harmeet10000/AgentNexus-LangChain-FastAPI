@@ -28,7 +28,7 @@ def _state(*, plan: list[PlanStep], current_step: int = 0) -> dict[str, Any]:
         "tenant_id": "tenant-1",
         "thread_id": "thread-1",
         "run_id": "run-1",
-        "checkpoint_id": "checkpoint-1",
+        "evidence_checkpoint_id": "checkpoint-1",
         "allowed_doc_ids": ["doc-1", "doc-2"],
         "plan": plan,
         "current_step": current_step,

@@ -274,6 +274,7 @@ async def test_restart_recovery_preserves_plan_decision_without_plan_leakage(
         ),
         pending_plan_decision_key="interrupt:plan-caller-parity",
         pending_plan_decision_modified=modified,
+        pending_plan_decision_checkpoint_id=CHECKPOINT_ID,
     )
     _, sweep_outcome, recorder_repo, sweep_repo = await _exercise_callers(
         _snapshot(
@@ -300,13 +301,13 @@ async def test_restart_recovery_preserves_plan_decision_without_plan_leakage(
     [
         (
             _snapshot(next_nodes=(), final_report={"summary": "Report is ready."}),
-            False,
+            True,
             SessionStatus.COMPLETED,
             "final_summary",
         ),
         (
-            _snapshot(created_at=OLD_CHECKPOINT),
-            False,
+            _snapshot(next_nodes=(), created_at=OLD_CHECKPOINT),
+            True,
             SessionStatus.FAILED,
             "turn_closed",
         ),
@@ -399,7 +400,7 @@ async def test_live_usage_side_input_does_not_change_caller_projection_parity() 
     recorder_outcome, sweep_outcome, recorder_repo, sweep_repo = await _exercise_callers(
         _snapshot(next_nodes=(), final_report={"summary": "Report is ready."}),
         outcome=applied,
-        aliveness=False,
+        aliveness=True,
         attach_usage=True,
     )
 
