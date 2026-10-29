@@ -10,6 +10,33 @@ verified evidence handle, every terminal state typed, nothing answered from memo
 ![CI](https://github.com/Harmeet10000/AgentNexus-LangChain-FastAPI/actions/workflows/test.yml/badge.svg)
 [![Greptile: The War on Bugs](https://www.greptile.com/badge.svg)](https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source)
 
+## Why this exists
+
+Legal work has a strange cruelty to it: the most expensive human judgment sits behind a
+wall of repetitive reading, clause sorting, calendar math, template comparison, and
+anxious second-guessing. The people who need clarity most are usually the least able to
+buy it continuously — founders signing vendor terms, families reading settlement papers,
+policyholders facing claim language, small businesses trying not to discover a liability
+clause after the damage is done.
+
+Agent Saul exists to reduce that information asymmetry. Not by pretending to be a
+lawyer, and not by turning legal judgment into autocomplete, but by making the
+repetitive surface area small enough that humans spend their attention on the parts
+that actually require judgment.
+
+The pain in India is specific: small startups rarely have strong legal teams on call;
+individuals are intimidated by fine print and legal notices; much of the work is
+high-volume, low-judgment grunt work; and most contract-AI products carry US/UK
+assumptions, not Indian statutes, procedures, and enforcement realities. The
+high-volume surface worth automating: clause tagging, risk flagging (one-sided
+indemnity, unlimited liability), deadline tracking, template comparison, stamp-duty and
+jurisdiction sanity checks, "is this clause enforceable in India?"
+
+Time is a symptom. Risk and uncertainty are the disease. The same principle governs how
+*we* build this project: agents should remove avoidable strain and the quiet dread of
+"what if I chose wrong" — lifting invisible weight off people, not adding a new layer
+of it.
+
 ## What it does
 
 - **Bulletproof ingestion** — bounded uploads (size + extension checked before
@@ -31,6 +58,77 @@ verified evidence handle, every terminal state typed, nothing answered from memo
 - **An evaluated system** — a provenance-gated evaluation corpus (105 cases, 23
   categories, dual-annotated, Cohen's κ 0.815) runs in CI with checksum, licensing
   and adjudication gates.
+
+## How Saul reasons
+
+Saul is a stateful, resumable, memory-aware reasoning pipeline: a distributed,
+resumable, schema-driven cognitive workflow engine with controlled reasoning surfaces,
+built on three layers:
+
+1. **Memory shaping** — filters, trimming, bounded context.
+2. **Runtime control** — specialist sub-agents, routing, orchestration.
+3. **Execution durability** — pause, resume, retry, replay.
+
+The mental model underneath:
+
+- The LLM is a **stateless reasoning engine**.
+- **State is the source of truth** (`LegalAgentState` and its projections).
+- **Memory is indexed projections of state** — advisory surfaces, never the record.
+
+The deepest design constraint: *if your system cannot deterministically replay a run,
+you do not control your agent.* Hence the shape:
+
+```text
+Plan -> deterministic execution -> validated output -> persisted state
+```
+
+Not:
+
+```text
+LLM -> decide -> act -> hope it works
+```
+
+The orchestration maps one-to-one onto the requirements. The orchestrator plans, then
+delegates to specialist sub-agents (risk, compliance, deep research) that loop over
+their tool surfaces until the plan step is done; the orchestrator reviews specialist
+output, handles failures, and replans when needed. Both plan approval and final report
+review are **LangGraph interrupts** — humans sit inside the loop, not on top of it.
+State lives in `LegalAgentState`; specialists read and write through controlled
+surfaces, and every resume re-resolves server-derived authorization before any
+evidence handle is honored.
+
+### LangGraph performance rules
+
+Do not initialize models or compile agents inside graph nodes. That is the fast path
+to slow requests, memory churn, noisy traces, and production pain.
+
+```python
+# Wrong: rebuilds the runtime on every call
+def research_node(state):
+    model = init_chat_model("<provider:model>")
+    agent = create_agent(model, tools)
+    return agent.invoke(state)
+
+# Right: compile once, execute many
+research_agent = create_agent(
+    init_chat_model("<provider:model>"),
+    tools=[search_caselaw],
+)
+
+def research_node(state):
+    return research_agent.invoke(state)
+```
+
+Model initialization can spend 100–500 ms fetching config and metadata; agent
+construction adds tens of milliseconds more. Ten nodes across ten concurrent requests
+become hundreds of avoidable constructions per second — and traces stop being
+comparable because the runtime shape keeps being rebuilt.
+
+The convention in this repo: models, tools, and graphs are compiled **once** at startup
+(FastAPI lifespan), held on `app.state`, and passed into `graph.add_node(...)` as ready
+callables. Checkpointers are wired per-workflow where isolation matters, dynamic model
+selection goes through explicit lookup tables, and heavy resources are never built
+inside node bodies. The graph behaves like infrastructure, not improvisation.
 
 ## Architecture
 
