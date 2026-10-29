@@ -134,9 +134,7 @@ _CONTRACT_OPENING_RE = re.compile(
 )
 
 
-def establish_contract_boundaries(
-    *, markdown: str, page_count: int = 0
-) -> ContractBoundaryResult:
+def establish_contract_boundaries(*, markdown: str, page_count: int = 0) -> ContractBoundaryResult:
     """Find high-confidence source markers for independently signed contracts.
 
     This is deliberately conservative.  A phrase such as ``this agreement``
