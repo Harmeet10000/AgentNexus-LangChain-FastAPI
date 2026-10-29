@@ -25,12 +25,8 @@ from app.kernel.errors import ErrorKind, FeatureError
 from app.observability.logging import logger
 
 
-@cache
-def get_shared_tavily_http_client() -> httpx.AsyncClient:
-    """Return a process-wide async HTTPX client for Tavily requests.
-
-    Used for non-request runtimes like background tasks and Celery workers.
-    """
+def _build_tavily_http_client() -> httpx.AsyncClient:
+    """Create a standalone Tavily HTTP client from settings."""
     settings: Settings = get_settings()
     return httpx.AsyncClient(
         base_url=settings.TAVILY_BASE_URL.rstrip("/"),
@@ -47,14 +43,34 @@ def get_shared_tavily_http_client() -> httpx.AsyncClient:
     )
 
 
+@cache
+def get_worker_tavily_http_client() -> httpx.AsyncClient:
+    """Return the worker-scoped Tavily HTTP client.
+
+    Non-request runtimes (Celery tasks, agent tool calls reached outside a
+    request) have no lifespan, so this process-scoped client is theirs alone:
+    whoever owns the worker process owns its lifecycle. The web lifespan must
+    NEVER touch it — it creates and closes its own client via
+    :func:`create_tavily_http_client`. Sharing one object across both owners
+    is exactly the double-ownership bug this split exists to prevent.
+    """
+    return _build_tavily_http_client()
+
+
 def get_tavily_http_client(connection: HTTPConnection) -> httpx.AsyncClient:
     """Dependency to inject Tavily HTTP client from request lifespan."""
     return connection.app.state.tavily_http_client
 
 
 async def create_tavily_http_client() -> httpx.AsyncClient:
-    """Create Tavily HTTP client for FastAPI lifespan management."""
-    return get_shared_tavily_http_client()
+    """Create a fresh Tavily HTTP client owned by the FastAPI lifespan.
+
+    Deliberately NOT the worker-scoped cached client: the lifespan closes
+    what it creates at shutdown, and handing it the cached object while the
+    cache kept serving the same reference meant every post-shutdown fallback
+    read a closed client.
+    """
+    return _build_tavily_http_client()
 
 
 async def close_tavily_http_client(client: httpx.AsyncClient) -> None:
@@ -197,7 +213,7 @@ async def search(
         include_answer: Whether to include an answer in the response
         include_raw_content: Whether to include raw page content
         include_images: Whether to include images from results
-        http_client: Optional HTTPX client (uses shared client if not provided)
+        http_client: Optional HTTPX client (uses the worker-scoped client if not provided)
 
     Returns:
         SearchResponse containing results and metadata
@@ -232,7 +248,7 @@ async def search(
     log.info("Executing Tavily search")
 
     if http_client is None:
-        http_client = get_shared_tavily_http_client()
+        http_client = get_worker_tavily_http_client()
 
     request_url = "/search"
     try:
@@ -323,7 +339,7 @@ async def get_context(
     Args:
         query: The search query
         max_results: Maximum number of results to include
-        http_client: Optional HTTPX client (uses shared client if not provided)
+        http_client: Optional HTTPX client (uses the worker-scoped client if not provided)
 
     Returns:
         Plain-text context combining search answer and top results

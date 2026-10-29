@@ -25,7 +25,6 @@ from .http import (
     close_httpx_client,
     create_httpx_client,
     get_httpx_client,
-    get_shared_httpx_client,
 )
 from .mongodb import close_mongo_client, create_mongo_client, get_mongodb
 from .neo4j import (
@@ -40,7 +39,6 @@ from .redis import close_redis_client, create_redis_client, get_redis
 from .tavily import (
     close_tavily_http_client,
     create_tavily_http_client,
-    get_shared_tavily_http_client,
     get_tavily_http_client,
 )
 
@@ -74,8 +72,6 @@ __all__ = [
     "get_postgres_db",
     "get_redis",
     "get_s3_client",
-    "get_shared_httpx_client",
-    "get_shared_tavily_http_client",
     "get_tavily_http_client",
     "init_db",
     "init_neo4j",
