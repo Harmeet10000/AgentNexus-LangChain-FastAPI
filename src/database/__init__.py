@@ -2,7 +2,7 @@
 
 `ChatMessage` / `ChatSession` / `DocumentVector` are re-exported here for one
 release so `from database import ChatMessage` keeps working after the move to
-`app.features.agent_saul.models`. New code must import from the feature directly.
+`app.features.agent_saul.adapters.persistence.models`. New code must import from the feature directly.
 """
 
 from .base import Base, PublicIdMixin, TimestampMixin
@@ -18,15 +18,19 @@ __all__ = [
 
 
 def __getattr__(name: str) -> type:
-    """Lazy shim — avoids import cycle when app.features.agent_saul.models imports Base.
+    """Lazy shim — avoids import cycle when app.features.agent_saul.adapters.persistence.models imports Base.
 
-    `from app.features.agent_saul.models import ...` triggers `database` package load.
-    If __init__.py eagerly imported ChatMessage, it would import agent_saul.models
+    `from app.features.agent_saul.adapters.persistence.models import ...` triggers `database` package load.
+    If __init__.py eagerly imported ChatMessage, it would import agent_saul.adapters.persistence.models
     before its classes are defined. Lazy getattr breaks the cycle.
     """
     if name in {"ChatMessage", "ChatSession"}:
-        from app.features.agent_saul.models import ChatMessage as _CM  # noqa: N814
-        from app.features.agent_saul.models import ChatSession as _CS  # noqa: N814
+        from app.features.agent_saul.adapters.persistence.models import (
+            ChatMessage as _CM,  # noqa: N814
+        )
+        from app.features.agent_saul.adapters.persistence.models import (
+            ChatSession as _CS,  # noqa: N814
+        )
 
         return _CM if name == "ChatMessage" else _CS
     if name == "DocumentVector":

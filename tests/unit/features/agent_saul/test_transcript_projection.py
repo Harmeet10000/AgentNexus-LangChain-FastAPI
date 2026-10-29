@@ -16,8 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import CheckpointTask, StateSnapshot
 
-from app.features.agent_saul.graph.state import STATE_SCHEMA_VERSION
-from app.features.agent_saul.transcript.projection import (
+from app.features.agent_saul.application.transcript.projection import (
     ORPHAN_GRACE,
     PAUSE_WINDOW,
     InterruptView,
@@ -30,6 +29,7 @@ from app.features.agent_saul.transcript.projection import (
     project,
     snapshot_to_view,
 )
+from app.features.agent_saul.domain.state import STATE_SCHEMA_VERSION
 
 NOW = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
 THREAD = "thread-0001"
@@ -660,7 +660,7 @@ def test_project_missing_tagged_query_writes_nothing() -> None:
 
 def test_project_unknown_hostile_kind_fails_closed() -> None:
     """ContentRole.for_kind refuses unknown kinds — never persist them."""
-    from app.features.agent_saul.transcript.projection import ContentRole
+    from app.features.agent_saul.application.transcript.projection import ContentRole
 
     with pytest.raises(Exception, match="unknown row kind"):
         ContentRole.for_kind("unmodeled_kind")

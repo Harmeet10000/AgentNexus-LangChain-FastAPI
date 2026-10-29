@@ -35,14 +35,14 @@ from typing import TYPE_CHECKING, cast
 from redis.exceptions import RedisError
 from returns.result import Failure
 
-from app.features.agent_saul.graph.graph import wire_saul_topology
-from app.features.agent_saul.thread_lock import ThreadLock
-from app.features.agent_saul.transcript.projection import (
+from app.features.agent_saul.application.thread_lock import ThreadLock
+from app.features.agent_saul.application.transcript.projection import (
     ORPHAN_GRACE,
     SessionStatus,
     snapshot_to_view,
 )
-from app.features.agent_saul.transcript.sync import apply_snapshot, prepare_snapshot
+from app.features.agent_saul.application.transcript.sync import apply_snapshot, prepare_snapshot
+from app.features.agent_saul.graph.graph import wire_saul_topology
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
 
-    from app.features.agent_saul.transcript.repository import (
+    from app.features.agent_saul.application.transcript.repository import (
         ChatTranscriptRepository,
         SessionMeta,
     )
@@ -89,7 +89,7 @@ def build_saul_read_graph(checkpointer: AsyncPostgresSaver) -> CompiledStateGrap
     """
     from langgraph.graph import StateGraph  # noqa: PLC0415 — cold path
 
-    from app.features.agent_saul.graph.state import (  # noqa: PLC0415 — cold path
+    from app.features.agent_saul.domain.state import (  # noqa: PLC0415 — cold path
         LegalAgentOutputState,
         LegalAgentState,
     )

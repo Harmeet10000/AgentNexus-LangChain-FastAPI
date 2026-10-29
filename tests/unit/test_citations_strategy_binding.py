@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
 
 def test_citation_fields_pre_exist_and_are_not_redefined() -> None:
-    from app.features.agent_saul.graph.state import Citation
+    from app.features.agent_saul.domain.state import Citation
 
     fields = set(Citation.model_fields)
     assert {"claim", "source", "confidence"} <= fields, sorted(fields)
 
 
 def test_a_report_with_no_citations_fails_validation() -> None:
-    from app.features.agent_saul.graph.state import (
+    from app.features.agent_saul.domain.state import (
         Citation,
         FinalReport,
     )
@@ -42,7 +42,7 @@ def test_a_report_with_no_citations_fails_validation() -> None:
 
 
 def test_a_risk_finding_with_no_citations_fails_validation() -> None:
-    from app.features.agent_saul.graph.state import (
+    from app.features.agent_saul.domain.state import (
         Citation,
         RiskFinding,
         RiskLabel,
@@ -61,7 +61,7 @@ def test_a_risk_finding_with_no_citations_fails_validation() -> None:
 
 
 def test_a_compliance_finding_with_no_citations_fails_validation() -> None:
-    from app.features.agent_saul.graph.state import Citation, ComplianceFinding
+    from app.features.agent_saul.domain.state import Citation, ComplianceFinding
 
     kwargs: dict[str, Any] = {
         "finding_id": "f-1",
@@ -76,7 +76,7 @@ def test_a_compliance_finding_with_no_citations_fails_validation() -> None:
 
 
 def test_a_grounding_verification_with_no_citations_fails_validation() -> None:
-    from app.features.agent_saul.graph.state import (
+    from app.features.agent_saul.domain.state import (
         Citation,
         GroundingVerificationOutput,
     )
@@ -94,7 +94,7 @@ def test_a_grounding_verification_with_no_citations_fails_validation() -> None:
 
 
 def test_negative_grounding_verification_can_report_no_available_citations() -> None:
-    from app.features.agent_saul.graph.state import GroundingVerificationOutput
+    from app.features.agent_saul.domain.state import GroundingVerificationOutput
 
     result = GroundingVerificationOutput(
         verified=False,

@@ -25,7 +25,7 @@ from app.extraction.langextract.service import (
     ExtractionRequest,
     ExtractionSucceeded,
 )
-from app.features.agent_saul.graph.state import ClauseSegment, ClauseType
+from app.features.agent_saul.domain.state import ClauseSegment, ClauseType
 from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,

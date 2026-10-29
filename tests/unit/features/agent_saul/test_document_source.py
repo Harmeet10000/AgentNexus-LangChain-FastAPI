@@ -19,7 +19,7 @@ import pytest
 from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.features.agent_saul.document_source import (
+from app.features.agent_saul.adapters.document_source import (
     DOCUMENT_SOURCE_CONFIG_KEY,
     DocumentTextFailure,
     DocumentTextFailureCode,
@@ -28,15 +28,15 @@ from app.features.agent_saul.document_source import (
     document_content_source_from_config,
     parse_document_id,
 )
-from app.features.agent_saul.dto import CreateSessionResponse
-from app.features.agent_saul.exceptions import (
+from app.features.agent_saul.api.dto import CreateSessionResponse
+from app.features.agent_saul.application.service import AgentSaulService, _document_preflight_error
+from app.features.agent_saul.domain.errors import (
     AgentSaulDocumentNotFoundError,
     AgentSaulInfrastructureError,
     AgentSaulValidationError,
 )
+from app.features.agent_saul.domain.state import WorkflowStatus
 from app.features.agent_saul.graph.nodes import make_ingestion_node
-from app.features.agent_saul.graph.state import WorkflowStatus
-from app.features.agent_saul.service import AgentSaulService, _document_preflight_error
 from app.features.documents.domain.errors import DocumentDatabaseError, DocumentNotFoundError
 
 if TYPE_CHECKING:

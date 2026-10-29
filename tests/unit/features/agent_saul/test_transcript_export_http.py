@@ -9,13 +9,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from returns.result import Failure, Success
 
-from app.features.agent_saul.dependencies import get_transcript_exporter
-from app.features.agent_saul.router import router
-from app.features.agent_saul.transcript.errors import (
+from app.features.agent_saul.api.http.dependencies import get_transcript_exporter
+from app.features.agent_saul.api.http.router import router
+from app.features.agent_saul.application.transcript.errors import (
     TranscriptNotFoundError,
     TranscriptSchemaError,
 )
-from app.features.agent_saul.transcript.export import (
+from app.features.agent_saul.application.transcript.export import (
     ExportTranscript,
     TranscriptExportError,
     TranscriptExportRow,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from returns.result import Result
 
-    from app.features.agent_saul.transcript.export import TranscriptExportEvent
+    from app.features.agent_saul.application.transcript.export import TranscriptExportEvent
 
 pytestmark = pytest.mark.unit
 

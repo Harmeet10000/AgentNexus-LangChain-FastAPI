@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, cast
 from returns.result import Success
 from sqlalchemy.dialects import postgresql
 
-from app.features.agent_saul.models import ChatMessage, ChatSession
-from app.features.agent_saul.transcript.repository import (
+from app.features.agent_saul.adapters.persistence.models import ChatMessage, ChatSession
+from app.features.agent_saul.application.transcript.repository import (
     ChatTranscriptRepository,
     _schedule_stale_session_rows,
 )

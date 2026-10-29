@@ -11,6 +11,14 @@ from app.ai.tools.registry import (
     get_tool_registry,
     register_default_tools,
 )
+from app.features.agent_saul.domain.state import (
+    ComplianceOutput,
+    FinalReport,
+    GroundingVerificationOutput,
+    NormalizedDocument,
+    OrchestratorAction,
+    RiskAnalysisOutput,
+)
 from app.features.documents.application.tools.authorization import ToolRuntimeContext
 from app.features.documents.application.tools.bundle import AgentToolBundle
 
@@ -41,14 +49,6 @@ from .nodes import (
 from .prompts import (
     _COMPLIANCE_SYSTEM_PROMPT,
     _RISK_ANALYSIS_SYSTEM_PROMPT,
-)
-from .state import (
-    ComplianceOutput,
-    FinalReport,
-    GroundingVerificationOutput,
-    NormalizedDocument,
-    OrchestratorAction,
-    RiskAnalysisOutput,
 )
 
 # ---------------------------------------------------------------------------

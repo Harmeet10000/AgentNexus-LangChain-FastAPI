@@ -1,6 +1,6 @@
 """Agent Saul chat transcript persistence (doc: agent-saul-chat-transcript-persistence.md)."""
 
-from app.features.agent_saul.transcript.projection import (
+from app.features.agent_saul.application.transcript.projection import (
     MESSAGE_KINDS,
     ORPHAN_GRACE,
     PAUSE_WINDOW,
@@ -18,7 +18,7 @@ from app.features.agent_saul.transcript.projection import (
     project,
     snapshot_to_view,
 )
-from app.features.agent_saul.transcript.repository import (
+from app.features.agent_saul.application.transcript.repository import (
     ApplyOutcome,
     ChatTranscriptRepository,
     SessionMeta,

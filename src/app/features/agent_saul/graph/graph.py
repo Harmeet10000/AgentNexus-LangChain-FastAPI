@@ -18,6 +18,12 @@ if TYPE_CHECKING:
 
     from .factory import SaulGraphNodes
 
+from app.features.agent_saul.domain.state import (
+    GRAPH_NODE_NAMES,
+    LegalAgentOutputState,
+    LegalAgentState,
+)
+
 from .factory import _build_graph_nodes, build_agent_registry
 from .nodes import (
     _VALID_WORKER_NODES,
@@ -26,11 +32,6 @@ from .nodes import (
     route_after_qna,
     route_deep_research,
     route_from_orchestrator,
-)
-from .state import (
-    GRAPH_NODE_NAMES,
-    LegalAgentOutputState,
-    LegalAgentState,
 )
 
 # Step budget (agent-state-handoff): the maximum number of super-steps a single

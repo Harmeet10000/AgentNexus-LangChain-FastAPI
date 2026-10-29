@@ -5,13 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from app.features.agent_saul.graph.nodes import (
-    make_compliance_node,
-    make_finalization_node,
-    make_grounding_verification_node,
-    make_risk_analysis_node,
-)
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain.state import (
     AssessmentStatus,
     Citation,
     ComplianceFinding,
@@ -24,6 +18,12 @@ from app.features.agent_saul.graph.state import (
     RiskAnalysisOutput,
     RiskLabel,
     WorkflowStatus,
+)
+from app.features.agent_saul.graph.nodes import (
+    make_compliance_node,
+    make_finalization_node,
+    make_grounding_verification_node,
+    make_risk_analysis_node,
 )
 
 

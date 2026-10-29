@@ -8,15 +8,15 @@ from uuid import uuid4
 import pytest
 from returns.result import Success
 
-from app.features.agent_saul.document_source import DocumentReadiness
-from app.features.agent_saul.exceptions import (
+from app.features.agent_saul.adapters.document_source import DocumentReadiness
+from app.features.agent_saul.application.service import AgentSaulService
+from app.features.agent_saul.domain.errors import (
     AgentSaulDocumentIngestionFailedError,
     AgentSaulDocumentNotReadyError,
 )
-from app.features.agent_saul.service import AgentSaulService
 
 if TYPE_CHECKING:
-    from app.features.agent_saul.document_source import DocumentReadinessState
+    from app.features.agent_saul.adapters.document_source import DocumentReadinessState
 
 pytestmark = pytest.mark.unit
 

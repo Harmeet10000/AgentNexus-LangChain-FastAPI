@@ -6,8 +6,12 @@ from datetime import UTC, datetime
 
 from langchain_core.messages import HumanMessage
 
-from app.features.agent_saul.transcript.projection import SnapshotView, TurnRow, TurnRows
-from app.features.agent_saul.transcript.sync import prepare_snapshot
+from app.features.agent_saul.application.transcript.projection import (
+    SnapshotView,
+    TurnRow,
+    TurnRows,
+)
+from app.features.agent_saul.application.transcript.sync import prepare_snapshot
 
 NOW = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
 

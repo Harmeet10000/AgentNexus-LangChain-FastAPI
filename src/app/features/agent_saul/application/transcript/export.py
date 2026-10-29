@@ -18,15 +18,15 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
 
-from app.features.agent_saul.transcript.errors import TranscriptNotFoundError
+from app.features.agent_saul.application.transcript.errors import TranscriptNotFoundError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from returns.result import Result
 
-    from app.features.agent_saul.transcript.errors import TranscriptError
-    from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+    from app.features.agent_saul.application.transcript.errors import TranscriptError
+    from app.features.agent_saul.application.transcript.repository import ChatTranscriptRepository
 
 
 class ExportTranscript(BaseModel):

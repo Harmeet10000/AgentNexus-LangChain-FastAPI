@@ -8,19 +8,19 @@ from typing import TYPE_CHECKING
 
 from returns.result import Failure, Success
 
-from app.features.agent_saul.transcript.errors import (
+from app.features.agent_saul.application.transcript.errors import (
     TranscriptInfrastructureError,
     TranscriptNotFoundError,
     TranscriptSchemaError,
 )
-from app.features.agent_saul.transcript.export import (
+from app.features.agent_saul.application.transcript.export import (
     ExportTranscript,
     PreparedTranscriptExport,
     TranscriptExporter,
     TranscriptExportError,
     TranscriptExportRow,
 )
-from app.features.agent_saul.transcript.repository import SessionMeta, TranscriptMessage
+from app.features.agent_saul.application.transcript.repository import SessionMeta, TranscriptMessage
 
 if TYPE_CHECKING:
     from typing import Any

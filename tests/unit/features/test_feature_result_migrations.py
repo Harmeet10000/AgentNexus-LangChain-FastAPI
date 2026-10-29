@@ -12,8 +12,8 @@ from fastapi import Response
 from pydantic import ValidationError
 from returns.result import Failure, Success
 
-from app.features.agent_saul.exceptions import AgentSaulError
-from app.features.agent_saul.service import AgentSaulService
+from app.features.agent_saul.application.service import AgentSaulService
+from app.features.agent_saul.domain.errors import AgentSaulError
 from app.features.audit.exceptions import AuditCode, AuditInfrastructureError
 from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccount
 from app.features.auth.domain.user import UserRole

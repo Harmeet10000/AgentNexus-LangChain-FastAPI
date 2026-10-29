@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.features.agent_saul.service import AgentSaulService
+from app.features.agent_saul.application.service import AgentSaulService
 
 if TYPE_CHECKING:
     from typing import Any

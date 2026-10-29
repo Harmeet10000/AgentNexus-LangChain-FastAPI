@@ -18,19 +18,19 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import StateSnapshot
 from returns.result import Success
 
-from app.features.agent_saul.graph.state import STATE_SCHEMA_VERSION
-from app.features.agent_saul.reconcile import _reconcile_once, _ThreadReconcileOutcome
-from app.features.agent_saul.transcript.projection import (
+from app.features.agent_saul.application.reconcile import _reconcile_once, _ThreadReconcileOutcome
+from app.features.agent_saul.application.transcript.projection import (
     SessionStatus,
     TurnRow,
     TurnRows,
 )
-from app.features.agent_saul.transcript.recorder import TurnRecorder
-from app.features.agent_saul.transcript.repository import (
+from app.features.agent_saul.application.transcript.recorder import TurnRecorder
+from app.features.agent_saul.application.transcript.repository import (
     ApplyOutcome,
     ChatTranscriptRepository,
     TranscriptTurnContext,
 )
+from app.features.agent_saul.domain.state import STATE_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -39,9 +39,9 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
     from redis.asyncio import Redis
 
-    from app.features.agent_saul.thread_lock import ThreadLock
-    from app.features.agent_saul.transcript.errors import TranscriptResult
-    from app.features.agent_saul.transcript.projection import Projection
+    from app.features.agent_saul.application.thread_lock import ThreadLock
+    from app.features.agent_saul.application.transcript.errors import TranscriptResult
+    from app.features.agent_saul.application.transcript.projection import Projection
 
 NOW = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
 OLD_CHECKPOINT = datetime(2020, 1, 1, tzinfo=UTC)

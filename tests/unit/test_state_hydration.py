@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from app.features.agent_saul.graph import state as state_module
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain import state as state_module
+from app.features.agent_saul.domain.state import (
     STATE_SCHEMA_VERSION,
     StateSchemaVersionError,
     hydrate_state,
@@ -90,7 +90,7 @@ def test_legal_agent_state_compiles_without_reserved_checkpoint_channel() -> Non
     """LangGraph owns ``checkpoint_id`` in configurable runtime metadata."""
     from langgraph.graph import END, StateGraph
 
-    from app.features.agent_saul.graph.state import LegalAgentState
+    from app.features.agent_saul.domain.state import LegalAgentState
 
     graph = StateGraph(LegalAgentState)
     graph.add_node("noop", lambda _state: {})
@@ -154,7 +154,7 @@ def test_version_constant_has_exactly_one_definition() -> None:
 
 def test_service_layer_imports_the_constant_instead_of_a_literal() -> None:
     app_root = Path(state_module.__file__).parents[3]
-    service_src = (app_root / "features/agent_saul/service.py").read_text()
+    service_src = (app_root / "features/agent_saul/application/service.py").read_text()
     assert "STATE_SCHEMA_VERSION" in service_src
     assert '"schema_version": 1' not in service_src
 
@@ -191,9 +191,9 @@ async def test_hydration_node_refuses_unknown_version() -> None:
 def test_hydration_node_is_entry_point_not_a_routing_target() -> None:
     from types import SimpleNamespace
 
+    from app.features.agent_saul.domain.state import GRAPH_NODE_NAMES
     from app.features.agent_saul.graph.graph import _wire_graph
     from app.features.agent_saul.graph.nodes import _VALID_WORKER_NODES
-    from app.features.agent_saul.graph.state import GRAPH_NODE_NAMES
 
     calls: list[tuple[str, object]] = []
 

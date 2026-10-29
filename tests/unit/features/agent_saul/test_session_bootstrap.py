@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 import pytest
 from returns.result import Failure, Success
 
-import app.features.agent_saul.service as service_module
-from app.features.agent_saul.service import AgentSaulService
-from app.features.agent_saul.transcript.errors import TranscriptInfrastructureError
-from app.features.agent_saul.transcript.recorder import TurnRecorder
+import app.features.agent_saul.application.service as service_module
+from app.features.agent_saul.application.service import AgentSaulService
+from app.features.agent_saul.application.transcript.errors import TranscriptInfrastructureError
+from app.features.agent_saul.application.transcript.recorder import TurnRecorder
 
 if TYPE_CHECKING:
     from typing import Any

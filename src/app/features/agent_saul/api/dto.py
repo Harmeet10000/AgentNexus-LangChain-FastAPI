@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain.state import (
     HITLInterruptType,
     PlanStep,
     WorkflowStatus,

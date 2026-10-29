@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from returns.result import Failure, Success
 
-from app.features.agent_saul.transcript.projection import project
-from app.features.agent_saul.transcript.repository import ApplyOutcome
+from app.features.agent_saul.application.transcript.projection import project
+from app.features.agent_saul.application.transcript.repository import ApplyOutcome
 
 _ASSISTANT_ROW_KINDS = frozenset({"plan_prompt", "clarification_prompt", "final_summary"})
 
@@ -22,8 +22,12 @@ if TYPE_CHECKING:
     from datetime import datetime
     from typing import Any
 
-    from app.features.agent_saul.transcript.errors import TranscriptResult
-    from app.features.agent_saul.transcript.projection import Projection, SnapshotView, TurnRows
+    from app.features.agent_saul.application.transcript.errors import TranscriptResult
+    from app.features.agent_saul.application.transcript.projection import (
+        Projection,
+        SnapshotView,
+        TurnRows,
+    )
 
 
 class ProjectionRepository(Protocol):

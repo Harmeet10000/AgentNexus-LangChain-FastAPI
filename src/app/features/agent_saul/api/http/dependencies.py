@@ -24,11 +24,11 @@ from redis.asyncio import Redis
 from returns.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.features.agent_saul.document_source import (
+from app.features.agent_saul.adapters.document_source import (
     DocumentContentSource,
     PostgresDocumentContentSource,
 )
-from app.features.agent_saul.runtime import (
+from app.features.agent_saul.application.runtime import (
     WS_SESSION_REJECTED_REASON,
     AgentSaulDeps,
     SessionStore,
@@ -40,8 +40,8 @@ from app.features.agent_saul.runtime import (
     require_saul_redis,
     resolve_ws_session,
 )
-from app.features.agent_saul.transcript.export import TranscriptExporter
-from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+from app.features.agent_saul.application.transcript.export import TranscriptExporter
+from app.features.agent_saul.application.transcript.repository import ChatTranscriptRepository
 from app.features.auth.api.http.dependencies import WebSocketClaims, get_refresh_token_repository
 from app.features.auth.api.websocket.security import (
     WebSocketSecurityContext,

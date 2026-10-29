@@ -27,17 +27,17 @@ from typing import TYPE_CHECKING, override
 from langchain_core.callbacks import BaseCallbackHandler
 from returns.result import Failure, Success
 
-from app.features.agent_saul.graph.state import HITLInterruptType
-from app.features.agent_saul.transcript.errors import (
+from app.features.agent_saul.application.transcript.errors import (
     TranscriptInfrastructureError,
 )
-from app.features.agent_saul.transcript.projection import (
+from app.features.agent_saul.application.transcript.projection import (
     VERDICT_ROW_KINDS,
     TurnRows,
     project,
     snapshot_to_view,
 )
-from app.features.agent_saul.transcript.sync import apply_snapshot, prepare_snapshot
+from app.features.agent_saul.application.transcript.sync import apply_snapshot, prepare_snapshot
+from app.features.agent_saul.domain.state import HITLInterruptType
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -48,14 +48,14 @@ if TYPE_CHECKING:
     from langgraph.types import StateSnapshot
     from redis.asyncio import Redis
 
-    from app.features.agent_saul.thread_lock import ThreadLock
-    from app.features.agent_saul.transcript.errors import (
+    from app.features.agent_saul.application.thread_lock import ThreadLock
+    from app.features.agent_saul.application.transcript.errors import (
         TranscriptResult,
     )
-    from app.features.agent_saul.transcript.projection import (
+    from app.features.agent_saul.application.transcript.projection import (
         SnapshotView,
     )
-    from app.features.agent_saul.transcript.repository import (
+    from app.features.agent_saul.application.transcript.repository import (
         ApplyOutcome,
         ChatTranscriptRepository,
         TranscriptTurnContext,

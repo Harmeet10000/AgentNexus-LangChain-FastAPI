@@ -22,7 +22,7 @@ from redis.asyncio import Redis
 from returns.result import Failure, Success
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.features.agent_saul.dependencies import (
+from app.features.agent_saul.api.http.dependencies import (
     get_agent_saul_deps,
     get_agent_saul_deps_ws,
     get_agent_saul_ws_security_context,
@@ -31,7 +31,7 @@ from app.features.agent_saul.dependencies import (
     get_saul_graph,
     get_saul_graph_ws,
 )
-from app.features.agent_saul.runtime import (
+from app.features.agent_saul.application.runtime import (
     WS_SESSION_REJECTED_REASON,
     SaulThreadContext,
     WsSessionRejection,

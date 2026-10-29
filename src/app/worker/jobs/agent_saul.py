@@ -26,8 +26,8 @@ from app.config import get_settings
 from app.connections.checkpointer import setup_langgraph_checkpointer
 from app.connections.postgres import init_db
 from app.connections.redis import close_redis_client, create_redis_client
-from app.features.agent_saul.reconcile import build_saul_read_graph, sweep_transcripts
-from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+from app.features.agent_saul.application.reconcile import build_saul_read_graph, sweep_transcripts
+from app.features.agent_saul.application.transcript.repository import ChatTranscriptRepository
 from app.observability.logging import logger
 from app.shared.jobs.names import AGENT_MEMORY_CONSOLIDATION, AGENT_SAUL_TRANSCRIPT_SWEEP
 from app.worker.celery.app import get_worker_celery_app
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from neo4j import AsyncDriver
 
     from app.config import Settings
-    from app.features.agent_saul.reconcile import SweepReport
+    from app.features.agent_saul.application.reconcile import SweepReport
 
 
 class Neo4jCredentials(BaseModel):

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.ai.tools import register_default_tools
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain.state import (
     ComplianceOutput,
     RiskAnalysisOutput,
 )

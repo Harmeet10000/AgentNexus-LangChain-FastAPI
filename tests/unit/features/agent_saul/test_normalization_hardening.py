@@ -7,18 +7,18 @@ import pytest
 from langchain_core.exceptions import OutputParserException
 from pydantic import ValidationError
 
-from app.features.agent_saul.graph.nodes import make_normalization_node, make_segmentation_node
-from app.features.agent_saul.graph.prompts import _NORMALIZATION_SYSTEM_PROMPT
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain.state import (
     DocumentSection,
     NormalizedDocument,
     WorkflowStatus,
 )
+from app.features.agent_saul.graph.nodes import make_normalization_node, make_segmentation_node
+from app.features.agent_saul.graph.prompts import _NORMALIZATION_SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from langchain_core.runnables import Runnable
 
-    from app.features.agent_saul.graph.state import LegalAgentState
+    from app.features.agent_saul.domain.state import LegalAgentState
 
 
 def test_document_section_infers_omitted_level_only_from_numeric_hierarchy() -> None:

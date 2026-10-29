@@ -20,7 +20,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.features.agent_saul.budget import BudgetLedger
+from app.features.agent_saul.domain.budget import BudgetLedger
 
 # ---------------------------------------------------------------------------
 # Enums

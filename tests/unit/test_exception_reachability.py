@@ -198,7 +198,7 @@ async def test_cognee_setup_base_caught_not_just_subclass():
 
 def test_state_schema_version_caught_at_callsite():
     """hydrate_state's raise is handled in the WS session loop, not in state.py."""
-    text = pathlib.Path("src/app/features/agent_saul/service.py").read_text(encoding="utf-8")
+    text = pathlib.Path("src/app/features/agent_saul/application/service.py").read_text(encoding="utf-8")
     assert "except StateSchemaVersionError" in text
 
 

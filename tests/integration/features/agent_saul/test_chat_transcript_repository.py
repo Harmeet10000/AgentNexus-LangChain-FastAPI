@@ -19,13 +19,12 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.connections.postgres import get_database_url
-from app.features.agent_saul.graph.state import STATE_SCHEMA_VERSION
-from app.features.agent_saul.transcript.errors import (
+from app.features.agent_saul.application.transcript.errors import (
     TranscriptInfrastructureError,
     TranscriptNotFoundError,
     TranscriptSchemaError,
 )
-from app.features.agent_saul.transcript.projection import (
+from app.features.agent_saul.application.transcript.projection import (
     ContentRole,
     ProjectedRow,
     Projection,
@@ -33,7 +32,8 @@ from app.features.agent_saul.transcript.projection import (
     project,
     snapshot_to_view,
 )
-from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
+from app.features.agent_saul.application.transcript.repository import ChatTranscriptRepository
+from app.features.agent_saul.domain.state import STATE_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

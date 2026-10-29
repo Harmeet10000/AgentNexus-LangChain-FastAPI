@@ -39,15 +39,14 @@ from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.agent_saul.budget import BudgetLedger, BudgetLimits
-from app.features.agent_saul.document_source import (
+from app.features.agent_saul.adapters.document_source import (
     DOCUMENT_SOURCE_CONFIG_KEY,
     DocumentReadiness,
     DocumentTextFailureCode,
     document_content_source_from_config,
     postgres_document_content_source,
 )
-from app.features.agent_saul.dto import (
+from app.features.agent_saul.api.dto import (
     CreateSessionResponse,
     WSDoneFrame,
     WSErrorFrame,
@@ -61,14 +60,20 @@ from app.features.agent_saul.dto import (
     WSTokenFrame,
     ws_inbound_adapter,
 )
-from app.features.agent_saul.exceptions import (
+from app.features.agent_saul.application.runtime import thread_owner_violates
+from app.features.agent_saul.application.thread_lock import ThreadLock
+from app.features.agent_saul.application.transcript.projection import PAUSE_WINDOW
+from app.features.agent_saul.application.transcript.recorder import PlanResumeEvidence, TurnRecorder
+from app.features.agent_saul.application.transcript.repository import ChatTranscriptRepository
+from app.features.agent_saul.domain.budget import BudgetLedger, BudgetLimits
+from app.features.agent_saul.domain.errors import (
     AgentSaulDocumentIngestionFailedError,
     AgentSaulDocumentNotFoundError,
     AgentSaulDocumentNotReadyError,
     AgentSaulInfrastructureError,
     AgentSaulValidationError,
 )
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain.state import (
     _MIGRATABLE_STATE_SCHEMA_VERSIONS,
     GRAPH_NODE_NAMES,
     STATE_SCHEMA_VERSION,
@@ -80,11 +85,6 @@ from app.features.agent_saul.graph.state import (
     initial_ingestion_state,
     legacy_resume_update,
 )
-from app.features.agent_saul.runtime import thread_owner_violates
-from app.features.agent_saul.thread_lock import ThreadLock
-from app.features.agent_saul.transcript.projection import PAUSE_WINDOW
-from app.features.agent_saul.transcript.recorder import PlanResumeEvidence, TurnRecorder
-from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
 from app.features.auth.api.websocket.security import (
     WebSocketIdleTimeout,
     WebSocketSecurityViolation,
@@ -100,17 +100,17 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from app.features.agent_saul.document_source import (
+    from app.features.agent_saul.adapters.document_source import (
         DocumentContentResult,
         DocumentContentSource,
         DocumentTextFailure,
     )
-    from app.features.agent_saul.dto import (
+    from app.features.agent_saul.api.dto import (
         WSOutbound,
         WSStartMessage,
     )
-    from app.features.agent_saul.exceptions import AgentSaulError, AgentSaulResult
-    from app.features.agent_saul.runtime import SaulThreadContext
+    from app.features.agent_saul.application.runtime import SaulThreadContext
+    from app.features.agent_saul.domain.errors import AgentSaulError, AgentSaulResult
     from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccountStore
     from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
         TenantMembershipService,

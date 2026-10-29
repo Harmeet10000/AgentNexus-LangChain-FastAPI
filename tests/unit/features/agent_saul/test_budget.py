@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.features.agent_saul.budget import (
+from app.features.agent_saul.domain.budget import (
     BudgetDimension,
     BudgetExhaustedError,
     BudgetLedger,

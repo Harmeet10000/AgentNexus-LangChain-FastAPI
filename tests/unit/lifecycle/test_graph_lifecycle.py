@@ -18,7 +18,7 @@ from langgraph.graph.state import CompiledStateGraph
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.features.agent_saul.dependencies import get_agent_saul_deps
+from app.features.agent_saul.api.http.dependencies import get_agent_saul_deps
 from app.lifecycle import graphs
 
 lifespan_module = importlib.import_module("app.lifecycle.lifespan")

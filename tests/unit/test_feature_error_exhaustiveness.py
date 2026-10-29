@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 
-from app.features.agent_saul.exceptions import (
+from app.features.agent_saul.domain.errors import (
     AgentSaulInfrastructureError,
     AgentSaulValidationError,
     agent_saul_error_to_http_status,

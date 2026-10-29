@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
+from app.features.agent_saul.domain.state import PlanActionType, PlanStep, WorkflowStatus
 from app.features.agent_saul.graph.nodes import make_deep_research_node
-from app.features.agent_saul.graph.state import PlanActionType, PlanStep, WorkflowStatus
 from app.features.documents.api.http.dto import (
     EvidenceCoverage,
     EvidenceRef,

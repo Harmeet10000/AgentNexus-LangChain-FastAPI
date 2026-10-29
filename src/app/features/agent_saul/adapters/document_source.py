@@ -11,7 +11,7 @@ in chunk order.
 
 The agent_saul feature owns the Protocol; the concrete adapter reaches through
 the documents feature's repository boundary (the feature→feature edge is
-established — ``agent_saul.dependencies`` already binds auth, and no
+established — ``agent_saul.api.http.dependencies`` already binds auth, and no
 import-linter contract forbids it). Injection rides the session's
 ``RunnableConfig`` (``configurable``): the Postgres checkpointer repopulates
 the persisted configurable from ``thread_id``/``checkpoint_ns``/``checkpoint_id``

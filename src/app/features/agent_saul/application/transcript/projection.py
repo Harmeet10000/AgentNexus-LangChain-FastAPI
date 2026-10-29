@@ -36,7 +36,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import StateSnapshot
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain.state import (
     _MIGRATABLE_STATE_SCHEMA_VERSIONS,
     STATE_SCHEMA_VERSION,
     HITLInterruptType,

@@ -7,18 +7,18 @@ import pytest
 from langchain.agents.structured_output import StructuredOutputValidationError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from app.features.agent_saul.graph.nodes import (
-    delegation_pairs_from,
-    make_compliance_node,
-    make_orchestrator_node,
-    make_risk_analysis_node,
-)
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.domain.state import (
     IngestionDocumentState,
     IngestionDocumentStatus,
     OrchestratorAction,
     OrchestratorActionType,
     WorkflowStatus,
+)
+from app.features.agent_saul.graph.nodes import (
+    delegation_pairs_from,
+    make_compliance_node,
+    make_orchestrator_node,
+    make_risk_analysis_node,
 )
 
 

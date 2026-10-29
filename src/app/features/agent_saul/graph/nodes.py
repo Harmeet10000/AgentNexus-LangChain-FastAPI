@@ -18,36 +18,18 @@ from langgraph.types import Send, interrupt
 from pydantic import BaseModel, Field, ValidationError
 from returns.result import Failure, Success
 
-from app.features.agent_saul.budget import (
-    BudgetDimension,
-    BudgetExhaustedError,
-    BudgetLedger,
-)
-from app.features.agent_saul.document_source import (
+from app.features.agent_saul.adapters.document_source import (
     CanonicalDocumentChunk,
     DocumentTextFailure,
     DocumentTextFailureCode,
     document_content_source_from_config,
 )
-from app.features.documents.api.http.dto import EvidenceSearchRequest, EvidenceSearchResponse
-from app.features.documents.application.tools.authorization import ToolRuntimeContext
-from app.observability.logging import logger
-from app.shared.langchain_layer.messages import make_delegation_pair
-
-from .prompts import (
-    _COMPLIANCE_SYSTEM_PROMPT,
-    _ENTITY_EXTRACTION_SYSTEM_PROMPT,
-    _FINALIZATION_SYSTEM_PROMPT,
-    _GROUNDING_SYSTEM_PROMPT,
-    _NORMALIZATION_SYSTEM_PROMPT,
-    _ORCHESTRATOR_SYSTEM_PROMPT,
-    _PLANNER_SYSTEM_PROMPT,
-    _QNA_SYSTEM_PROMPT,
-    _RELATIONSHIP_MAPPING_SYSTEM_PROMPT,
-    _RISK_ANALYSIS_SYSTEM_PROMPT,
-    _SEGMENTATION_SYSTEM_PROMPT,
+from app.features.agent_saul.domain.budget import (
+    BudgetDimension,
+    BudgetExhaustedError,
+    BudgetLedger,
 )
-from .state import (
+from app.features.agent_saul.domain.state import (
     GRAPH_NODE_NAMES,
     AgentError,
     AssessmentStatus,
@@ -78,6 +60,24 @@ from .state import (
     RiskAnalysisOutput,
     WorkflowStatus,
     hydrate_state,
+)
+from app.features.documents.api.http.dto import EvidenceSearchRequest, EvidenceSearchResponse
+from app.features.documents.application.tools.authorization import ToolRuntimeContext
+from app.observability.logging import logger
+from app.shared.langchain_layer.messages import make_delegation_pair
+
+from .prompts import (
+    _COMPLIANCE_SYSTEM_PROMPT,
+    _ENTITY_EXTRACTION_SYSTEM_PROMPT,
+    _FINALIZATION_SYSTEM_PROMPT,
+    _GROUNDING_SYSTEM_PROMPT,
+    _NORMALIZATION_SYSTEM_PROMPT,
+    _ORCHESTRATOR_SYSTEM_PROMPT,
+    _PLANNER_SYSTEM_PROMPT,
+    _QNA_SYSTEM_PROMPT,
+    _RELATIONSHIP_MAPPING_SYSTEM_PROMPT,
+    _RISK_ANALYSIS_SYSTEM_PROMPT,
+    _SEGMENTATION_SYSTEM_PROMPT,
 )
 
 if TYPE_CHECKING:

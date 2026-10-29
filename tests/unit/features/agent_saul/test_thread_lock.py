@@ -12,7 +12,11 @@ import pytest
 from fakeredis.aioredis import FakeRedis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from app.features.agent_saul.thread_lock import DEFAULT_TTL_SECONDS, ThreadLock, lock_key
+from app.features.agent_saul.application.thread_lock import (
+    DEFAULT_TTL_SECONDS,
+    ThreadLock,
+    lock_key,
+)
 
 pytestmark = pytest.mark.unit
 

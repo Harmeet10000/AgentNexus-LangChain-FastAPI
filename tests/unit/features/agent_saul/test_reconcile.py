@@ -8,20 +8,24 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from returns.result import Success
 
-from app.features.agent_saul import reconcile as reconcile_module
-from app.features.agent_saul.reconcile import (
+from app.features.agent_saul.application import reconcile as reconcile_module
+from app.features.agent_saul.application.reconcile import (
     _reconcile_hinted_threads,
     _reconcile_locked,
     _reconcile_stale_sessions,
     _ThreadReconcileOutcome,
 )
-from app.features.agent_saul.transcript.projection import Projection, SessionStatus, SnapshotView
-from app.features.agent_saul.transcript.repository import (
+from app.features.agent_saul.application.transcript.projection import (
+    Projection,
+    SessionStatus,
+    SnapshotView,
+)
+from app.features.agent_saul.application.transcript.repository import (
     ApplyOutcome,
     SessionMeta,
     TranscriptTurnContext,
 )
-from app.features.agent_saul.transcript.sync import PreparedSnapshot
+from app.features.agent_saul.application.transcript.sync import PreparedSnapshot
 from app.observability.logging import logger
 
 if TYPE_CHECKING:

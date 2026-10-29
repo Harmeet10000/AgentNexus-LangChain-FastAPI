@@ -8,20 +8,20 @@ import pytest
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from returns.result import Success
 
-from app.features.agent_saul.document_source import (
+from app.features.agent_saul.adapters.document_source import (
     DOCUMENT_SOURCE_CONFIG_KEY,
     CanonicalDocumentChunk,
+)
+from app.features.agent_saul.domain.state import (
+    ClauseSegment,
+    ClauseType,
+    WorkflowStatus,
+    hydrate_state,
 )
 from app.features.agent_saul.graph.nodes import (
     make_ingestion_node,
     make_normalization_node,
     make_segmentation_node,
-)
-from app.features.agent_saul.graph.state import (
-    ClauseSegment,
-    ClauseType,
-    WorkflowStatus,
-    hydrate_state,
 )
 
 if TYPE_CHECKING:

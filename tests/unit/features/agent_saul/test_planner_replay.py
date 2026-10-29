@@ -9,15 +9,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, StateSnapshot, interrupt
 from returns.result import Success
 
-from app.features.agent_saul.dto import WSResumeMessage
-from app.features.agent_saul.graph.nodes import (
-    PlannerOutput,
-    make_plan_approval_node,
-    make_plan_generation_node,
-    route_deep_research,
-    route_from_orchestrator,
+from app.features.agent_saul.api.dto import WSResumeMessage
+from app.features.agent_saul.application.service import (
+    AgentSaulService,
+    _legacy_planner_proposal,
 )
-from app.features.agent_saul.graph.state import (
+from app.features.agent_saul.application.transcript.projection import snapshot_to_view
+from app.features.agent_saul.domain.state import (
     STATE_SCHEMA_VERSION,
     LegalAgentState,
     OrchestratorAction,
@@ -26,11 +24,13 @@ from app.features.agent_saul.graph.state import (
     PlanStep,
     WorkflowStatus,
 )
-from app.features.agent_saul.service import (
-    AgentSaulService,
-    _legacy_planner_proposal,
+from app.features.agent_saul.graph.nodes import (
+    PlannerOutput,
+    make_plan_approval_node,
+    make_plan_generation_node,
+    route_deep_research,
+    route_from_orchestrator,
 )
-from app.features.agent_saul.transcript.projection import snapshot_to_view
 from app.observability.logging import logger
 
 

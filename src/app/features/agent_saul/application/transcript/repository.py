@@ -27,13 +27,17 @@ from sqlalchemy import func, literal_column, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.features.agent_saul.models import MESSAGE_SCHEMA_VERSION, ChatMessage, ChatSession
-from app.features.agent_saul.transcript.errors import (
+from app.features.agent_saul.adapters.persistence.models import (
+    MESSAGE_SCHEMA_VERSION,
+    ChatMessage,
+    ChatSession,
+)
+from app.features.agent_saul.application.transcript.errors import (
     TranscriptInfrastructureError,
     TranscriptNotFoundError,
     TranscriptSchemaError,
 )
-from app.features.agent_saul.transcript.projection import (
+from app.features.agent_saul.application.transcript.projection import (
     MESSAGE_KINDS,
     TRANSCRIPT_SCHEMA_VERSION,
     VERDICT_ROW_KINDS,
@@ -49,11 +53,11 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from app.features.agent_saul.transcript.errors import (
+    from app.features.agent_saul.application.transcript.errors import (
         TranscriptError,
         TranscriptResult,
     )
-    from app.features.agent_saul.transcript.projection import (
+    from app.features.agent_saul.application.transcript.projection import (
         ProjectedRow,
         Projection,
     )
