@@ -28,6 +28,7 @@ def main() -> None:
         ws_max_queue=settings.UVICORN_WS_MAX_QUEUE,
         ws_ping_interval=settings.UVICORN_WS_PING_INTERVAL,
         ws_ping_timeout=settings.UVICORN_WS_PING_TIMEOUT,
+        timeout_graceful_shutdown=settings.UVICORN_GRACEFUL_SHUTDOWN_TIMEOUT,
     )
 
 

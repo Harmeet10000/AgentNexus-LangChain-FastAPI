@@ -19,6 +19,17 @@ services:
     networks:
       - langchain-network
     restart: unless-stopped
+    # Docker's default is 10s, which would SIGKILL the app inside its 25s
+    # lifespan drain and 30s uvicorn connection cap (see
+    # docs/runbooks/shutdown-and-restart-drill.md). The chain must be:
+    # stop_grace_period (45s) > timeout_graceful_shutdown (30s) > drain (25s).
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health/live', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       timescale:
         condition: service_healthy
@@ -36,6 +47,8 @@ services:
     networks:
       - langchain-network
     restart: unless-stopped
+    # Default 10s grace SIGKILLs mid-task; warm shutdown drains in-flight work.
+    stop_grace_period: 45s
     depends_on:
       timescale:
         condition: service_healthy
@@ -53,6 +66,7 @@ services:
     networks:
       - langchain-network
     restart: unless-stopped
+    stop_grace_period: 45s
     depends_on:
       timescale:
         condition: service_healthy
@@ -70,6 +84,7 @@ services:
     networks:
       - langchain-network
     restart: unless-stopped
+    stop_grace_period: 45s
     depends_on:
       rabbitmq:
         condition: service_healthy

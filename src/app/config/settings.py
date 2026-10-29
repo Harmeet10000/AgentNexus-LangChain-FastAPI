@@ -478,6 +478,17 @@ class Settings(BaseSettings):
     UVICORN_WS_PING_INTERVAL: float = Field(default=20.0)
     UVICORN_WS_PING_TIMEOUT: float = Field(default=20.0)
 
+    # --- Graceful shutdown ---
+    # SIGTERM/SIGINT: uvicorn keeps serving already-accepted requests, then
+    # force-closes any remaining connections after this many seconds. The
+    # default of None waits forever — an unfinishing SSE stream or WebSocket
+    # then turns every supervisor's SIGKILL timeout into the real shutdown
+    # policy and discards all lifespan cleanup. APP_SHUTDOWN_TIMEOUT bounds
+    # the lifespan cleanup itself and must stay a few seconds BELOW the
+    # uvicorn cap so the outer OTEL flush is not cut off by the server.
+    UVICORN_GRACEFUL_SHUTDOWN_TIMEOUT: int = Field(default=30, ge=1)
+    APP_SHUTDOWN_TIMEOUT: int = Field(default=25, ge=1)
+
     # --- Resend Email Service ---
     RESEND_API_KEY: SecretStr = Field(default=SecretStr(""))
     RESEND_FROM_EMAIL: str = Field(default="noreply@yourdomain.com")
@@ -492,6 +503,7 @@ class Settings(BaseSettings):
     S3_REGION: str = Field(default="auto")
     S3_FORCE_PATH_STYLE: bool = Field(default=True)
     S3_PUBLIC_URL: str = Field(default="")
+    S3_PRESIGNED_GET_TTL_SECONDS: int = Field(default=18_000, ge=18_000, le=604_800)
 
     # --- File Upload ---
     # Benchmark decision (scripts/benchmark_upload_pipeline.py): retain a 10 MiB
