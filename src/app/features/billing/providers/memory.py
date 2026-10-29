@@ -125,7 +125,7 @@ class InMemoryBillingProvider(BillingProvider):
             customer_id = self._customers_by_email.setdefault(
                 operation.email.lower(), f"cust_memory_{len(self._customers_by_email) + 1}"
             )
-            customer = ProviderCustomer(customer_id, operation.email)
+            customer = ProviderCustomer(provider_customer_id=customer_id, email=operation.email)
             self._customers_by_correlation[operation.correlation_id] = customer
             return self._success(
                 operation,
@@ -142,7 +142,7 @@ class InMemoryBillingProvider(BillingProvider):
                 )
             return self._success(
                 operation,
-                value=ProviderCustomer(customer_id, operation.email),
+                value=ProviderCustomer(provider_customer_id=customer_id, email=operation.email),
             )
 
         if isinstance(operation, CreateSubscriptionOperation):
@@ -177,7 +177,7 @@ class InMemoryBillingProvider(BillingProvider):
             return self._success(operation, value=state)
 
         if isinstance(operation, ListPaymentsOperation):
-            return self._success(operation, value=ProviderPaymentBatch(self._payments))
+            return self._success(operation, value=ProviderPaymentBatch(payments=self._payments))
 
         if isinstance(operation, CancelSubscriptionOperation):
             return self._update_subscription(operation, status="cancelled")

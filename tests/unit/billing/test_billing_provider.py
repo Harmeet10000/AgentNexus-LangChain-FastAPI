@@ -65,12 +65,19 @@ async def test_in_memory_provider_is_stateful_by_correlation() -> None:
     provider = InMemoryBillingProvider()
 
     customer = await provider.execute(
-        CreateCustomerOperation("customer@example.test", None, "Customer", "customer_1")
+        CreateCustomerOperation(
+            email="customer@example.test",
+            contact=None,
+            name="Customer",
+            correlation_id="customer_1",
+        )
     )
     assert isinstance(customer, Success)
 
     found_customer = await provider.execute(
-        FindCustomerByEmailOperation("customer@example.test", "find_customer_1")
+        FindCustomerByEmailOperation(
+            email="customer@example.test", correlation_id="find_customer_1"
+        )
     )
     assert isinstance(found_customer, Success)
     assert found_customer.unwrap().value == customer.unwrap().value
@@ -81,22 +88,28 @@ async def test_in_memory_provider_is_stateful_by_correlation() -> None:
     assert subscription.unwrap().value.grants_paid_entitlement is False
 
     found_subscription = await provider.execute(
-        FindSubscriptionByCorrelationOperation("operation_1")
+        FindSubscriptionByCorrelationOperation(correlation_id="operation_1")
     )
     assert isinstance(found_subscription, Success)
     assert found_subscription.unwrap().value == subscription.unwrap().value
 
-    link = await provider.execute(CreatePaymentLinkOperation(500, "INR", "upgrade", "link_1"))
-    refund = await provider.execute(CreateRefundOperation("pay_1", 500, "refund_1"))
+    link = await provider.execute(
+        CreatePaymentLinkOperation(
+            amount=500, currency="INR", description="upgrade", correlation_id="link_1"
+        )
+    )
+    refund = await provider.execute(
+        CreateRefundOperation(payment_id="pay_1", amount=500, correlation_id="refund_1")
+    )
     assert isinstance(link, Success)
     assert isinstance(link.unwrap().value, ProviderPaymentLink)
     assert isinstance(refund, Success)
     assert isinstance(refund.unwrap().value, ProviderReceipt)
     assert isinstance(
-        await provider.execute(FindPaymentLinkByCorrelationOperation("link_1")), Success
+        await provider.execute(FindPaymentLinkByCorrelationOperation(correlation_id="link_1")), Success
     )
     assert isinstance(
-        await provider.execute(FindRefundByCorrelationOperation("pay_1", "refund_1")), Success
+        await provider.execute(FindRefundByCorrelationOperation(payment_id="pay_1", correlation_id="refund_1")), Success
     )
 
 
@@ -104,7 +117,11 @@ async def test_in_memory_provider_is_stateful_by_correlation() -> None:
 async def test_in_memory_provider_script_preserves_typed_unknown_failure() -> None:
     operation = _create_operation()
     scripted: tuple[ProviderResult, ...] = (
-        Failure(ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)),
+        Failure(
+            ProviderOutcomeUnknownError(
+                operation=operation.kind, correlation_id=operation.correlation_id
+            )
+        ),
     )
     provider = InMemoryBillingProvider({operation.kind: scripted})
 
@@ -118,11 +135,13 @@ async def test_in_memory_provider_script_preserves_typed_unknown_failure() -> No
 
 def test_operation_values_reject_invalid_mutation_inputs() -> None:
     with pytest.raises(ValueError, match="amount must be positive"):
-        CreatePaymentLinkOperation(0, "INR", "upgrade", "link_1")
+        CreatePaymentLinkOperation(
+            amount=0, currency="INR", description="upgrade", correlation_id="link_1"
+        )
     with pytest.raises(ValueError, match="duration_days must be positive"):
-        PauseSubscriptionOperation("sub_1", "pause_1", duration_days=0)
+        PauseSubscriptionOperation(provider_subscription_id="sub_1", correlation_id="pause_1", duration_days=0)
     with pytest.raises(ValueError, match="correlation_id must not be empty"):
-        CreateRefundOperation("pay_1", 100, "")
+        CreateRefundOperation(payment_id="pay_1", amount=100, correlation_id="")
 
 
 class _FakeRazorpay:
@@ -238,10 +257,10 @@ async def test_razorpay_adapter_uses_documented_pause_resume_post_shapes() -> No
     client = _FakeRazorpay()
     provider = RazorpayBillingProvider(client)
 
-    pause = await provider.execute(PauseSubscriptionOperation("sub_remote_1", "pause_1", 30))
-    resume = await provider.execute(ResumeSubscriptionOperation("sub_remote_1", "resume_1"))
+    pause = await provider.execute(PauseSubscriptionOperation(provider_subscription_id="sub_remote_1", correlation_id="pause_1", duration_days=30))
+    resume = await provider.execute(ResumeSubscriptionOperation(provider_subscription_id="sub_remote_1", correlation_id="resume_1"))
     change = await provider.execute(
-        ChangeSubscriptionPlanOperation("sub_remote_1", "plan_2", "change_1", "cycle_end")
+        ChangeSubscriptionPlanOperation(provider_subscription_id="sub_remote_1", plan_id="plan_2", correlation_id="change_1", schedule_at="cycle_end")
     )
 
     assert all(isinstance(result, Success) for result in (pause, resume, change))
@@ -256,9 +275,9 @@ async def test_razorpay_adapter_uses_documented_pause_resume_post_shapes() -> No
 async def test_razorpay_adapter_supports_correlation_reconciliation_reads() -> None:
     provider = RazorpayBillingProvider(_FakeRazorpay())
 
-    subscription = await provider.execute(FindSubscriptionByCorrelationOperation("operation_1"))
-    link = await provider.execute(FindPaymentLinkByCorrelationOperation("link_1"))
-    refund = await provider.execute(FindRefundByCorrelationOperation("pay_1", "refund_1"))
+    subscription = await provider.execute(FindSubscriptionByCorrelationOperation(correlation_id="operation_1"))
+    link = await provider.execute(FindPaymentLinkByCorrelationOperation(correlation_id="link_1"))
+    refund = await provider.execute(FindRefundByCorrelationOperation(payment_id="pay_1", correlation_id="refund_1"))
 
     assert all(isinstance(result, Success) for result in (subscription, link, refund))
     assert isinstance(subscription.unwrap().value, ProviderSubscriptionState)
@@ -346,7 +365,7 @@ async def test_razorpay_retryable_mutation_is_unknown_but_reads_are_typed() -> N
     provider = RazorpayBillingProvider(BrokenRazorpay())
 
     mutation = await provider.execute(_create_operation())
-    observation = await provider.execute(ObserveSubscriptionOperation("sub_remote_1", "observe_1"))
+    observation = await provider.execute(ObserveSubscriptionOperation(provider_subscription_id="sub_remote_1", correlation_id="observe_1"))
 
     assert isinstance(mutation, Failure)
     assert isinstance(mutation.failure(), ProviderOutcomeUnknownError)
@@ -362,7 +381,7 @@ async def test_razorpay_429_read_is_rate_limited() -> None:
             raise RazorpayRetryableError(service="razorpay", detail="rate limited", status_code=429)
 
     result = await RazorpayBillingProvider(RateLimitedRazorpay()).execute(
-        ObserveSubscriptionOperation("sub_remote_1", "observe_429")
+        ObserveSubscriptionOperation(provider_subscription_id="sub_remote_1", correlation_id="observe_429")
     )
 
     assert isinstance(result, Failure)
@@ -379,7 +398,7 @@ async def test_razorpay_403_is_authentication_not_substring_parsed() -> None:
             )
 
     result = await RazorpayBillingProvider(RejectedRazorpay()).execute(
-        CancelSubscriptionOperation("sub_remote_1", False, "cancel_1")
+        CancelSubscriptionOperation(provider_subscription_id="sub_remote_1", cancel_at_cycle_end=False, correlation_id="cancel_1")
     )
 
     assert isinstance(result, Failure)
@@ -405,7 +424,7 @@ async def test_missing_correlation_match_requires_manual_review() -> None:
             return []
 
     result = await RazorpayBillingProvider(NoMatchRazorpay()).execute(
-        FindPaymentLinkByCorrelationOperation("not_found")
+        FindPaymentLinkByCorrelationOperation(correlation_id="not_found")
     )
 
     assert isinstance(result, Failure)

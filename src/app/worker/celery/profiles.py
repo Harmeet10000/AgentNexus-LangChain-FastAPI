@@ -7,10 +7,11 @@ ingestion queue with the default worker's concurrency or consuming the DLQ.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
+
+from pydantic import BaseModel, ConfigDict
 
 from app.config import get_settings
 from app.shared.jobs.catalog import JOB_CATALOG, JobQueue
@@ -33,9 +34,10 @@ class WorkerRole(StrEnum):
     crawler = CRAWLER
 
 
-@dataclass(frozen=True, slots=True)
-class WorkerProfile:
+class WorkerProfile(BaseModel):
     """The complete command-level contract for one worker pool."""
+
+    model_config = ConfigDict(frozen=True)
 
     role: WorkerRole
     queue: str
@@ -51,7 +53,8 @@ class WorkerProfile:
 
         return self.task_modules
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         if not self.queue:
             message = "worker profiles require a queue"
             raise ValueError(message)

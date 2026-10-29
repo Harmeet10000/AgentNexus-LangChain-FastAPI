@@ -10,15 +10,12 @@ callers must read/search before deciding whether another write is safe.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, ClassVar, Protocol
+from typing import ClassVar, Literal, Protocol, override
 
+from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Result
-
-if TYPE_CHECKING:
-    from datetime import datetime
-    from typing import Literal
 
 
 def _invalid(message: str) -> None:
@@ -62,17 +59,19 @@ class ProviderOperationKind(StrEnum):
     FIND_PLAN_BY_CORRELATION = "find_plan_by_correlation"
 
 
-@dataclass(frozen=True, slots=True)
-class CreateCustomerOperation:
+class CreateCustomerOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     email: str
     contact: str | None
     name: str | None
     correlation_id: str
-    notes: Mapping[str, str] = field(default_factory=dict)
+    notes: Mapping[str, str] = Field(default_factory=dict)
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.CREATE_CUSTOMER
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.email, field_name="email")
         _require_text(self.correlation_id, field_name="correlation_id")
         if self.contact is not None:
@@ -82,31 +81,35 @@ class CreateCustomerOperation:
         _require_notes(self.notes)
 
 
-@dataclass(frozen=True, slots=True)
-class FindCustomerByEmailOperation:
+class FindCustomerByEmailOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     email: str
     correlation_id: str
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.FIND_CUSTOMER_BY_EMAIL
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.email, field_name="email")
         _require_text(self.correlation_id, field_name="correlation_id")
 
 
-@dataclass(frozen=True, slots=True)
-class CreateSubscriptionOperation:
+class CreateSubscriptionOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     plan_id: str
     customer_id: str
     total_count: int
     quantity: int
     customer_notify: bool
     correlation_id: str
-    notes: Mapping[str, str] = field(default_factory=dict)
+    notes: Mapping[str, str] = Field(default_factory=dict)
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.CREATE_SUBSCRIPTION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.plan_id, field_name="plan_id")
         _require_text(self.customer_id, field_name="customer_id")
         _require_text(self.correlation_id, field_name="correlation_id")
@@ -121,23 +124,26 @@ class CreateSubscriptionOperation:
         _require_notes(self.notes)
 
 
-@dataclass(frozen=True, slots=True)
-class CancelSubscriptionOperation:
+class CancelSubscriptionOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_subscription_id: str
     cancel_at_cycle_end: bool
     correlation_id: str
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.CANCEL_SUBSCRIPTION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_subscription_id, field_name="provider_subscription_id")
         _require_text(self.correlation_id, field_name="correlation_id")
         if not isinstance(self.cancel_at_cycle_end, bool):
             _invalid("cancel_at_cycle_end must be a boolean")
 
 
-@dataclass(frozen=True, slots=True)
-class PauseSubscriptionOperation:
+class PauseSubscriptionOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     """Pause immediately; duration is a local scheduling fact.
 
     Razorpay's documented pause request accepts only ``pause_at=now``.  A
@@ -152,7 +158,8 @@ class PauseSubscriptionOperation:
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.PAUSE_SUBSCRIPTION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_subscription_id, field_name="provider_subscription_id")
         _require_text(self.correlation_id, field_name="correlation_id")
         if self.duration_days is not None and (
@@ -166,23 +173,26 @@ class PauseSubscriptionOperation:
             _invalid("pause_at must be 'now'")
 
 
-@dataclass(frozen=True, slots=True)
-class ResumeSubscriptionOperation:
+class ResumeSubscriptionOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_subscription_id: str
     correlation_id: str
     resume_at: Literal["now"] = "now"
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.RESUME_SUBSCRIPTION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_subscription_id, field_name="provider_subscription_id")
         _require_text(self.correlation_id, field_name="correlation_id")
         if self.resume_at != "now":
             _invalid("resume_at must be 'now'")
 
 
-@dataclass(frozen=True, slots=True)
-class ChangeSubscriptionPlanOperation:
+class ChangeSubscriptionPlanOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_subscription_id: str
     plan_id: str
     correlation_id: str
@@ -190,7 +200,8 @@ class ChangeSubscriptionPlanOperation:
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.CHANGE_SUBSCRIPTION_PLAN
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_subscription_id, field_name="provider_subscription_id")
         _require_text(self.plan_id, field_name="plan_id")
         _require_text(self.correlation_id, field_name="correlation_id")
@@ -198,30 +209,35 @@ class ChangeSubscriptionPlanOperation:
             _invalid("schedule_at must be 'now' or 'cycle_end'")
 
 
-@dataclass(frozen=True, slots=True)
-class ObserveSubscriptionOperation:
+class ObserveSubscriptionOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_subscription_id: str
     correlation_id: str
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.OBSERVE_SUBSCRIPTION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_subscription_id, field_name="provider_subscription_id")
         _require_text(self.correlation_id, field_name="correlation_id")
 
 
-@dataclass(frozen=True, slots=True)
-class FindSubscriptionByCorrelationOperation:
+class FindSubscriptionByCorrelationOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     correlation_id: str
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.FIND_SUBSCRIPTION_BY_CORRELATION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.correlation_id, field_name="correlation_id")
 
 
-@dataclass(frozen=True, slots=True)
-class ListPaymentsOperation:
+class ListPaymentsOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     """Read a bounded provider payment window for reconciliation.
 
     The provider port exposes the observation as one typed operation so jobs
@@ -237,7 +253,8 @@ class ListPaymentsOperation:
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.LIST_PAYMENTS
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.correlation_id, field_name="correlation_id")
         if self.from_timestamp is not None and (
             isinstance(self.from_timestamp, bool) or not isinstance(self.from_timestamp, int)
@@ -262,18 +279,20 @@ class ListPaymentsOperation:
             _invalid("from_timestamp must not be after to_timestamp")
 
 
-@dataclass(frozen=True, slots=True)
-class CreatePaymentLinkOperation:
+class CreatePaymentLinkOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     amount: int
     currency: str
     description: str
     correlation_id: str
     customer_id: str | None = None
-    notes: Mapping[str, str] = field(default_factory=dict)
+    notes: Mapping[str, str] = Field(default_factory=dict)
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.CREATE_PAYMENT_LINK
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         if isinstance(self.amount, bool) or not isinstance(self.amount, int):
             _invalid("amount must be an integer")
         if self.amount <= 0:
@@ -291,26 +310,30 @@ class CreatePaymentLinkOperation:
         _require_notes(self.notes)
 
 
-@dataclass(frozen=True, slots=True)
-class FindPaymentLinkByCorrelationOperation:
+class FindPaymentLinkByCorrelationOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     correlation_id: str
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.FIND_PAYMENT_LINK_BY_CORRELATION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.correlation_id, field_name="correlation_id")
 
 
-@dataclass(frozen=True, slots=True)
-class CreateRefundOperation:
+class CreateRefundOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     payment_id: str
     amount: int
     correlation_id: str
-    notes: Mapping[str, str] = field(default_factory=dict)
+    notes: Mapping[str, str] = Field(default_factory=dict)
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.CREATE_REFUND
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.payment_id, field_name="payment_id")
         if isinstance(self.amount, bool) or not isinstance(self.amount, int):
             _invalid("amount must be an integer")
@@ -320,21 +343,24 @@ class CreateRefundOperation:
         _require_notes(self.notes)
 
 
-@dataclass(frozen=True, slots=True)
-class FindRefundByCorrelationOperation:
+class FindRefundByCorrelationOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     payment_id: str
     correlation_id: str
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.FIND_REFUND_BY_CORRELATION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.payment_id, field_name="payment_id")
         _require_text(self.correlation_id, field_name="correlation_id")
 
 
-@dataclass(frozen=True, slots=True)
-class CreatePlanOperation:
+class CreatePlanOperation(BaseModel):
     """Create an immutable provider plan under a durable correlation key."""
+
+    model_config = ConfigDict(frozen=True)
 
     name: str
     amount: int
@@ -342,11 +368,12 @@ class CreatePlanOperation:
     period: str
     interval: int
     correlation_id: str
-    notes: Mapping[str, str] = field(default_factory=dict)
+    notes: Mapping[str, str] = Field(default_factory=dict)
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.CREATE_PLAN
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.name, field_name="name")
         if isinstance(self.amount, bool) or not isinstance(self.amount, int) or self.amount <= 0:
             _invalid("amount must be a positive integer")
@@ -369,13 +396,15 @@ class CreatePlanOperation:
         _require_notes(self.notes)
 
 
-@dataclass(frozen=True, slots=True)
-class FindPlanByCorrelationOperation:
+class FindPlanByCorrelationOperation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     correlation_id: str
 
     kind: ClassVar[ProviderOperationKind] = ProviderOperationKind.FIND_PLAN_BY_CORRELATION
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.correlation_id, field_name="correlation_id")
 
 
@@ -411,8 +440,9 @@ class ProviderErrorCode(StrEnum):
     UNEXPECTED = "unexpected"
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderInvalidRequestError:
+class ProviderInvalidRequestError(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     message: str = "The billing provider rejected the request"
     operation: ProviderOperationKind | None = None
     correlation_id: str | None = None
@@ -422,8 +452,9 @@ class ProviderInvalidRequestError:
     requires_reconciliation: ClassVar[bool] = False
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderAuthenticationError:
+class ProviderAuthenticationError(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     message: str = "The billing provider credentials were rejected"
     operation: ProviderOperationKind | None = None
     correlation_id: str | None = None
@@ -433,8 +464,9 @@ class ProviderAuthenticationError:
     requires_reconciliation: ClassVar[bool] = False
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderRateLimitedError:
+class ProviderRateLimitedError(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     message: str = "The billing provider rate limit was reached"
     operation: ProviderOperationKind | None = None
     correlation_id: str | None = None
@@ -444,8 +476,9 @@ class ProviderRateLimitedError:
     requires_reconciliation: ClassVar[bool] = False
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderUnavailableError:
+class ProviderUnavailableError(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     message: str = "The billing provider is temporarily unavailable"
     operation: ProviderOperationKind | None = None
     correlation_id: str | None = None
@@ -455,8 +488,9 @@ class ProviderUnavailableError:
     requires_reconciliation: ClassVar[bool] = False
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderNotFoundError:
+class ProviderNotFoundError(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     message: str = "The billing provider resource was not found"
     operation: ProviderOperationKind | None = None
     correlation_id: str | None = None
@@ -466,9 +500,10 @@ class ProviderNotFoundError:
     requires_reconciliation: ClassVar[bool] = False
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderOutcomeUnknownError:
+class ProviderOutcomeUnknownError(BaseModel):
     """A mutation may have committed and must be reconciled before retry."""
+
+    model_config = ConfigDict(frozen=True)
 
     operation: ProviderOperationKind
     correlation_id: str
@@ -479,9 +514,10 @@ class ProviderOutcomeUnknownError:
     requires_reconciliation: ClassVar[bool] = True
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderManualReviewRequiredError:
+class ProviderManualReviewRequiredError(BaseModel):
     """The provider cannot deterministically resolve a correlation search."""
+
+    model_config = ConfigDict(frozen=True)
 
     operation: ProviderOperationKind
     correlation_id: str
@@ -492,9 +528,10 @@ class ProviderManualReviewRequiredError:
     requires_reconciliation: ClassVar[bool] = True
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderReconciliationRequiredError:
+class ProviderReconciliationRequiredError(BaseModel):
     """A provider read returned an unusable fact; reconcile before mutating."""
+
+    model_config = ConfigDict(frozen=True)
 
     operation: ProviderOperationKind
     correlation_id: str
@@ -505,8 +542,9 @@ class ProviderReconciliationRequiredError:
     requires_reconciliation: ClassVar[bool] = True
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderUnexpectedError:
+class ProviderUnexpectedError(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     message: str = "The billing provider returned an unusable response"
     operation: ProviderOperationKind | None = None
     correlation_id: str | None = None
@@ -529,8 +567,9 @@ type ProviderError = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderSubscriptionState:
+class ProviderSubscriptionState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_subscription_id: str
     status: str
     current_period_start: datetime | None = None
@@ -540,7 +579,8 @@ class ProviderSubscriptionState:
     cancel_at_cycle_end: bool | None = None
     plan_id: str | None = None
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_subscription_id, field_name="provider_subscription_id")
         _require_text(self.status, field_name="status")
         if self.status not in {
@@ -563,23 +603,27 @@ class ProviderSubscriptionState:
         return self.status == "active"
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderCustomer:
+class ProviderCustomer(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_customer_id: str
     email: str
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_customer_id, field_name="provider_customer_id")
         _require_text(self.email, field_name="email")
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderPaymentLink:
+class ProviderPaymentLink(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_payment_link_id: str
     short_url: str | None = None
     status: str | None = None
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_payment_link_id, field_name="provider_payment_link_id")
         if self.short_url is not None:
             _require_text(self.short_url, field_name="short_url")
@@ -595,31 +639,36 @@ class ProviderPaymentLink:
             _invalid("status is not a supported Razorpay payment-link status")
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderPlan:
+class ProviderPlan(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_plan_id: str
     name: str | None = None
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_plan_id, field_name="provider_plan_id")
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderReceipt:
+class ProviderReceipt(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     provider_refund_id: str
     payment_id: str
     amount: int
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_refund_id, field_name="provider_refund_id")
         _require_text(self.payment_id, field_name="payment_id")
         if isinstance(self.amount, bool) or not isinstance(self.amount, int) or self.amount <= 0:
             _invalid("amount must be positive")
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderPaymentState:
+class ProviderPaymentState(BaseModel):
     """One normalized payment fact observed from the billing provider."""
+
+    model_config = ConfigDict(frozen=True)
 
     provider_payment_id: str
     status: str
@@ -630,7 +679,8 @@ class ProviderPaymentState:
     created_at: datetime | None = None
     captured_at: datetime | None = None
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.provider_payment_id, field_name="provider_payment_id")
         _require_text(self.status, field_name="status")
         _require_text(self.currency, field_name="currency")
@@ -642,9 +692,10 @@ class ProviderPaymentState:
             _require_text(self.method, field_name="method")
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderPaymentBatch:
+class ProviderPaymentBatch(BaseModel):
     """Bounded, immutable result of a payment-list observation."""
+
+    model_config = ConfigDict(frozen=True)
 
     payments: tuple[ProviderPaymentState, ...]
 
@@ -660,13 +711,15 @@ type ProviderValue = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderSuccess[T: ProviderValue]:
+class ProviderSuccess[T: ProviderValue](BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     operation: ProviderOperationKind
     correlation_id: str
     value: T
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         _require_text(self.correlation_id, field_name="correlation_id")
 
 

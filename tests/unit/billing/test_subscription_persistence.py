@@ -147,7 +147,10 @@ def test_snapshot_save_preserves_period_end_entitlement_boundary() -> None:
         id=str(uuid4()),
         user_id="user-1",
         plan_id=str(uuid4()),
-        state=ActiveState(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)),
+        state=ActiveState(
+            period_start=datetime(2026, 1, 1, tzinfo=UTC),
+            period_end=datetime(2026, 2, 1, tzinfo=UTC),
+        ),
         version=4,
         remote_sync=RemoteSyncState.PENDING,
         cancellation_intent=CancellationIntent(

@@ -62,7 +62,9 @@ async def test_customer_to_subscription_crash_has_one_post_per_child() -> None:
     persistence = InMemoryLifecyclePersistence(
         {
             "sub-1": LifecycleRecord(
-                SubscriptionSnapshot("sub-1", "user-1", "plan-1", CreatedState()),
+                snapshot=SubscriptionSnapshot(
+                    id="sub-1", user_id="user-1", plan_id="plan-1", state=CreatedState()
+                ),
                 customer_email="customer@example.test",
             )
         }
@@ -70,9 +72,9 @@ async def test_customer_to_subscription_crash_has_one_post_per_child() -> None:
     provider = _CrashAfterFirstMutation(ProviderOperationKind.CREATE_CUSTOMER)
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     request = LifecycleRequest(
-        "sub-1",
-        CreateSubscription(CommandMetadata("create-1"), "plan-1"),
-        PolicyContext(now=datetime.now(tz=UTC)),
+        subscription_id="sub-1",
+        input=CreateSubscription(metadata=CommandMetadata(request_id="create-1"), plan_id="plan-1"),
+        context=PolicyContext(now=datetime.now(tz=UTC)),
     )
 
     with pytest.raises(CancelledError):
@@ -92,7 +94,9 @@ async def test_customer_outcome_crash_still_records_and_executes_child() -> None
     persistence = _CrashAfterCustomerOutcome(
         {
             "sub-1": LifecycleRecord(
-                SubscriptionSnapshot("sub-1", "user-1", "plan-1", CreatedState()),
+                snapshot=SubscriptionSnapshot(
+                    id="sub-1", user_id="user-1", plan_id="plan-1", state=CreatedState()
+                ),
                 customer_email="customer@example.test",
             )
         }
@@ -100,9 +104,9 @@ async def test_customer_outcome_crash_still_records_and_executes_child() -> None
     provider = InMemoryBillingProvider()
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     request = LifecycleRequest(
-        "sub-1",
-        CreateSubscription(CommandMetadata("create-1"), "plan-1"),
-        PolicyContext(now=datetime.now(tz=UTC)),
+        subscription_id="sub-1",
+        input=CreateSubscription(metadata=CommandMetadata(request_id="create-1"), plan_id="plan-1"),
+        context=PolicyContext(now=datetime.now(tz=UTC)),
     )
 
     with pytest.raises(CancelledError):

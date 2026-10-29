@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 import anthropic
@@ -26,7 +25,7 @@ import openai
 from google.api_core import exceptions as google_exceptions
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
 from app.resilience.circuit_breaker import (
@@ -85,9 +84,10 @@ _TRANSIENT_PROVIDER_TYPES = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _RawOutcome:
+class _RawOutcome(BaseModel):
     """Private result of the provider call before parsing or error translation."""
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     value: object | None = None
     error: Exception | None = None

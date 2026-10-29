@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast, override
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -98,9 +99,10 @@ from .models import (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderOperationInput:
+class ProviderOperationInput(BaseModel):
     """Normalized facts required to create a durable provider operation."""
+
+    model_config = ConfigDict(frozen=True)
 
     correlation_id: str
     idempotency_key: str
@@ -109,9 +111,10 @@ class ProviderOperationInput:
     request_data: Mapping[str, object] | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderOperationUpdate:
+class ProviderOperationUpdate(BaseModel):
     """Patch accepted by the persistence seam after a provider attempt."""
+
+    model_config = ConfigDict(frozen=True)
 
     state: ProviderOperationState | str
     attempts: int | None = None
@@ -155,7 +158,6 @@ class SubscriptionLifecyclePersistence(Protocol):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from typing import Any
 
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -1410,7 +1412,9 @@ class SqlAlchemyLifecyclePersistence(SubscriptionRepository, LifecyclePersistenc
                 return _coordinator_failure("finish", snapshot_result.failure().message)
             final_snapshot = snapshot_result.unwrap()
             if reconciled and provider_plan is not None:
-                final_snapshot = replace(final_snapshot, observed_plan_id=provider_plan)
+                final_snapshot = final_snapshot.model_copy(
+                    update={"observed_plan_id": provider_plan}
+                )
             outcome = LifecycleOutcome(
                 snapshot=final_snapshot,
                 plan=plan,
@@ -1526,7 +1530,7 @@ def _effect_payload(effect: TransitionEffect) -> dict[str, object]:
 def _operation_payload(operation: ProviderOperation) -> dict[str, object]:
     return {
         "kind": operation.kind.value,
-        "fields": _json_value(asdict(operation)),
+        "fields": _json_value(operation.model_dump(mode="python")),
     }
 
 
@@ -1754,7 +1758,7 @@ def _provider_success_payload(result: ProviderSuccess[Any] | None) -> object:
         "correlation_id": result.correlation_id,
         "value": {
             "type": type(result.value).__name__,
-            "fields": _json_value(asdict(result.value)),
+            "fields": _json_value(result.value.model_dump(mode="python")),
         },
     }
 
@@ -1784,7 +1788,9 @@ def _provider_success_from_payload(payload: object) -> ProviderSuccess[Any] | No
         return None
     try:
         return ProviderSuccess(
-            ProviderOperationKind(operation), correlation_id, constructor(**fields)
+            operation=ProviderOperationKind(operation),
+            correlation_id=correlation_id,
+            value=constructor(**fields),
         )
     except (TypeError, ValueError):
         return None
@@ -1851,7 +1857,7 @@ def _snapshot_payload(snapshot: SubscriptionSnapshot) -> dict[str, object]:
         "id": snapshot.id,
         "user_id": snapshot.user_id,
         "plan_id": snapshot.plan_id,
-        "state": _json_value(asdict(snapshot.state)),
+        "state": _json_value(snapshot.state.model_dump(mode="python")),
         "version": snapshot.version,
         "remote_sync": snapshot.remote_sync.value,
         "cancellation_intent": (
@@ -2103,13 +2109,19 @@ def _to_lifecycle_snapshot(
     state_by_name: dict[str, object] = {
         SubscriptionStatus.CREATED.value: CreatedState(),
         SubscriptionStatus.AUTHENTICATED.value: AuthenticatedState(),
-        SubscriptionStatus.ACTIVE.value: ActiveState(period_start, period_end),
+        SubscriptionStatus.ACTIVE.value: ActiveState(
+            period_start=period_start, period_end=period_end
+        ),
         SubscriptionStatus.PAST_DUE.value: PastDueState(
-            retry_count=subscription.retry_count,
+            # Legacy rows may hold a NULL retry counter (the dataclass accepted
+            # it silently); pydantic enforces the declared int, so normalize.
+            retry_count=subscription.retry_count or 0,
             period_start=period_start,
             period_end=period_end,
         ),
-        SubscriptionStatus.HALTED.value: HaltedState(period_start, period_end),
+        SubscriptionStatus.HALTED.value: HaltedState(
+            period_start=period_start, period_end=period_end
+        ),
         SubscriptionStatus.CANCELLED.value: CancelledState(
             at=subscription.cancelled_at,
             at_period_end=subscription.cancel_at_period_end,

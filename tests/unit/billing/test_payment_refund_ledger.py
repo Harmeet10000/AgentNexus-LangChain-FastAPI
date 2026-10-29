@@ -136,7 +136,9 @@ async def test_refund_receipt_mismatch_requires_reconciliation_without_local_pro
 ) -> None:
     payment = _payment()
     service, _ = _service(payment)
-    provider_receipt = ProviderReceipt("rfnd_mismatch", receipt_payment_id, receipt_amount)
+    provider_receipt = ProviderReceipt(
+        provider_refund_id="rfnd_mismatch", payment_id=receipt_payment_id, amount=receipt_amount
+    )
 
     async def execute_malformed_provider(*_args: object, **_kwargs: object) -> Success[object]:
         return Success(SimpleNamespace(value=provider_receipt))

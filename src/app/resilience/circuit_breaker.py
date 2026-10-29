@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, override
 from urllib.parse import quote
 
+from pydantic import BaseModel, ConfigDict
 from redis.exceptions import RedisError
 
 if TYPE_CHECKING:
@@ -39,14 +39,16 @@ class CircuitBreakerBackendError(RuntimeError):
     """Raised when Redis is unavailable and the breaker is configured fail-closed."""
 
 
-@dataclass(frozen=True, slots=True)
-class CircuitBreakerSettings:
+class CircuitBreakerSettings(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     failure_threshold: int = 5
     recovery_timeout_seconds: int = 60
     probe_lease_seconds: int = 10
     fail_open: bool = True
 
-    def __post_init__(self) -> None:
+    @override
+    def model_post_init(self, __context: object) -> None:
         if self.failure_threshold < 1:
             msg = "failure_threshold must be at least 1"
             raise ValueError(msg)

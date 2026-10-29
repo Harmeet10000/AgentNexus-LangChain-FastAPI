@@ -112,12 +112,12 @@ def _context(**kwargs: Any) -> PolicyContext:
 def test_period_end_cancel_keeps_entitlement_until_period_end() -> None:
     """Requirement 5.7: period-end cancellation is an intent, not termination."""
 
-    before = _snapshot(ActiveState(START, END))
+    before = _snapshot(ActiveState(period_start=START, period_end=END))
     result = (
         SubscriptionMachine()
         .plan(
             before,
-            CancelSubscription(_command(), cancel_at_period_end=True),
+            CancelSubscription(metadata=_command(), cancel_at_period_end=True),
             _context(),
         )
         .unwrap()
@@ -140,7 +140,9 @@ def test_payment_capture_cannot_reactivate_paused_or_halted_subscription(state: 
         SubscriptionMachine()
         .plan(
             before,
-            PaymentCaptured(_event("payment-stale"), payment_id="pay-stale", amount_paisa=100),
+            PaymentCaptured(
+                metadata=_event("payment-stale"), payment_id="pay-stale", amount_paisa=100
+            ),
             _context(),
         )
         .unwrap()
@@ -155,32 +157,32 @@ def test_payment_capture_cannot_reactivate_paused_or_halted_subscription(state: 
     ("event", "expected_state"),
     [
         (
-            SubscriptionCharged(_event("charge-omitted")),
-            ActiveState(START, END),
+            SubscriptionCharged(metadata=_event("charge-omitted")),
+            ActiveState(period_start=START, period_end=END),
         ),
         (
-            SubscriptionActivated(_event("activation-omitted")),
-            ActiveState(START, END),
+            SubscriptionActivated(metadata=_event("activation-omitted")),
+            ActiveState(period_start=START, period_end=END),
         ),
     ],
 )
 def test_omitted_period_facts_do_not_erase_current_period(
     event: object, expected_state: object
 ) -> None:
-    before = _snapshot(ActiveState(START, END))
+    before = _snapshot(ActiveState(period_start=START, period_end=END))
     result = SubscriptionMachine().plan(before, event, _context()).unwrap()  # type: ignore[arg-type]
 
     assert result.after.state == expected_state
 
 
 def test_stale_period_facts_do_not_regress_current_period() -> None:
-    before = _snapshot(ActiveState(START, END))
+    before = _snapshot(ActiveState(period_start=START, period_end=END))
     result = (
         SubscriptionMachine()
         .plan(
             before,
             SubscriptionCharged(
-                _event("charge-old"),
+                metadata=_event("charge-old"),
                 period_start=START - timedelta(days=31),
                 period_end=END - timedelta(days=31),
             ),
@@ -196,15 +198,21 @@ def test_stale_period_facts_do_not_regress_current_period() -> None:
 @pytest.mark.parametrize(
     "event_factory",
     [
-        lambda: SubscriptionAuthenticated(_event("replay-auth", replay=True)),
-        lambda: SubscriptionActivated(_event("replay-active", replay=True), START, END),
-        lambda: SubscriptionCharged(_event("replay-charge", replay=True), START, END),
-        lambda: PaymentCaptured(_event("replay-capture", replay=True), "pay-1", 100),
-        lambda: PaymentFailed(_event("replay-failed", replay=True), "pay-2"),
-        lambda: SubscriptionPaused(_event("replay-paused", replay=True)),
-        lambda: SubscriptionResumed(_event("replay-resumed", replay=True)),
-        lambda: SubscriptionHalted(_event("replay-halted", replay=True)),
-        lambda: SubscriptionCancelled(_event("replay-cancelled", replay=True)),
+        lambda: SubscriptionAuthenticated(metadata=_event("replay-auth", replay=True)),
+        lambda: SubscriptionActivated(
+            metadata=_event("replay-active", replay=True), period_start=START, period_end=END
+        ),
+        lambda: SubscriptionCharged(
+            metadata=_event("replay-charge", replay=True), period_start=START, period_end=END
+        ),
+        lambda: PaymentCaptured(
+            metadata=_event("replay-capture", replay=True), payment_id="pay-1", amount_paisa=100
+        ),
+        lambda: PaymentFailed(metadata=_event("replay-failed", replay=True), payment_id="pay-2"),
+        lambda: SubscriptionPaused(metadata=_event("replay-paused", replay=True)),
+        lambda: SubscriptionResumed(metadata=_event("replay-resumed", replay=True)),
+        lambda: SubscriptionHalted(metadata=_event("replay-halted", replay=True)),
+        lambda: SubscriptionCancelled(metadata=_event("replay-cancelled", replay=True)),
     ],
 )
 def test_every_replayed_event_is_a_no_effect_skip(event_factory: Callable[[], object]) -> None:
@@ -218,7 +226,7 @@ def test_every_replayed_event_is_a_no_effect_skip(event_factory: Callable[[], ob
         if isinstance(event, SubscriptionAuthenticated)
         else AuthenticatedState()
         if isinstance(event, SubscriptionActivated)
-        else ActiveState(START, END)
+        else ActiveState(period_start=START, period_end=END)
     )
     before = _snapshot(state)
     result = SubscriptionMachine().plan(before, event, _context()).unwrap()  # type: ignore[arg-type]
@@ -229,12 +237,12 @@ def test_every_replayed_event_is_a_no_effect_skip(event_factory: Callable[[], ob
 
 
 def test_no_op_does_not_bump_optimistic_version() -> None:
-    before = _snapshot(ActiveState(START, END), version=11)
+    before = _snapshot(ActiveState(period_start=START, period_end=END), version=11)
     result = (
         SubscriptionMachine()
         .plan(
             before,
-            SubscriptionAuthenticated(_event("already-authenticated")),
+            SubscriptionAuthenticated(metadata=_event("already-authenticated")),
             _context(),
         )
         .unwrap()
@@ -246,8 +254,8 @@ def test_no_op_does_not_bump_optimistic_version() -> None:
 
 def test_context_requires_aware_time() -> None:
     result = SubscriptionMachine().plan(
-        _snapshot(ActiveState(START, END)),
-        SubscriptionAuthenticated(_event("aware-time")),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        SubscriptionAuthenticated(metadata=_event("aware-time")),
         PolicyContext(now=NAIVE_NOW),
     )
 
@@ -257,8 +265,8 @@ def test_context_requires_aware_time() -> None:
 @pytest.mark.parametrize("duration_days", [0, -1, 366])
 def test_pause_duration_is_bounded(duration_days: int) -> None:
     result = SubscriptionMachine().plan(
-        _snapshot(ActiveState(START, END)),
-        PauseSubscription(_command(), duration_days=duration_days),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        PauseSubscription(metadata=_command(), duration_days=duration_days),
         _context(),
     )
 
@@ -270,7 +278,7 @@ def test_create_has_pending_remote_sync_and_audit_intent() -> None:
         SubscriptionMachine()
         .plan(
             _snapshot(CreatedState()),
-            CreateSubscription(_command(), plan_id="plan-old"),
+            CreateSubscription(metadata=_command(), plan_id="plan-old"),
             _context(),
         )
         .unwrap()
@@ -282,8 +290,10 @@ def test_create_has_pending_remote_sync_and_audit_intent() -> None:
 
 def test_plan_change_rejects_effective_date_after_period_end() -> None:
     result = SubscriptionMachine().plan(
-        _snapshot(ActiveState(START, END)),
-        ChangeSubscriptionPlan(_command(), "plan-new", END + timedelta(seconds=1)),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        ChangeSubscriptionPlan(
+            metadata=_command(), new_plan_id="plan-new", effective_at=END + timedelta(seconds=1)
+        ),
         _context(),
     )
 
@@ -292,8 +302,8 @@ def test_plan_change_rejects_effective_date_after_period_end() -> None:
 
 def test_plan_change_rejects_partial_financial_facts() -> None:
     result = SubscriptionMachine().plan(
-        _snapshot(ActiveState(START, END)),
-        ChangeSubscriptionPlan(_command(), "plan-new", NOW),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        ChangeSubscriptionPlan(metadata=_command(), new_plan_id="plan-new", effective_at=NOW),
         _context(current_plan_amount=1000),
     )
 
@@ -305,14 +315,14 @@ def test_plan_change_updates_desired_without_advancing_observed_plan() -> None:
         id="sub-contract",
         user_id="user-contract",
         plan_id="plan-old",
-        state=ActiveState(START, END),
+        state=ActiveState(period_start=START, period_end=END),
         observed_plan_id="plan-old",
     )
     result = (
         SubscriptionMachine()
         .plan(
             before,
-            ChangeSubscriptionPlan(_command(), "plan-new", NOW),
+            ChangeSubscriptionPlan(metadata=_command(), new_plan_id="plan-new", effective_at=NOW),
             _context(current_plan_amount=1000, target_plan_amount=2000),
         )
         .unwrap()
@@ -489,14 +499,38 @@ async def test_every_ambiguous_mutation_is_attempted_once() -> None:
             return fail
 
     operations = (
-        CreateCustomerOperation("customer@example.test", None, None, "ambiguous-customer"),
-        CreateSubscriptionOperation("plan-1", "customer-1", 12, 1, True, "ambiguous-create"),
-        CancelSubscriptionOperation("sub-1", False, "ambiguous-cancel"),
-        PauseSubscriptionOperation("sub-1", "ambiguous-pause"),
-        ResumeSubscriptionOperation("sub-1", "ambiguous-resume"),
-        ChangeSubscriptionPlanOperation("sub-1", "plan-2", "ambiguous-change"),
-        CreatePaymentLinkOperation(500, "INR", "upgrade", "ambiguous-link"),
-        CreateRefundOperation("pay-1", 500, "ambiguous-refund"),
+        CreateCustomerOperation(
+            email="customer@example.test",
+            contact=None,
+            name=None,
+            correlation_id="ambiguous-customer",
+        ),
+        CreateSubscriptionOperation(
+            plan_id="plan-1",
+            customer_id="customer-1",
+            total_count=12,
+            quantity=1,
+            customer_notify=True,
+            correlation_id="ambiguous-create",
+        ),
+        CancelSubscriptionOperation(
+            provider_subscription_id="sub-1",
+            cancel_at_cycle_end=False,
+            correlation_id="ambiguous-cancel",
+        ),
+        PauseSubscriptionOperation(
+            provider_subscription_id="sub-1", correlation_id="ambiguous-pause"
+        ),
+        ResumeSubscriptionOperation(
+            provider_subscription_id="sub-1", correlation_id="ambiguous-resume"
+        ),
+        ChangeSubscriptionPlanOperation(
+            provider_subscription_id="sub-1", plan_id="plan-2", correlation_id="ambiguous-change"
+        ),
+        CreatePaymentLinkOperation(
+            amount=500, currency="INR", description="upgrade", correlation_id="ambiguous-link"
+        ),
+        CreateRefundOperation(payment_id="pay-1", amount=500, correlation_id="ambiguous-refund"),
     )
     client = AmbiguousRazorpay()
     provider = RazorpayBillingProvider(client)
@@ -543,7 +577,9 @@ async def test_customer_provisioning_preserves_identity_and_correlation() -> Non
     assert isinstance(result, Success)
     assert result.unwrap().operation is operation.kind
     assert result.unwrap().correlation_id == operation.correlation_id
-    assert result.unwrap().value == ProviderCustomer("cust-remote-1", operation.email)
+    assert result.unwrap().value == ProviderCustomer(
+        provider_customer_id="cust-remote-1", email=operation.email
+    )
     assert client.calls == [
         {
             "email": operation.email,
@@ -589,10 +625,15 @@ async def test_remote_plan_change_preserves_postconditions_and_request_shape() -
     ("operation", "expected_error"),
     [
         (
-            CreatePaymentLinkOperation(500, "INR", "upgrade", "unknown-link"),
+            CreatePaymentLinkOperation(
+                amount=500, currency="INR", description="upgrade", correlation_id="unknown-link"
+            ),
             ProviderOutcomeUnknownError,
         ),
-        (CreateRefundOperation("pay-1", 500, "unknown-refund"), ProviderOutcomeUnknownError),
+        (
+            CreateRefundOperation(payment_id="pay-1", amount=500, correlation_id="unknown-refund"),
+            ProviderOutcomeUnknownError,
+        ),
     ],
 )
 async def test_malformed_mutation_results_require_reconciliation(
@@ -616,9 +657,9 @@ async def test_malformed_mutation_results_require_reconciliation(
 async def test_unresolved_correlation_searches_explicitly_require_manual_review() -> None:
     provider = InMemoryBillingProvider()
     searches = (
-        FindSubscriptionByCorrelationOperation("missing-subscription"),
-        FindPaymentLinkByCorrelationOperation("missing-link"),
-        FindRefundByCorrelationOperation("pay-1", "missing-refund"),
+        FindSubscriptionByCorrelationOperation(correlation_id="missing-subscription"),
+        FindPaymentLinkByCorrelationOperation(correlation_id="missing-link"),
+        FindRefundByCorrelationOperation(payment_id="pay-1", correlation_id="missing-refund"),
     )
 
     for operation in searches:
@@ -653,7 +694,11 @@ async def test_permanent_provider_statuses_have_stable_error_taxonomy(
             )
 
     result = await RazorpayBillingProvider(RejectedRazorpay()).execute(
-        CancelSubscriptionOperation("sub-1", False, f"status-{status_code}")
+        CancelSubscriptionOperation(
+            provider_subscription_id="sub-1",
+            cancel_at_cycle_end=False,
+            correlation_id=f"status-{status_code}",
+        )
     )
 
     assert isinstance(result, Failure)
@@ -666,11 +711,19 @@ async def test_permanent_provider_statuses_have_stable_error_taxonomy(
 async def test_in_memory_reuses_correlation_identity_across_mutation_replays() -> None:
     provider = InMemoryBillingProvider()
     customer_operation = CreateCustomerOperation(
-        "customer@example.test", None, "Customer", "customer-replay"
+        email="customer@example.test",
+        contact=None,
+        name="Customer",
+        correlation_id="customer-replay",
     )
     first_customer = await provider.execute(customer_operation)
     second_customer = await provider.execute(
-        CreateCustomerOperation("CUSTOMER@EXAMPLE.TEST", None, "Customer", "customer-replay-2")
+        CreateCustomerOperation(
+            email="CUSTOMER@EXAMPLE.TEST",
+            contact=None,
+            name="Customer",
+            correlation_id="customer-replay-2",
+        )
     )
     assert isinstance(first_customer, Success)
     assert isinstance(second_customer, Success)
@@ -680,7 +733,12 @@ async def test_in_memory_reuses_correlation_identity_across_mutation_replays() -
     )
 
     subscription_operation = CreateSubscriptionOperation(
-        "plan-1", first_customer.unwrap().value.provider_customer_id, 12, 1, True, "sub-replay"
+        plan_id="plan-1",
+        customer_id=first_customer.unwrap().value.provider_customer_id,
+        total_count=12,
+        quantity=1,
+        customer_notify=True,
+        correlation_id="sub-replay",
     )
     first_subscription = await provider.execute(subscription_operation)
     second_subscription = await provider.execute(subscription_operation)
@@ -688,10 +746,14 @@ async def test_in_memory_reuses_correlation_identity_across_mutation_replays() -
     assert isinstance(second_subscription, Success)
     assert first_subscription.unwrap().value == second_subscription.unwrap().value
 
-    link_operation = CreatePaymentLinkOperation(500, "INR", "upgrade", "link-replay")
+    link_operation = CreatePaymentLinkOperation(
+        amount=500, currency="INR", description="upgrade", correlation_id="link-replay"
+    )
     first_link = await provider.execute(link_operation)
     second_link = await provider.execute(link_operation)
-    refund_operation = CreateRefundOperation("pay-1", 500, "refund-replay")
+    refund_operation = CreateRefundOperation(
+        payment_id="pay-1", amount=500, correlation_id="refund-replay"
+    )
     first_refund = await provider.execute(refund_operation)
     second_refund = await provider.execute(refund_operation)
 
@@ -710,7 +772,9 @@ async def test_observe_malformed_read_requires_reconciliation() -> None:
             return {"id": "sub-1", "status": "provider-added-future-status"}
 
     result = await RazorpayBillingProvider(MalformedReadRazorpay()).execute(
-        ObserveSubscriptionOperation("sub-1", "observe-malformed")
+        ObserveSubscriptionOperation(
+            provider_subscription_id="sub-1", correlation_id="observe-malformed"
+        )
     )
 
     assert isinstance(result, Failure)

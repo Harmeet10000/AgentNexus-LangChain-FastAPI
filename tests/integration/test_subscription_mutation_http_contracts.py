@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from returns.result import Failure, Success
 
-from app.features.auth.dependencies import get_current_verified_user
+from app.features.auth.api.http.dependencies import get_current_verified_user
 from app.features.billing.providers import (
     CreateRefundOperation,
     CreateSubscriptionOperation,
@@ -183,7 +183,7 @@ class _MutationService:
             )
         self.persistence.seed(
             LifecycleRecord(
-                snapshot,
+                snapshot=snapshot,
                 customer_email="http@example.test",
                 provider_customer_id=provider_customer_id,
                 provider_subscription_id=provider_subscription_id,
@@ -195,7 +195,7 @@ class _MutationService:
 
     async def _seed_provider_subscription(self, customer_id: str) -> str:
         result = await self.provider.execute(
-            CreateSubscriptionOperation("rp_plan_a", customer_id, 0, 1, True, "seed-http")
+            CreateSubscriptionOperation(plan_id="rp_plan_a", customer_id=customer_id, total_count=0, quantity=1, customer_notify=True, correlation_id="seed-http")
         )
         assert isinstance(result, Success)
         value = result.unwrap().value
@@ -263,7 +263,7 @@ class _MutationService:
         self.calls.append(("create", key))
         result = await self.coordinator.apply(
             CreateSubscription(
-                CommandMetadata(key, expected_version=self._record().snapshot.version), dto.plan_id
+                CommandMetadata(request_id=key, expected_version=self._record().snapshot.version), dto.plan_id
             ),
             key,
             subscription_id=str(self._state.id),
@@ -285,7 +285,7 @@ class _MutationService:
         self.calls.append(("cancel", key))
         result = await self.coordinator.apply(
             CancelSubscription(
-                CommandMetadata(key, expected_version=self._record().snapshot.version),
+                CommandMetadata(request_id=key, expected_version=self._record().snapshot.version),
                 cancel_at_period_end=dto.cancel_at_period_end,
             ),
             key,
@@ -317,7 +317,7 @@ class _MutationService:
         self.calls.append(("pause", key))
         result = await self.coordinator.apply(
             PauseSubscription(
-                CommandMetadata(key, expected_version=self._record().snapshot.version),
+                CommandMetadata(request_id=key, expected_version=self._record().snapshot.version),
                 duration_days=dto.pause_duration_days,
             ),
             key,
@@ -333,7 +333,7 @@ class _MutationService:
         self.calls.append(("resume", key))
         result = await self.coordinator.apply(
             ResumeSubscription(
-                CommandMetadata(key, expected_version=self._record().snapshot.version)
+                CommandMetadata(request_id=key, expected_version=self._record().snapshot.version)
             ),
             key,
             subscription_id=subscription_id,
@@ -352,14 +352,16 @@ class _MutationService:
         key = idempotency_key or "missing-key"
         self.calls.append(("change-plan", key))
         record = self.persistence.records[subscription_id]
-        self.persistence.records[subscription_id] = replace(
-            record, desired_provider_plan_id="rp_plan_b"
+        self.persistence.records[subscription_id] = record.model_copy(
+            update={"desired_provider_plan_id": "rp_plan_b"}
         )
         result = await self.coordinator.apply(
             ChangeSubscriptionPlan(
-                CommandMetadata(key, expected_version=self._record().snapshot.version),
-                dto.new_plan_id,
-                dto.effective_date or datetime.now(tz=UTC),
+                metadata=CommandMetadata(
+                    request_id=key, expected_version=self._record().snapshot.version
+                ),
+                new_plan_id=dto.new_plan_id,
+                effective_at=dto.effective_date or datetime.now(tz=UTC),
             ),
             key,
             subscription_id=subscription_id,

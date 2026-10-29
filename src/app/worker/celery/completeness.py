@@ -11,14 +11,15 @@ one.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
+
+from pydantic import BaseModel, ConfigDict
 
 from app.config import get_settings
 from app.shared.jobs.catalog import JOB_CATALOG
 from app.shared.jobs.topology import task_routes
-from app.worker.celery.profiles import profile_for_role
+from app.worker.celery.profiles import WorkerRole, profile_for_role
 from app.worker.celery.registration import TASK_DECLARING_MODULES, TASK_MODULES
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
     from app.shared.jobs.catalog import JobDefinition
     from app.shared.jobs.payloads import CeleryTaskPayload
-    from app.worker.celery.profiles import WorkerProfile, WorkerRole
+    from app.worker.celery.profiles import WorkerProfile
 
 
 def _names(value: Iterable[str] | Mapping[str, object]) -> frozenset[str]:
@@ -98,9 +99,10 @@ def _route_configuration_mismatches(
     )
 
 
-@dataclass(frozen=True)
-class JobCatalogDrift:
+class JobCatalogDrift(BaseModel):
     """All independently actionable catalog/worker disagreement categories."""
+
+    model_config = ConfigDict(frozen=True)
 
     catalog_not_declared: tuple[str, ...] = ()
     declared_not_catalog: tuple[str, ...] = ()
@@ -272,9 +274,10 @@ def check_job_catalog_completeness(  # noqa: PLR0914
     )
 
 
-@dataclass(frozen=True)
-class QueueCoverageDrift:
+class QueueCoverageDrift(BaseModel):
     """Deployment-wide queue coverage, independent of any one worker pool."""
+
+    model_config = ConfigDict(frozen=True)
 
     required_queues_not_consumed: tuple[str, ...] = ()
     consumed_queues_not_declared: tuple[str, ...] = ()
@@ -456,9 +459,10 @@ def _application_values(values: Iterable[str]) -> frozenset[str]:
     return frozenset(value for value in values if not value.startswith("celery."))
 
 
-@dataclass(frozen=True, slots=True)
-class WorkerProfileDrift:
+class WorkerProfileDrift(BaseModel):
     """Mismatch between a role profile and the jobs a worker advertises."""
+
+    model_config = ConfigDict(frozen=True)
 
     role: WorkerRole
     expected_queue: str

@@ -11,7 +11,6 @@ must never silently manufacture value.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -74,7 +73,7 @@ def _active_snapshot(
         id=subscription_id,
         user_id="user-1",
         plan_id="plan-old",
-        state=ActiveState(datetime(2026, 10, 1, tzinfo=UTC), PERIOD_END),
+        state=ActiveState(period_start=datetime(2026, 10, 1, tzinfo=UTC), period_end=PERIOD_END),
         version=version,
         remote_sync=RemoteSyncState.SYNCED,
         observed_plan_id="plan-old",
@@ -88,7 +87,7 @@ def _coordinator() -> tuple[
     persistence = InMemoryLifecyclePersistence()
     persistence.seed(
         LifecycleRecord(
-            _active_snapshot(),
+            snapshot=_active_snapshot(),
             provider_customer_id="cust-1",
             provider_subscription_id="sub-remote",
             provider_plan_id="rp_plan_old",
@@ -105,9 +104,9 @@ async def test_upgrade_exposes_payment_link_but_gates_remote_plan_and_entitlemen
     """An upgrade is desired locally before it is paid, not remotely active."""
     coordinator, persistence, provider = _coordinator()
     command = ChangeSubscriptionPlan(
-        CommandMetadata("upgrade-gate-1", expected_version=4),
-        "plan-new",
-        NOW,
+        metadata=CommandMetadata(request_id="upgrade-gate-1", expected_version=4),
+        new_plan_id="plan-new",
+        effective_at=NOW,
     )
 
     outcome = await coordinator.apply(
@@ -145,15 +144,23 @@ async def test_upgrade_exposes_payment_link_but_gates_remote_plan_and_entitlemen
 async def test_verified_capture_executes_pending_remote_plan_change_once() -> None:
     coordinator, persistence, provider = _coordinator()
     seeded = await provider.execute(
-        CreateSubscriptionOperation("rp_plan_old", "cust-1", 0, 1, True, "seed-capture")
+        CreateSubscriptionOperation(
+            plan_id="rp_plan_old",
+            customer_id="cust-1",
+            total_count=0,
+            quantity=1,
+            customer_notify=True,
+            correlation_id="seed-capture",
+        )
     )
     assert isinstance(seeded, Success)
-    persistence.records["sub-local"] = replace(
-        persistence.records["sub-local"],
-        provider_subscription_id=seeded.unwrap().value.provider_subscription_id,
+    persistence.records["sub-local"] = persistence.records["sub-local"].model_copy(
+        update={"provider_subscription_id": seeded.unwrap().value.provider_subscription_id}
     )
     upgrade = ChangeSubscriptionPlan(
-        CommandMetadata("upgrade-capture-1", expected_version=4), "plan-new", NOW
+        metadata=CommandMetadata(request_id="upgrade-capture-1", expected_version=4),
+        new_plan_id="plan-new",
+        effective_at=NOW,
     )
     first = await coordinator.apply(
         upgrade,
@@ -174,7 +181,7 @@ async def test_verified_capture_executes_pending_remote_plan_change_once() -> No
     assert pending_upgrade is not None
 
     capture = PaymentCaptured(
-        EventMetadata("capture-upgrade-1", occurred_at=NOW),
+        metadata=EventMetadata(event_id="capture-upgrade-1", occurred_at=NOW),
         payment_id="pay-upgrade-1",
         amount_paisa=pending_upgrade.amount_paisa,
         currency=pending_upgrade.currency,
@@ -204,7 +211,9 @@ async def test_verified_capture_executes_pending_remote_plan_change_once() -> No
 @pytest.mark.asyncio
 async def test_provider_idempotency_same_payload_replays_and_different_payload_conflicts() -> None:
     coordinator, _persistence, provider = _coordinator()
-    first_operation = CreatePaymentLinkOperation(500, "INR", "upgrade", "payment-key-1")
+    first_operation = CreatePaymentLinkOperation(
+        amount=500, currency="INR", description="upgrade", correlation_id="payment-key-1"
+    )
     replay = await coordinator.execute_provider_operation(
         first_operation, subscription_id="sub-local", idempotency_key="payment-key-1"
     )
@@ -212,7 +221,9 @@ async def test_provider_idempotency_same_payload_replays_and_different_payload_c
         first_operation, subscription_id="sub-local", idempotency_key="payment-key-1"
     )
     conflict = await coordinator.execute_provider_operation(
-        CreatePaymentLinkOperation(700, "INR", "upgrade", "payment-key-other"),
+        CreatePaymentLinkOperation(
+            amount=700, currency="INR", description="upgrade", correlation_id="payment-key-other"
+        ),
         subscription_id="sub-local",
         idempotency_key="payment-key-1",
     )
@@ -229,7 +240,9 @@ async def test_provider_idempotency_same_payload_replays_and_different_payload_c
 @pytest.mark.asyncio
 async def test_provider_idempotency_concurrent_replays_issue_one_remote_mutation() -> None:
     coordinator, _persistence, provider = _coordinator()
-    operation = CreatePaymentLinkOperation(500, "INR", "upgrade", "payment-concurrent-1")
+    operation = CreatePaymentLinkOperation(
+        amount=500, currency="INR", description="upgrade", correlation_id="payment-concurrent-1"
+    )
 
     results = await asyncio.gather(
         *(
@@ -255,14 +268,14 @@ class _UnknownThenFoundProvider(InMemoryBillingProvider):
     def __init__(self) -> None:
         super().__init__()
         self.mutation_attempts = 0
-        self.receipt = ProviderReceipt("rfnd-recovered", "pay-1", 500)
+        self.receipt = ProviderReceipt(provider_refund_id="rfnd-recovered", payment_id="pay-1", amount=500)
 
     async def execute(self, operation: Any):  # type: ignore[no-untyped-def]
         if operation.kind is ProviderOperationKind.CREATE_REFUND:
             self.mutation_attempts += 1
             if self.mutation_attempts == 1:
                 return Failure(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)
+                    ProviderOutcomeUnknownError(operation=operation.kind, correlation_id=operation.correlation_id)
                 )
         if operation.kind is ProviderOperationKind.FIND_REFUND_BY_CORRELATION:
             return Success(
@@ -280,7 +293,9 @@ async def test_keyless_cancel_refund_recovery_reconciles_without_second_refund()
     provider = _UnknownThenFoundProvider()
     persistence = InMemoryLifecyclePersistence()
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
-    operation = CreateRefundOperation("pay-1", 500, "cancel-refund-recovery")
+    operation = CreateRefundOperation(
+        payment_id="pay-1", amount=500, correlation_id="cancel-refund-recovery"
+    )
 
     first = await coordinator.execute_provider_operation(
         operation,
@@ -324,7 +339,9 @@ async def test_concurrent_pending_refund_lease_reconciles_without_second_mutatio
     provider = _YieldingProvider()
     persistence = InMemoryLifecyclePersistence()
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
-    operation = CreateRefundOperation("pay-1", 500, "concurrent-refund")
+    operation = CreateRefundOperation(
+        payment_id="pay-1", amount=500, correlation_id="concurrent-refund"
+    )
 
     first = asyncio.create_task(
         coordinator.execute_provider_operation(

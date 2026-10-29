@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -90,9 +90,10 @@ _REPLAY_LOCKS: dict[str, asyncio.Lock] = {}
 _PROCESSING_LEASE = timedelta(minutes=5)
 
 
-@dataclass(frozen=True, slots=True)
-class _Observation:
+class _Observation(BaseModel):
     """Lifecycle result facts needed by webhook side-effect orchestration."""
+
+    model_config = ConfigDict(frozen=True)
 
     eligible: bool
     applied: bool
@@ -595,7 +596,7 @@ class WebhookService:
             return Success("skipped")
         observed = await self._observe_subscription(
             subscription,
-            SubscriptionAuthenticated(self._metadata(event_id, entity)),
+            SubscriptionAuthenticated(metadata=self._metadata(event_id, entity)),
             event_id=event_id,
             event_type=WebhookEventType.SUBSCRIPTION_AUTHENTICATED.value,
         )
@@ -628,9 +629,9 @@ class WebhookService:
         observed = await self._observe_subscription(
             subscription,
             SubscriptionActivated(
-                self._metadata(event_id, entity),
-                self._parse_datetime(entity.get("current_start")),
-                self._parse_datetime(entity.get("current_end")),
+                metadata=self._metadata(event_id, entity),
+                period_start=self._parse_datetime(entity.get("current_start")),
+                period_end=self._parse_datetime(entity.get("current_end")),
             ),
             event_id=event_id,
             event_type=WebhookEventType.SUBSCRIPTION_ACTIVATED.value,
@@ -654,9 +655,9 @@ class WebhookService:
         observed = await self._observe_subscription(
             subscription,
             SubscriptionCharged(
-                self._metadata(event_id, entity),
-                self._parse_datetime(entity.get("current_start")),
-                self._parse_datetime(entity.get("current_end")),
+                metadata=self._metadata(event_id, entity),
+                period_start=self._parse_datetime(entity.get("current_start")),
+                period_end=self._parse_datetime(entity.get("current_end")),
             ),
             event_id=event_id,
             event_type=WebhookEventType.SUBSCRIPTION_CHARGED.value,
@@ -728,7 +729,7 @@ class WebhookService:
         *,
         event_id: str,
         event_type: str,
-        event_factory: Callable[[EventMetadata], VerifiedBillingEvent],
+        event_factory: Callable[..., VerifiedBillingEvent],
         audit_action: str | None = None,
         replay: bool = False,
     ) -> WebhookResult[str]:
@@ -737,7 +738,7 @@ class WebhookService:
         subscription = await self._find_subscription_by_entity(entity)
         if subscription is None:
             return Success("skipped")
-        event = event_factory(self._metadata(event_id, entity))
+        event = event_factory(metadata=self._metadata(event_id, entity))
         observed = await self._observe_subscription(
             subscription, event, event_id=event_id, event_type=event_type
         )
@@ -786,7 +787,7 @@ class WebhookService:
         observed = await self._observe_subscription(
             subscription,
             PaymentCaptured(
-                self._metadata(event_id, entity),
+                metadata=self._metadata(event_id, entity),
                 payment_id=rz_payment_id,
                 amount_paisa=amount,
                 currency=currency,
@@ -930,7 +931,9 @@ class WebhookService:
                         details={"invoice_id": str(invoice.id), "manual_review": True},
                     )
                 )
-            receipt = ProviderReceipt(refund_id, payment.razorpay_payment_id, amount)
+            receipt = ProviderReceipt(
+                provider_refund_id=refund_id, payment_id=payment.razorpay_payment_id, amount=amount
+            )
         try:
             applied = await apply_settled(
                 invoice.id,
@@ -1317,7 +1320,7 @@ class WebhookService:
         rz_payment_id = entity.get("id")
         observed = await self._observe_subscription(
             subscription,
-            PaymentFailed(self._metadata(event_id, entity), payment_id=str(rz_payment_id or "")),
+            PaymentFailed(metadata=self._metadata(event_id, entity), payment_id=str(rz_payment_id or "")),
             event_id=event_id,
             event_type=WebhookEventType.PAYMENT_FAILED.value,
         )

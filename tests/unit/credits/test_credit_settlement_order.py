@@ -68,7 +68,7 @@ async def test_apply_settled_rejects_mismatched_receipt_before_opening_transacti
         invoice_id,
         "user-1",
         _plan(invoice_id),
-        ProviderReceipt("rfnd-1", "pay-1", 299),
+        ProviderReceipt(provider_refund_id="rfnd-1", payment_id="pay-1", amount=299),
         payment_id="pay-1",
     )
 
@@ -98,7 +98,10 @@ async def test_webhook_settles_provider_before_local_credit_apply() -> None:
     payment_service = SimpleNamespace(
         settle_credit_application=AsyncMock(
             side_effect=lambda *_args, **_kwargs: (
-                order.append("provider") or Success(ProviderReceipt("rfnd-1", "pay-1", 300))
+                order.append("provider")
+                or Success(
+                    ProviderReceipt(provider_refund_id="rfnd-1", payment_id="pay-1", amount=300)
+                )
             )
         )
     )
@@ -251,8 +254,8 @@ async def test_webhook_retry_after_receipt_crash_applies_credit_once() -> None:
                     user_id="user-1",
                     plan_id="plan-local",
                     state=ActiveState(
-                        datetime(2026, 10, 1, tzinfo=UTC),
-                        datetime(2026, 11, 1, tzinfo=UTC),
+                        period_start=datetime(2026, 10, 1, tzinfo=UTC),
+                        period_end=datetime(2026, 11, 1, tzinfo=UTC),
                     ),
                     version=1,
                 ),

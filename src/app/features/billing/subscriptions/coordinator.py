@@ -16,10 +16,10 @@ as a coordinator test adapter.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast, override
 
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Result, Success
 
 from ..exceptions import (
@@ -46,49 +46,43 @@ from ..providers import (
     ObserveSubscriptionOperation,
     PauseSubscriptionOperation,
     ProviderCustomer,
+    ProviderError,
     ProviderManualReviewRequiredError,
+    ProviderOperation,
     ProviderOutcomeUnknownError,
     ProviderPaymentLink,
     ProviderSubscriptionState,
+    ProviderSuccess,
+    ProviderValue,
     ResumeSubscriptionOperation,
 )
 from .lifecycle import (
     EffectKind,
     PaymentCaptured,
     PaymentFailed,
+    PolicyContext,
     RemoteSyncState,
     SubscriptionActivated,
     SubscriptionAuthenticated,
     SubscriptionCancelled,
     SubscriptionCharged,
+    SubscriptionCommand,
     SubscriptionHalted,
     SubscriptionMachine,
     SubscriptionPaused,
     SubscriptionResumed,
+    SubscriptionSnapshot,
     TransitionOutcome,
+    TransitionPlan,
+    VerifiedBillingEvent,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..providers import (
-        BillingProvider,
-        ProviderError,
-        ProviderOperation,
-        ProviderOperationKind,
-        ProviderSuccess,
-        ProviderValue,
-    )
+    from ..providers import BillingProvider, ProviderOperationKind
     from .exceptions import SubscriptionVersionConflictError
-    from .lifecycle import (
-        PendingUpgrade,
-        PolicyContext,
-        SubscriptionCommand,
-        SubscriptionSnapshot,
-        TransitionEffect,
-        TransitionPlan,
-        VerifiedBillingEvent,
-    )
+    from .lifecycle import PendingUpgrade, TransitionEffect
 
 
 type LifecycleCoordinatorResult[T] = Result[T, LifecycleCoordinatorError]
@@ -104,9 +98,10 @@ class IntentStatus(StrEnum):
     FAILED = "failed"
 
 
-@dataclass(frozen=True, slots=True)
-class ProviderOperationIntent:
+class ProviderOperationIntent(BaseModel):
     """A provider mutation/read recorded before it is sent."""
+
+    model_config = ConfigDict(frozen=True)
 
     key: str
     subscription_id: str | None
@@ -116,9 +111,10 @@ class ProviderOperationIntent:
     error: ProviderError | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class CapturedUpgrade:
+class CapturedUpgrade(BaseModel):
     """Verified economic fact that unlocks one staged plan upgrade."""
+
+    model_config = ConfigDict(frozen=True)
 
     subscription_id: str
     payment_link_key: str
@@ -129,8 +125,9 @@ class CapturedUpgrade:
     currency: str
 
 
-@dataclass(frozen=True, slots=True)
-class LifecycleRecord:
+class LifecycleRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     """The persistence port's aggregate projection.
 
     Provider IDs and customer facts are deliberately outside
@@ -149,15 +146,17 @@ class LifecycleRecord:
     desired_provider_plan_id: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class LifecycleRequest:
+class LifecycleRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     subscription_id: str
     input: SubscriptionCommand | VerifiedBillingEvent
     context: PolicyContext
 
 
-@dataclass(frozen=True, slots=True)
-class LifecyclePreviewRequest:
+class LifecyclePreviewRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     subscription_id: str
     input: SubscriptionCommand | VerifiedBillingEvent
     context: PolicyContext
@@ -169,8 +168,9 @@ class CoordinatorStatus(StrEnum):
     RECONCILED = "reconciled"
 
 
-@dataclass(frozen=True, slots=True)
-class LifecycleOutcome:
+class LifecycleOutcome(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     snapshot: SubscriptionSnapshot
     plan: TransitionPlan
     status: CoordinatorStatus
@@ -439,7 +439,9 @@ class SubscriptionLifecycleCoordinator:
             # projection rather than a stale pre-reconciliation snapshot.
             refreshed = await self._persistence.load(request_value.subscription_id)
             if isinstance(refreshed, Success):
-                return Success(replace(outcome.unwrap(), snapshot=refreshed.unwrap().snapshot))
+                return Success(
+                    outcome.unwrap().model_copy(update={"snapshot": refreshed.unwrap().snapshot})
+                )
             return outcome
         completed = await self.complete_captured_upgrade(
             CapturedUpgrade(
@@ -457,10 +459,11 @@ class SubscriptionLifecycleCoordinator:
         refreshed = await self._persistence.load(request_value.subscription_id)
         if isinstance(refreshed, Success):
             return Success(
-                replace(
-                    outcome.unwrap(),
-                    snapshot=refreshed.unwrap().snapshot,
-                    status=CoordinatorStatus.RECONCILED,
+                outcome.unwrap().model_copy(
+                    update={
+                        "snapshot": refreshed.unwrap().snapshot,
+                        "status": CoordinatorStatus.RECONCILED,
+                    }
                 )
             )
         return outcome
@@ -576,8 +579,8 @@ class SubscriptionLifecycleCoordinator:
         if intent.status is not IntentStatus.SUCCEEDED or intent.result is None:
             return _provider_error(
                 ProviderOutcomeUnknownError(
-                    operation.kind,
-                    operation.correlation_id,
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
                     message="Payment-link dependency has not reached a succeeded provider result",
                 ),
                 operation=operation.kind,
@@ -661,7 +664,9 @@ class SubscriptionLifecycleCoordinator:
                 result, _ = reconciled.unwrap()
                 if result is None:
                     return _provider_error(
-                        ProviderOutcomeUnknownError(operation.kind, operation.correlation_id),
+                        ProviderOutcomeUnknownError(
+                            operation=operation.kind, correlation_id=operation.correlation_id
+                        ),
                         operation=operation.kind,
                         correlation_id=operation.correlation_id,
                     )
@@ -677,7 +682,9 @@ class SubscriptionLifecycleCoordinator:
             result, _ = reconciled.unwrap()
             if result is None:
                 return _provider_error(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id),
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    ),
                     operation=operation.kind,
                     correlation_id=operation.correlation_id,
                 )
@@ -685,14 +692,18 @@ class SubscriptionLifecycleCoordinator:
         if intent.status is IntentStatus.FAILED:
             return _provider_error(
                 intent.error
-                or ProviderOutcomeUnknownError(operation.kind, operation.correlation_id),
+                or ProviderOutcomeUnknownError(
+                    operation=operation.kind, correlation_id=operation.correlation_id
+                ),
                 operation=operation.kind,
                 correlation_id=operation.correlation_id,
             )
         if intent.status is IntentStatus.MANUAL_REVIEW:
             return _provider_error(
                 intent.error
-                or ProviderManualReviewRequiredError(operation.kind, operation.correlation_id),
+                or ProviderManualReviewRequiredError(
+                    operation=operation.kind, correlation_id=operation.correlation_id
+                ),
                 operation=operation.kind,
                 correlation_id=operation.correlation_id,
             )
@@ -708,7 +719,7 @@ class SubscriptionLifecycleCoordinator:
                 else IntentStatus.FAILED
             )
             saved = await self._persistence.provider_outcome(
-                replace(intent, status=status, error=result.failure())
+                intent.model_copy(update={"status": status, "error": result.failure()})
             )
             if isinstance(saved, Failure):
                 return saved
@@ -724,7 +735,7 @@ class SubscriptionLifecycleCoordinator:
             )
         success = result.unwrap()
         saved = await self._persistence.provider_outcome(
-            replace(intent, status=IntentStatus.SUCCEEDED, result=success)
+            intent.model_copy(update={"status": IntentStatus.SUCCEEDED, "result": success})
         )
         if isinstance(saved, Failure):
             return saved
@@ -963,11 +974,11 @@ class SubscriptionLifecycleCoordinator:
         ):
             return _provider_error(
                 ProviderOutcomeUnknownError(
-                    ObserveSubscriptionOperation(
+                    operation=ObserveSubscriptionOperation(
                         provider_subscription_id=record.provider_subscription_id,
                         correlation_id=f"{remote_key}:observe",
                     ).kind,
-                    f"{remote_key}:observe",
+                    correlation_id=f"{remote_key}:observe",
                     message="Provider plan observation does not match captured upgrade",
                 ),
                 operation=ObserveSubscriptionOperation(
@@ -1012,7 +1023,9 @@ class SubscriptionLifecycleCoordinator:
                     source="subscription_lifecycle_coordinator",
                 )
             )
-        return Success(LifecycleRequest(subscription_id, request, context))
+        return Success(
+            LifecycleRequest(subscription_id=subscription_id, input=request, context=context)
+        )
 
     async def _run(  # noqa: PLR0912,PLR0914 -- orchestration stages are explicit
         self,
@@ -1118,15 +1131,16 @@ class SubscriptionLifecycleCoordinator:
             # Bind it to the snapshot once, before either is persisted, rather
             # than reconstructing the key in a later webhook path.
             payment_link_key = payment_link_intents[0].key
-            plan = replace(
-                plan,
-                after=replace(
-                    plan.after,
-                    pending_upgrade=replace(
-                        pending_upgrade,
-                        payment_link_key=payment_link_key,
-                    ),
-                ),
+            plan = plan.model_copy(
+                update={
+                    "after": plan.after.model_copy(
+                        update={
+                            "pending_upgrade": pending_upgrade.model_copy(
+                                update={"payment_link_key": payment_link_key}
+                            )
+                        }
+                    )
+                }
             )
         staged = await self._persistence.stage(
             record,
@@ -1183,7 +1197,11 @@ class SubscriptionLifecycleCoordinator:
         )
         if isinstance(saved, Failure):
             return saved
-        return Success(replace(saved.unwrap(), status=CoordinatorStatus.SKIPPED, plan=outcome.plan))
+        return Success(
+            saved.unwrap().model_copy(
+                update={"status": CoordinatorStatus.SKIPPED, "plan": outcome.plan}
+            )
+        )
 
     def _translate_effects(
         self,
@@ -1379,7 +1397,9 @@ class SubscriptionLifecycleCoordinator:
     ) -> LifecycleCoordinatorResult[tuple[ProviderSuccess[ProviderValue] | None, bool]]:
         if intent.subscription_id is None:
             return _provider_error(
-                ProviderOutcomeUnknownError(intent.operation.kind, intent.operation.correlation_id),
+                ProviderOutcomeUnknownError(
+                    operation=intent.operation.kind, correlation_id=intent.operation.correlation_id
+                ),
                 operation=intent.operation.kind,
                 correlation_id=intent.operation.correlation_id,
             )
@@ -1393,8 +1413,8 @@ class SubscriptionLifecycleCoordinator:
                 if saved_intent.result is None:
                     return _provider_error(
                         ProviderOutcomeUnknownError(
-                            saved_intent.operation.kind,
-                            saved_intent.operation.correlation_id,
+                            operation=saved_intent.operation.kind,
+                            correlation_id=saved_intent.operation.correlation_id,
                         ),
                         operation=saved_intent.operation.kind,
                         correlation_id=saved_intent.operation.correlation_id,
@@ -1433,7 +1453,8 @@ class SubscriptionLifecycleCoordinator:
             return _provider_error(
                 saved_intent.error
                 or ProviderOutcomeUnknownError(
-                    intent.operation.kind, intent.operation.correlation_id
+                    operation=intent.operation.kind,
+                    correlation_id=intent.operation.correlation_id,
                 ),
                 operation=intent.operation.kind,
                 correlation_id=intent.operation.correlation_id,
@@ -1452,18 +1473,19 @@ class SubscriptionLifecycleCoordinator:
         result = await self._provider.execute(intent.operation)
         if isinstance(result, Failure):
             recorded = await self._persistence.provider_outcome(
-                replace(
-                    intent,
-                    status=(
-                        IntentStatus.UNKNOWN
-                        if isinstance(result.failure(), ProviderOutcomeUnknownError)
-                        else IntentStatus.TRANSIENT_FAILURE
-                        if result.failure().retryable
-                        else IntentStatus.MANUAL_REVIEW
-                        if result.failure().requires_reconciliation
-                        else IntentStatus.FAILED
-                    ),
-                    error=result.failure(),
+                intent.model_copy(
+                    update={
+                        "status": (
+                            IntentStatus.UNKNOWN
+                            if isinstance(result.failure(), ProviderOutcomeUnknownError)
+                            else IntentStatus.TRANSIENT_FAILURE
+                            if result.failure().retryable
+                            else IntentStatus.MANUAL_REVIEW
+                            if result.failure().requires_reconciliation
+                            else IntentStatus.FAILED
+                        ),
+                        "error": result.failure(),
+                    }
                 )
             )
             if isinstance(recorded, Failure):
@@ -1484,7 +1506,7 @@ class SubscriptionLifecycleCoordinator:
             )
         success = result.unwrap()
         recorded = await self._persistence.provider_outcome(
-            replace(intent, status=IntentStatus.SUCCEEDED, result=success)
+            intent.model_copy(update={"status": IntentStatus.SUCCEEDED, "result": success})
         )
         if isinstance(recorded, Failure):
             return recorded
@@ -1512,8 +1534,8 @@ class SubscriptionLifecycleCoordinator:
         if not isinstance(customer, ProviderCustomer):
             return _provider_error(
                 ProviderOutcomeUnknownError(
-                    intent.operation.kind,
-                    intent.operation.correlation_id,
+                    operation=intent.operation.kind,
+                    correlation_id=intent.operation.correlation_id,
                     message="Customer provisioning returned no provider customer",
                 ),
                 operation=intent.operation.kind,
@@ -1562,14 +1584,16 @@ class SubscriptionLifecycleCoordinator:
     ) -> LifecycleCoordinatorResult[tuple[ProviderSuccess[ProviderValue] | None, bool]]:
         operation = intent.operation
         marked = await self._persistence.provider_outcome(
-            replace(intent, status=IntentStatus.RECONCILIATION)
+            intent.model_copy(update={"status": IntentStatus.RECONCILIATION})
         )
         if isinstance(marked, Failure):
             return marked
         if isinstance(operation, CreateCustomerOperation):
             if record is None:
                 return _provider_error(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id),
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    ),
                     operation=operation.kind,
                     correlation_id=operation.correlation_id,
                 )
@@ -1580,7 +1604,7 @@ class SubscriptionLifecycleCoordinator:
             )
         elif isinstance(operation, CreateSubscriptionOperation):
             read: ProviderOperation = FindSubscriptionByCorrelationOperation(
-                operation.correlation_id
+                correlation_id=operation.correlation_id
             )
         elif isinstance(operation, CreateRefundOperation):
             read = FindRefundByCorrelationOperation(
@@ -1588,9 +1612,9 @@ class SubscriptionLifecycleCoordinator:
                 correlation_id=operation.correlation_id,
             )
         elif isinstance(operation, CreatePaymentLinkOperation):
-            read = FindPaymentLinkByCorrelationOperation(operation.correlation_id)
+            read = FindPaymentLinkByCorrelationOperation(correlation_id=operation.correlation_id)
         elif isinstance(operation, CreatePlanOperation):
-            read = FindPlanByCorrelationOperation(operation.correlation_id)
+            read = FindPlanByCorrelationOperation(correlation_id=operation.correlation_id)
         elif record is not None and record.provider_subscription_id is not None:
             read = ObserveSubscriptionOperation(
                 provider_subscription_id=record.provider_subscription_id,
@@ -1598,7 +1622,9 @@ class SubscriptionLifecycleCoordinator:
             )
         else:
             return _provider_error(
-                ProviderOutcomeUnknownError(operation.kind, operation.correlation_id),
+                ProviderOutcomeUnknownError(
+                    operation=operation.kind, correlation_id=operation.correlation_id
+                ),
                 operation=operation.kind,
                 correlation_id=operation.correlation_id,
             )
@@ -1621,15 +1647,15 @@ class SubscriptionLifecycleCoordinator:
                 # up.
                 return _provider_error(
                     ProviderOutcomeUnknownError(
-                        operation.kind,
-                        operation.correlation_id,
+                        operation=operation.kind,
+                        correlation_id=operation.correlation_id,
                         message="Provider plan has not converged to the requested target",
                     ),
                     operation=operation.kind,
                     correlation_id=operation.correlation_id,
                 )
         recorded = await self._persistence.provider_outcome(
-            replace(intent, status=IntentStatus.SUCCEEDED, result=success)
+            intent.model_copy(update={"status": IntentStatus.SUCCEEDED, "result": success})
         )
         if isinstance(recorded, Failure):
             return recorded
@@ -1660,7 +1686,7 @@ class InMemoryLifecyclePersistence(LifecyclePersistence):
         self.records = {
             key: record
             if record.desired_provider_plan_id or record.provider_plan_id
-            else replace(record, desired_provider_plan_id=record.snapshot.plan_id)
+            else record.model_copy(update={"desired_provider_plan_id": record.snapshot.plan_id})
             for key, record in (records or {}).items()
         }
         self.intents: dict[str, ProviderOperationIntent] = {}
@@ -1677,7 +1703,7 @@ class InMemoryLifecyclePersistence(LifecyclePersistence):
         self.records[record.snapshot.id] = (
             record
             if record.desired_provider_plan_id or record.provider_plan_id
-            else replace(record, desired_provider_plan_id=record.snapshot.plan_id)
+            else record.model_copy(update={"desired_provider_plan_id": record.snapshot.plan_id})
         )
 
     @override
@@ -1750,7 +1776,7 @@ class InMemoryLifecyclePersistence(LifecyclePersistence):
                     expected_version=expected_version,
                 )
             )
-        staged = replace(current, snapshot=after)
+        staged = current.model_copy(update={"snapshot": after})
         self.records[record.snapshot.id] = staged
         self.audit.extend(audit_effects)
         self.plans.setdefault(idempotency_key, plan)
@@ -1845,15 +1871,17 @@ class InMemoryLifecyclePersistence(LifecyclePersistence):
                     expected_version=expected_version,
                 )
             )
-        self.records[subscription_id] = replace(
-            record,
-            snapshot=replace(
-                record.snapshot,
-                observed_plan_id=observed_plan_id,
-                remote_sync=RemoteSyncState.SYNCED,
-                pending_upgrade=None,
-            ),
-            provider_plan_id=record.desired_provider_plan_id,
+        self.records[subscription_id] = record.model_copy(
+            update={
+                "snapshot": record.snapshot.model_copy(
+                    update={
+                        "observed_plan_id": observed_plan_id,
+                        "remote_sync": RemoteSyncState.SYNCED,
+                        "pending_upgrade": None,
+                    }
+                ),
+                "provider_plan_id": record.desired_provider_plan_id,
+            }
         )
         return Success(None)
 
@@ -1866,13 +1894,16 @@ class InMemoryLifecyclePersistence(LifecyclePersistence):
         if record is not None and intent.result is not None:
             value = intent.result.value
             if isinstance(value, ProviderSubscriptionState):
-                record = replace(
-                    record,
-                    provider_subscription_id=value.provider_subscription_id,
-                    provider_plan_id=value.plan_id or record.provider_plan_id,
+                record = record.model_copy(
+                    update={
+                        "provider_subscription_id": value.provider_subscription_id,
+                        "provider_plan_id": value.plan_id or record.provider_plan_id,
+                    }
                 )
             elif isinstance(value, ProviderCustomer):
-                record = replace(record, provider_customer_id=value.provider_customer_id)
+                record = record.model_copy(
+                    update={"provider_customer_id": value.provider_customer_id}
+                )
             if intent.subscription_id is not None:
                 self.records[intent.subscription_id] = record
         return Success(None)
@@ -1900,9 +1931,10 @@ class InMemoryLifecyclePersistence(LifecyclePersistence):
         state = (
             RemoteSyncState.RETRYABLE_FAILURE if retryable else RemoteSyncState.PERMANENT_FAILURE
         )
-        self.records[subscription_id] = replace(
-            record,
-            snapshot=replace(record.snapshot, remote_sync=state),
+        self.records[subscription_id] = record.model_copy(
+            update={
+                "snapshot": record.snapshot.model_copy(update={"remote_sync": state}),
+            }
         )
         return Success(None)
 
@@ -1935,27 +1967,35 @@ class InMemoryLifecyclePersistence(LifecyclePersistence):
             for result in provider_results:
                 if isinstance(result.value, ProviderSubscriptionState):
                     provider_plan = result.value.plan_id or provider_plan
-        finalized_snapshot = replace(
-            record.snapshot,
-            remote_sync=(
-                RemoteSyncState.SYNCED
-                if sync_provider and reconciled
-                else record.snapshot.remote_sync
-            ),
-            observed_plan_id=(
-                provider_plan or record.snapshot.observed_plan_id
-                if sync_provider and reconciled
-                else record.snapshot.observed_plan_id
-            ),
-            # Provider acknowledgement is an integration fact on the already
-            # staged lifecycle version; it must not create a second logical
-            # transition or make optimistic command versions skip numbers.
-            version=record.snapshot.version,
+        finalized_snapshot = record.snapshot.model_copy(
+            update={
+                "remote_sync": (
+                    RemoteSyncState.SYNCED
+                    if sync_provider and reconciled
+                    else record.snapshot.remote_sync
+                ),
+                "observed_plan_id": (
+                    provider_plan or record.snapshot.observed_plan_id
+                    if sync_provider and reconciled
+                    else record.snapshot.observed_plan_id
+                ),
+                # Provider acknowledgement is an integration fact on the already
+                # staged lifecycle version; it must not create a second logical
+                # transition or make optimistic command versions skip numbers.
+                "version": record.snapshot.version,
+            }
         )
-        finalized = replace(record, snapshot=finalized_snapshot, provider_plan_id=provider_plan)
+        finalized = record.model_copy(
+            update={"snapshot": finalized_snapshot, "provider_plan_id": provider_plan}
+        )
         self.records[subscription_id] = finalized
         status = CoordinatorStatus.RECONCILED if reconciled else CoordinatorStatus.APPLIED
-        outcome = LifecycleOutcome(finalized_snapshot, plan, status, provider_results)
+        outcome = LifecycleOutcome(
+            snapshot=finalized_snapshot,
+            plan=plan,
+            status=status,
+            provider_results=provider_results,
+        )
         self.commands[idempotency_key] = outcome
         return Success(outcome)
 

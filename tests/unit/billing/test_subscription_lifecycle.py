@@ -69,7 +69,7 @@ def test_state_graph_is_enforced_by_the_public_planner() -> None:
     machine = SubscriptionMachine()
     result = machine.plan(
         _snapshot(CreatedState()),
-        SubscriptionActivated(_event_metadata()),
+        SubscriptionActivated(metadata=_event_metadata()),
         PolicyContext(now=NOW),
     )
 
@@ -81,7 +81,7 @@ def test_authenticated_then_activated_preserves_paid_entitlement_boundary() -> N
     machine = SubscriptionMachine()
     authenticated = machine.plan(
         _snapshot(CreatedState()),
-        SubscriptionAuthenticated(_event_metadata()),
+        SubscriptionAuthenticated(metadata=_event_metadata()),
         PolicyContext(now=NOW),
     ).unwrap()
     assert isinstance(authenticated.after.state, AuthenticatedState)
@@ -89,7 +89,9 @@ def test_authenticated_then_activated_preserves_paid_entitlement_boundary() -> N
 
     activated = machine.plan(
         authenticated.after,
-        SubscriptionActivated(_event_metadata(event_id="event-2"), START, END),
+        SubscriptionActivated(
+            metadata=_event_metadata(event_id="event-2"), period_start=START, period_end=END
+        ),
         PolicyContext(now=NOW),
     ).unwrap()
     assert isinstance(activated.after.state, ActiveState)
@@ -98,11 +100,13 @@ def test_authenticated_then_activated_preserves_paid_entitlement_boundary() -> N
 
 def test_active_same_state_payment_event_is_a_fact_update_not_invalid_transition() -> None:
     machine = SubscriptionMachine()
-    snapshot = _snapshot(ActiveState(START, END))
+    snapshot = _snapshot(ActiveState(period_start=START, period_end=END))
     result = machine.plan(
         snapshot,
         SubscriptionCharged(
-            _event_metadata(), START + timedelta(days=31), END + timedelta(days=31)
+            metadata=_event_metadata(),
+            period_start=START + timedelta(days=31),
+            period_end=END + timedelta(days=31),
         ),
         PolicyContext(now=NOW),
     ).unwrap()
@@ -115,10 +119,12 @@ def test_active_same_state_payment_event_is_a_fact_update_not_invalid_transition
 
 def test_replayed_activation_is_deterministic_skip_without_effects() -> None:
     machine = SubscriptionMachine()
-    snapshot = _snapshot(ActiveState(START, END), version=4)
+    snapshot = _snapshot(ActiveState(period_start=START, period_end=END), version=4)
     result = machine.plan(
         snapshot,
-        SubscriptionActivated(_event_metadata(replay=True), START, END),
+        SubscriptionActivated(
+            metadata=_event_metadata(replay=True), period_start=START, period_end=END
+        ),
         PolicyContext(now=NOW),
     ).unwrap()
 
@@ -130,8 +136,8 @@ def test_replayed_activation_is_deterministic_skip_without_effects() -> None:
 def test_user_status_change_is_immediate_but_remote_sync_is_pending() -> None:
     machine = SubscriptionMachine()
     result = machine.plan(
-        _snapshot(ActiveState(START, END)),
-        CancelSubscription(_command_metadata(), cancel_at_period_end=False),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        CancelSubscription(metadata=_command_metadata(), cancel_at_period_end=False),
         PolicyContext(now=NOW),
     ).unwrap()
 
@@ -144,8 +150,8 @@ def test_period_end_cancellation_keeps_active_entitlement_and_records_intent() -
     result = (
         SubscriptionMachine()
         .plan(
-            _snapshot(ActiveState(START, END)),
-            CancelSubscription(_command_metadata(), cancel_at_period_end=True),
+            _snapshot(ActiveState(period_start=START, period_end=END)),
+            CancelSubscription(metadata=_command_metadata(), cancel_at_period_end=True),
             PolicyContext(now=NOW),
         )
         .unwrap()
@@ -164,7 +170,7 @@ def test_create_marks_remote_sync_pending_and_emits_audit() -> None:
         SubscriptionMachine()
         .plan(
             _snapshot(CreatedState()),
-            CreateSubscription(_command_metadata(), plan_id="plan-1"),
+            CreateSubscription(metadata=_command_metadata(), plan_id="plan-1"),
             PolicyContext(now=NOW),
         )
         .unwrap()
@@ -177,10 +183,10 @@ def test_create_marks_remote_sync_pending_and_emits_audit() -> None:
 
 def test_stale_command_returns_conflict_plan_without_effects() -> None:
     machine = SubscriptionMachine()
-    snapshot = _snapshot(ActiveState(START, END), version=3)
+    snapshot = _snapshot(ActiveState(period_start=START, period_end=END), version=3)
     result = machine.plan(
         snapshot,
-        CancelSubscription(_command_metadata(version=2)),
+        CancelSubscription(metadata=_command_metadata(version=2)),
         PolicyContext(now=NOW),
     ).unwrap()
 
@@ -193,19 +199,25 @@ def test_stale_command_returns_conflict_plan_without_effects() -> None:
 @pytest.mark.parametrize(
     "event",
     [
-        SubscriptionAuthenticated(_event_metadata(replay=True)),
-        SubscriptionActivated(_event_metadata(replay=True), START, END),
-        SubscriptionCharged(_event_metadata(replay=True), START, END),
-        PaymentCaptured(_event_metadata(replay=True), payment_id="pay-1", amount_paisa=1000),
-        PaymentFailed(_event_metadata(replay=True), payment_id="pay-2"),
-        SubscriptionPaused(_event_metadata(replay=True)),
-        SubscriptionResumed(_event_metadata(replay=True)),
-        SubscriptionHalted(_event_metadata(replay=True)),
-        SubscriptionCancelled(_event_metadata(replay=True)),
+        SubscriptionAuthenticated(metadata=_event_metadata(replay=True)),
+        SubscriptionActivated(
+            metadata=_event_metadata(replay=True), period_start=START, period_end=END
+        ),
+        SubscriptionCharged(
+            metadata=_event_metadata(replay=True), period_start=START, period_end=END
+        ),
+        PaymentCaptured(
+            metadata=_event_metadata(replay=True), payment_id="pay-1", amount_paisa=1000
+        ),
+        PaymentFailed(metadata=_event_metadata(replay=True), payment_id="pay-2"),
+        SubscriptionPaused(metadata=_event_metadata(replay=True)),
+        SubscriptionResumed(metadata=_event_metadata(replay=True)),
+        SubscriptionHalted(metadata=_event_metadata(replay=True)),
+        SubscriptionCancelled(metadata=_event_metadata(replay=True)),
     ],
 )
 def test_every_replayed_event_returns_original_snapshot_without_effects(event: object) -> None:
-    snapshot = _snapshot(ActiveState(START, END), version=7)
+    snapshot = _snapshot(ActiveState(period_start=START, period_end=END), version=7)
     result = SubscriptionMachine().plan(snapshot, event, PolicyContext(now=NOW))  # type: ignore[arg-type]
 
     assert result.unwrap().outcome is TransitionOutcome.SKIP
@@ -215,7 +227,9 @@ def test_every_replayed_event_returns_original_snapshot_without_effects(event: o
 
 
 def test_event_timestamp_must_be_timezone_aware() -> None:
-    event = SubscriptionAuthenticated(EventMetadata("event-1", NOW.replace(tzinfo=None)))
+    event = SubscriptionAuthenticated(
+        metadata=EventMetadata(event_id="event-1", occurred_at=NOW.replace(tzinfo=None))
+    )
 
     result = SubscriptionMachine().plan(_snapshot(CreatedState()), event, PolicyContext(now=NOW))
 
@@ -226,8 +240,8 @@ def test_event_timestamp_must_be_timezone_aware() -> None:
 @pytest.mark.parametrize("duration_days", [0, 366])
 def test_pause_duration_is_bounded_inside_the_kernel(duration_days: int) -> None:
     result = SubscriptionMachine().plan(
-        _snapshot(ActiveState(START, END)),
-        PauseSubscription(_command_metadata(), duration_days=duration_days),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        PauseSubscription(metadata=_command_metadata(), duration_days=duration_days),
         PolicyContext(now=NOW),
     )
 
@@ -246,8 +260,10 @@ def test_plan_change_checks_both_period_bounds_without_financial_context(
     effective_at: datetime, message_fragment: str
 ) -> None:
     result = SubscriptionMachine().plan(
-        _snapshot(ActiveState(START, END)),
-        ChangeSubscriptionPlan(_command_metadata(), "plan-2", effective_at),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        ChangeSubscriptionPlan(
+            metadata=_command_metadata(), new_plan_id="plan-2", effective_at=effective_at
+        ),
         PolicyContext(now=NOW),
     )
 
@@ -263,8 +279,10 @@ def test_plan_change_requires_both_or_neither_financial_amount(
     current_amount: int | None, target_amount: int | None
 ) -> None:
     result = SubscriptionMachine().plan(
-        _snapshot(ActiveState(START, END)),
-        ChangeSubscriptionPlan(_command_metadata(), "plan-2", NOW),
+        _snapshot(ActiveState(period_start=START, period_end=END)),
+        ChangeSubscriptionPlan(
+            metadata=_command_metadata(), new_plan_id="plan-2", effective_at=NOW
+        ),
         PolicyContext(
             now=NOW,
             current_plan_amount=current_amount,
@@ -277,12 +295,12 @@ def test_plan_change_requires_both_or_neither_financial_amount(
 
 
 def test_omitted_period_facts_are_preserved_and_noop_does_not_bump_version() -> None:
-    snapshot = _snapshot(ActiveState(START, END), version=3)
+    snapshot = _snapshot(ActiveState(period_start=START, period_end=END), version=3)
     result = (
         SubscriptionMachine()
         .plan(
             snapshot,
-            SubscriptionCharged(_event_metadata(), None, None),
+            SubscriptionCharged(metadata=_event_metadata(), period_start=None, period_end=None),
             PolicyContext(now=NOW),
         )
         .unwrap()
@@ -295,13 +313,15 @@ def test_omitted_period_facts_are_preserved_and_noop_does_not_bump_version() -> 
 
 
 def test_regressive_period_facts_are_skipped_without_erasing_current_facts() -> None:
-    snapshot = _snapshot(ActiveState(START, END), version=3)
+    snapshot = _snapshot(ActiveState(period_start=START, period_end=END), version=3)
     result = (
         SubscriptionMachine()
         .plan(
             snapshot,
             SubscriptionCharged(
-                _event_metadata(), START - timedelta(days=1), END - timedelta(days=1)
+                metadata=_event_metadata(),
+                period_start=START - timedelta(days=1),
+                period_end=END - timedelta(days=1),
             ),
             PolicyContext(now=NOW),
         )
@@ -318,7 +338,7 @@ def test_paused_and_halted_subscriptions_do_not_reactivate_on_payment_capture() 
     for state in (PausedState(start=NOW), HaltedState()):
         result = machine.plan(
             _snapshot(state),
-            PaymentCaptured(_event_metadata(), payment_id="pay-1", amount_paisa=1000),
+            PaymentCaptured(metadata=_event_metadata(), payment_id="pay-1", amount_paisa=1000),
             PolicyContext(now=NOW),
         ).unwrap()
         assert result.outcome is TransitionOutcome.SKIP
@@ -331,14 +351,16 @@ def test_plan_change_updates_desired_plan_without_overwriting_observed_plan() ->
         id="sub-1",
         user_id="user-1",
         plan_id="plan-1",
-        state=ActiveState(START, END),
+        state=ActiveState(period_start=START, period_end=END),
         observed_plan_id="plan-1",
     )
     result = (
         SubscriptionMachine()
         .plan(
             snapshot,
-            ChangeSubscriptionPlan(_command_metadata(), "plan-2", NOW),
+            ChangeSubscriptionPlan(
+                metadata=_command_metadata(), new_plan_id="plan-2", effective_at=NOW
+            ),
             PolicyContext(now=NOW),
         )
         .unwrap()
@@ -395,9 +417,9 @@ def test_cancellation_full_policy_refunds_unused_value_not_full_capture() -> Non
 @pytest.mark.parametrize(
     "event",
     [
-        PaymentCaptured(_event_metadata(), payment_id="pay-1", amount_paisa=1000),
-        PaymentFailed(_event_metadata(), payment_id="pay-2"),
-        SubscriptionCancelled(_event_metadata()),
+        PaymentCaptured(metadata=_event_metadata(), payment_id="pay-1", amount_paisa=1000),
+        PaymentFailed(metadata=_event_metadata(), payment_id="pay-2"),
+        SubscriptionCancelled(metadata=_event_metadata()),
     ],
 )
 def test_terminal_cancelled_state_never_reactivates_from_provider_events(event: object) -> None:

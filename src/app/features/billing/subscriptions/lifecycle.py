@@ -7,12 +7,12 @@ plan that an outer transaction executor may persist and dispatch.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
 
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
 from .exceptions import (
@@ -22,9 +22,6 @@ from .exceptions import (
 )
 
 if TYPE_CHECKING:
-    from datetime import datetime
-    from typing import Literal
-
     from .exceptions import SubscriptionResult
 
 
@@ -39,47 +36,54 @@ class SubscriptionStateKind(StrEnum):
     EXPIRED = "expired"
 
 
-@dataclass(frozen=True, slots=True)
-class CreatedState:
+class CreatedState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     kind: Literal[SubscriptionStateKind.CREATED] = SubscriptionStateKind.CREATED
 
 
-@dataclass(frozen=True, slots=True)
-class AuthenticatedState:
+class AuthenticatedState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     kind: Literal[SubscriptionStateKind.AUTHENTICATED] = SubscriptionStateKind.AUTHENTICATED
 
 
-@dataclass(frozen=True, slots=True)
-class ActiveState:
+class ActiveState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     period_start: datetime | None = None
     period_end: datetime | None = None
     kind: Literal[SubscriptionStateKind.ACTIVE] = SubscriptionStateKind.ACTIVE
 
 
-@dataclass(frozen=True, slots=True)
-class PastDueState:
+class PastDueState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     retry_count: int = 0
     period_start: datetime | None = None
     period_end: datetime | None = None
     kind: Literal[SubscriptionStateKind.PAST_DUE] = SubscriptionStateKind.PAST_DUE
 
 
-@dataclass(frozen=True, slots=True)
-class HaltedState:
+class HaltedState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     period_start: datetime | None = None
     period_end: datetime | None = None
     kind: Literal[SubscriptionStateKind.HALTED] = SubscriptionStateKind.HALTED
 
 
-@dataclass(frozen=True, slots=True)
-class CancelledState:
+class CancelledState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     at: datetime | None = None
     at_period_end: bool = False
     kind: Literal[SubscriptionStateKind.CANCELLED] = SubscriptionStateKind.CANCELLED
 
 
-@dataclass(frozen=True, slots=True)
-class PausedState:
+class PausedState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     start: datetime | None = None
     end: datetime | None = None
     period_start: datetime | None = None
@@ -87,8 +91,9 @@ class PausedState:
     kind: Literal[SubscriptionStateKind.PAUSED] = SubscriptionStateKind.PAUSED
 
 
-@dataclass(frozen=True, slots=True)
-class ExpiredState:
+class ExpiredState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     kind: Literal[SubscriptionStateKind.EXPIRED] = SubscriptionStateKind.EXPIRED
 
 
@@ -111,16 +116,18 @@ class RemoteSyncState(StrEnum):
     PERMANENT_FAILURE = "permanent_failure"
 
 
-@dataclass(frozen=True, slots=True)
-class CancellationIntent:
+class CancellationIntent(BaseModel):
     """A local cancellation request, independent from observed remote state."""
+
+    model_config = ConfigDict(frozen=True)
 
     requested_at: datetime
     at_period_end: bool
 
 
-@dataclass(frozen=True, slots=True)
-class PendingUpgrade:
+class PendingUpgrade(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     """Economic dependency for a desired upgrade awaiting capture.
 
     The local plan is intentionally advanced before payment, but this durable
@@ -135,9 +142,10 @@ class PendingUpgrade:
     currency: str
 
 
-@dataclass(frozen=True, slots=True)
-class SubscriptionSnapshot:
+class SubscriptionSnapshot(BaseModel):
     """Immutable domain snapshot passed to the pure state machine."""
+
+    model_config = ConfigDict(frozen=True)
 
     id: str
     user_id: str
@@ -155,9 +163,10 @@ class SubscriptionSnapshot:
         return self.pending_upgrade is None and isinstance(self.state, (ActiveState, PastDueState))
 
 
-@dataclass(frozen=True, slots=True)
-class PolicyContext:
+class PolicyContext(BaseModel):
     """Explicit clock and optional financial facts used by planning."""
+
+    model_config = ConfigDict(frozen=True)
 
     now: datetime
     current_plan_amount: int | None = None
@@ -172,38 +181,44 @@ class PolicyContext:
     tax_rate: Decimal = Decimal("0.18")
 
 
-@dataclass(frozen=True, slots=True)
-class CommandMetadata:
+class CommandMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     request_id: str
     expected_version: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class PauseSubscription:
+class PauseSubscription(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: CommandMetadata
     duration_days: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class ResumeSubscription:
+class ResumeSubscription(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: CommandMetadata
 
 
-@dataclass(frozen=True, slots=True)
-class CancelSubscription:
+class CancelSubscription(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: CommandMetadata
     cancel_at_period_end: bool = True
 
 
-@dataclass(frozen=True, slots=True)
-class ChangeSubscriptionPlan:
+class ChangeSubscriptionPlan(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: CommandMetadata
     new_plan_id: str
     effective_at: datetime
 
 
-@dataclass(frozen=True, slots=True)
-class CreateSubscription:
+class CreateSubscription(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: CommandMetadata
     plan_id: str
 
@@ -217,64 +232,74 @@ type SubscriptionCommand = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class EventMetadata:
+class EventMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     event_id: str
     occurred_at: datetime
     replay: bool = False
     expected_version: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SubscriptionAuthenticated:
+class SubscriptionAuthenticated(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: EventMetadata
 
 
-@dataclass(frozen=True, slots=True)
-class SubscriptionActivated:
-    metadata: EventMetadata
-    period_start: datetime | None = None
-    period_end: datetime | None = None
+class SubscriptionActivated(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-
-@dataclass(frozen=True, slots=True)
-class SubscriptionCharged:
     metadata: EventMetadata
     period_start: datetime | None = None
     period_end: datetime | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class PaymentCaptured:
+class SubscriptionCharged(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    metadata: EventMetadata
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+
+
+class PaymentCaptured(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: EventMetadata
     payment_id: str
     amount_paisa: int
     currency: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class PaymentFailed:
+class PaymentFailed(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: EventMetadata
     payment_id: str
 
 
-@dataclass(frozen=True, slots=True)
-class SubscriptionPaused:
+class SubscriptionPaused(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: EventMetadata
 
 
-@dataclass(frozen=True, slots=True)
-class SubscriptionResumed:
+class SubscriptionResumed(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: EventMetadata
 
 
-@dataclass(frozen=True, slots=True)
-class SubscriptionHalted:
+class SubscriptionHalted(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: EventMetadata
 
 
-@dataclass(frozen=True, slots=True)
-class SubscriptionCancelled:
+class SubscriptionCancelled(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     metadata: EventMetadata
 
 
@@ -306,16 +331,18 @@ class EffectKind(StrEnum):
     AUDIT = "audit"
 
 
-@dataclass(frozen=True, slots=True)
-class TransitionEffect:
+class TransitionEffect(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     kind: EffectKind
     operation: str
     idempotency_key: str
     values: tuple[tuple[str, object], ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class TransitionPlan:
+class TransitionPlan(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     outcome: TransitionOutcome
     before: SubscriptionSnapshot
     after: SubscriptionSnapshot
@@ -352,7 +379,9 @@ def _effect(
     key: str,
     **values: object,
 ) -> TransitionEffect:
-    return TransitionEffect(kind, operation, key, tuple(values.items()))
+    return TransitionEffect(
+        kind=kind, operation=operation, idempotency_key=key, values=tuple(values.items())
+    )
 
 
 def _validate_explicit_time(value: datetime, *, name: str) -> SubscriptionResult[datetime]:
@@ -460,10 +489,10 @@ class SubscriptionMachine:
             )
             return Success(
                 TransitionPlan(
-                    TransitionOutcome.CONFLICT,
-                    snapshot,
-                    snapshot,
-                    snapshot.version,
+                    outcome=TransitionOutcome.CONFLICT,
+                    before=snapshot,
+                    after=snapshot,
+                    expected_version=snapshot.version,
                     reason="expected_version_mismatch",
                     error=conflict,
                 )
@@ -507,8 +536,8 @@ class SubscriptionMachine:
     @staticmethod
     def _bump(plan: TransitionPlan) -> TransitionPlan:
         if plan.outcome is TransitionOutcome.APPLY:
-            after = replace(plan.after, version=plan.before.version + 1)
-            return replace(plan, after=after)
+            after = plan.after.model_copy(update={"version": plan.before.version + 1})
+            return plan.model_copy(update={"after": after})
         return plan
 
     @staticmethod
@@ -524,10 +553,10 @@ class SubscriptionMachine:
     ) -> SubscriptionResult[TransitionPlan]:
         return Success(
             TransitionPlan(
-                outcome,
-                before,
-                after,
-                before.version,
+                outcome=outcome,
+                before=before,
+                after=after,
+                expected_version=before.version,
                 effects=(
                     *_effects_for_change(before, after, operation, metadata_key),
                     *effects,
@@ -553,15 +582,16 @@ class SubscriptionMachine:
             if command.duration_days is not None
             else None
         )
-        after = replace(
-            before,
-            state=PausedState(
-                start=context.now,
-                end=end,
-                period_start=before.state.period_start,
-                period_end=before.state.period_end,
-            ),
-            remote_sync=RemoteSyncState.PENDING,
+        after = before.model_copy(
+            update={
+                "state": PausedState(
+                    start=context.now,
+                    end=end,
+                    period_start=before.state.period_start,
+                    period_end=before.state.period_end,
+                ),
+                "remote_sync": RemoteSyncState.PENDING,
+            }
         )
         return self._base(
             before,
@@ -582,10 +612,14 @@ class SubscriptionMachine:
     ) -> SubscriptionResult[TransitionPlan]:
         if not isinstance(before.state, PausedState):
             return Failure(_invalid_transition(before, SubscriptionStateKind.ACTIVE))
-        after = replace(
-            before,
-            state=ActiveState(before.state.period_start, before.state.period_end),
-            remote_sync=RemoteSyncState.PENDING,
+        after = before.model_copy(
+            update={
+                "state": ActiveState(
+                    period_start=before.state.period_start,
+                    period_end=before.state.period_end,
+                ),
+                "remote_sync": RemoteSyncState.PENDING,
+            }
         )
         return self._base(
             before,
@@ -611,17 +645,19 @@ class SubscriptionMachine:
             at_period_end=command.cancel_at_period_end,
         )
         if command.cancel_at_period_end:
-            after = replace(
-                before,
-                cancellation_intent=intent,
-                remote_sync=RemoteSyncState.PENDING,
+            after = before.model_copy(
+                update={
+                    "cancellation_intent": intent,
+                    "remote_sync": RemoteSyncState.PENDING,
+                }
             )
         else:
-            after = replace(
-                before,
-                state=CancelledState(at=context.now, at_period_end=False),
-                cancellation_intent=intent,
-                remote_sync=RemoteSyncState.PENDING,
+            after = before.model_copy(
+                update={
+                    "state": CancelledState(at=context.now, at_period_end=False),
+                    "cancellation_intent": intent,
+                    "remote_sync": RemoteSyncState.PENDING,
+                }
             )
         return self._base(
             before,
@@ -687,7 +723,9 @@ class SubscriptionMachine:
                     details={"effective_at": command.effective_at.isoformat()},
                 )
             )
-        after = replace(before, plan_id=command.new_plan_id, remote_sync=RemoteSyncState.PENDING)
+        after = before.model_copy(
+            update={"plan_id": command.new_plan_id, "remote_sync": RemoteSyncState.PENDING}
+        )
         effects: tuple[TransitionEffect, ...] = ()
         upgrade_requires_capture = False
         if context.current_plan_amount is not None and context.target_plan_amount is not None:
@@ -725,15 +763,16 @@ class SubscriptionMachine:
                 and context.target_provider_plan_id
                 and context.target_currency
             ):
-                after = replace(
-                    after,
-                    pending_upgrade=PendingUpgrade(
-                        payment_link_key=command.metadata.request_id,
-                        target_plan_id=command.new_plan_id,
-                        target_provider_plan_id=context.target_provider_plan_id,
-                        amount_paisa=proration.unwrap().amount_paisa,
-                        currency=context.target_currency,
-                    ),
+                after = after.model_copy(
+                    update={
+                        "pending_upgrade": PendingUpgrade(
+                            payment_link_key=command.metadata.request_id,
+                            target_plan_id=command.new_plan_id,
+                            target_provider_plan_id=context.target_provider_plan_id,
+                            amount_paisa=proration.unwrap().amount_paisa,
+                            currency=context.target_currency,
+                        ),
+                    }
                 )
         # An upgrade is an economic two-phase transition.  Stage the desired
         # local plan and payment-link intent now, but do not mutate the remote
@@ -763,7 +802,7 @@ class SubscriptionMachine:
     ) -> SubscriptionResult[TransitionPlan]:
         if not isinstance(before.state, CreatedState) or before.plan_id != command.plan_id:
             return Failure(_error("Subscription creation requires a CREATED snapshot", details={}))
-        after = replace(before, remote_sync=RemoteSyncState.PENDING)
+        after = before.model_copy(update={"remote_sync": RemoteSyncState.PENDING})
         return self._base(
             before,
             after,
@@ -803,7 +842,7 @@ class SubscriptionMachine:
             return Failure(_invalid_transition(before, SubscriptionStateKind.AUTHENTICATED))
         return self._base(
             before,
-            replace(before, state=AuthenticatedState()),
+            before.model_copy(update={"state": AuthenticatedState()}),
             operation="subscription_authenticated",
             metadata_key=event.metadata.event_id,
         )
@@ -820,9 +859,10 @@ class SubscriptionMachine:
             merged = facts.unwrap()
             if merged is None:
                 return self._skip(before, "stale_period_facts")
-            after = replace(
-                before,
-                state=ActiveState(*merged),
+            after = before.model_copy(
+                update={
+                    "state": ActiveState(period_start=merged[0], period_end=merged[1]),
+                }
             )
             return self._base(
                 before,
@@ -842,7 +882,9 @@ class SubscriptionMachine:
             return self._skip(before, "stale_period_facts")
         return self._base(
             before,
-            replace(before, state=ActiveState(*merged)),
+            before.model_copy(
+                update={"state": ActiveState(period_start=merged[0], period_end=merged[1])}
+            ),
             operation="subscription_activated",
             metadata_key=event.metadata.event_id,
         )
@@ -860,7 +902,9 @@ class SubscriptionMachine:
         merged = facts.unwrap()
         if merged is None:
             return self._skip(before, "stale_period_facts")
-        after = replace(before, state=ActiveState(*merged))
+        after = before.model_copy(
+            update={"state": ActiveState(period_start=merged[0], period_end=merged[1])}
+        )
         return self._base(
             before,
             after,
@@ -887,10 +931,13 @@ class SubscriptionMachine:
         if isinstance(before.state, ActiveState):
             state = before.state
         elif isinstance(before.state, PastDueState):
-            state = ActiveState(before.state.period_start, before.state.period_end)
+            state = ActiveState(
+                period_start=before.state.period_start,
+                period_end=before.state.period_end,
+            )
         else:
             return self._skip(before, "payment_without_paid_state")
-        after = replace(before, state=state)
+        after = before.model_copy(update={"state": state})
         return self._base(
             before,
             after,
@@ -925,13 +972,14 @@ class SubscriptionMachine:
             return Failure(_invalid_transition(before, SubscriptionStateKind.PAST_DUE))
         return self._base(
             before,
-            replace(
-                before,
-                state=PastDueState(
-                    retry_count=1,
-                    period_start=before.state.period_start,
-                    period_end=before.state.period_end,
-                ),
+            before.model_copy(
+                update={
+                    "state": PastDueState(
+                        retry_count=1,
+                        period_start=before.state.period_start,
+                        period_end=before.state.period_end,
+                    ),
+                }
             ),
             operation="payment_failed",
             metadata_key=event.metadata.event_id,
@@ -946,13 +994,14 @@ class SubscriptionMachine:
             return Failure(_invalid_transition(before, SubscriptionStateKind.PAUSED))
         return self._base(
             before,
-            replace(
-                before,
-                state=PausedState(
-                    start=event.metadata.occurred_at,
-                    period_start=before.state.period_start,
-                    period_end=before.state.period_end,
-                ),
+            before.model_copy(
+                update={
+                    "state": PausedState(
+                        start=event.metadata.occurred_at,
+                        period_start=before.state.period_start,
+                        period_end=before.state.period_end,
+                    ),
+                }
             ),
             operation="subscription_paused",
             metadata_key=event.metadata.event_id,
@@ -967,7 +1016,14 @@ class SubscriptionMachine:
             return Failure(_invalid_transition(before, SubscriptionStateKind.ACTIVE))
         return self._base(
             before,
-            replace(before, state=ActiveState(before.state.period_start, before.state.period_end)),
+            before.model_copy(
+                update={
+                    "state": ActiveState(
+                        period_start=before.state.period_start,
+                        period_end=before.state.period_end,
+                    )
+                }
+            ),
             operation="subscription_resumed",
             metadata_key=event.metadata.event_id,
         )
@@ -981,12 +1037,13 @@ class SubscriptionMachine:
             return Failure(_invalid_transition(before, SubscriptionStateKind.HALTED))
         return self._base(
             before,
-            replace(
-                before,
-                state=HaltedState(
-                    period_start=before.state.period_start,
-                    period_end=before.state.period_end,
-                ),
+            before.model_copy(
+                update={
+                    "state": HaltedState(
+                        period_start=before.state.period_start,
+                        period_end=before.state.period_end,
+                    ),
+                }
             ),
             operation="subscription_halted",
             metadata_key=event.metadata.event_id,
@@ -1001,7 +1058,7 @@ class SubscriptionMachine:
             return Failure(_invalid_transition(before, SubscriptionStateKind.CANCELLED))
         return self._base(
             before,
-            replace(before, state=CancelledState(at=event.metadata.occurred_at)),
+            before.model_copy(update={"state": CancelledState(at=event.metadata.occurred_at)}),
             operation="subscription_cancelled",
             metadata_key=event.metadata.event_id,
         )
@@ -1010,10 +1067,10 @@ class SubscriptionMachine:
     def _skip(before: SubscriptionSnapshot, reason: str) -> SubscriptionResult[TransitionPlan]:
         return Success(
             TransitionPlan(
-                TransitionOutcome.SKIP,
-                before,
-                before,
-                before.version,
+                outcome=TransitionOutcome.SKIP,
+                before=before,
+                after=before,
+                expected_version=before.version,
                 reason=reason,
             )
         )
@@ -1043,16 +1100,18 @@ def _effects_for_change(
     )
 
 
-@dataclass(frozen=True, slots=True)
-class ProrationDecision:
+class ProrationDecision(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     remaining_fraction: Decimal
     amount_paisa: int
     tax_paisa: int
     direction: Literal["upgrade", "downgrade", "no_change"]
 
 
-@dataclass(frozen=True, slots=True)
-class CancellationRefund:
+class CancellationRefund(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     amount_paisa: int
     remaining_fraction: Decimal
     policy: Literal["FULL", "PRO_RATA", "NONE"]
@@ -1128,7 +1187,11 @@ def calculate_proration(
             Decimal(1), rounding=ROUND_HALF_EVEN
         )
         tax = abs(amount) - int(base)
-    return Success(ProrationDecision(fraction, amount, tax, direction))
+    return Success(
+        ProrationDecision(
+            remaining_fraction=fraction, amount_paisa=amount, tax_paisa=tax, direction=direction
+        )
+    )
 
 
 def calculate_cancellation_refund(
@@ -1156,4 +1219,6 @@ def calculate_cancellation_refund(
                 Decimal(1), rounding=ROUND_HALF_EVEN
             )
         )
-    return Success(CancellationRefund(amount, fraction, policy))
+    return Success(
+        CancellationRefund(amount_paisa=amount, remaining_fraction=fraction, policy=policy)
+    )

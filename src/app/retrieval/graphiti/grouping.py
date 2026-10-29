@@ -13,11 +13,11 @@ it is stable across processes and has no dependence on URL/path escaping.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from graphiti_core.errors import GroupIdValidationError
 from graphiti_core.helpers import validate_group_id
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -33,9 +33,10 @@ _NOT_CANONICAL = "group_id is not a canonical Graphiti scope"
 _INVALID_SCOPE = "group_id contains an invalid Graphiti scope"
 
 
-@dataclass(frozen=True, slots=True)
-class GraphitiGroupScope:
+class GraphitiGroupScope(BaseModel):
     """The identity tuple represented by a Graphiti group ID."""
+
+    model_config = ConfigDict(frozen=True)
 
     tenant_id: str
     document_id: str
@@ -43,9 +44,10 @@ class GraphitiGroupScope:
     contract_index: int | None
 
 
-@dataclass(frozen=True, slots=True)
-class GraphitiDocumentScope:
+class GraphitiDocumentScope(BaseModel):
     """Authorized version plus the exact contracts visible for that version."""
+
+    model_config = ConfigDict(frozen=True)
 
     tenant_id: str
     document_id: str

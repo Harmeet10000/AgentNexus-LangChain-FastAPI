@@ -452,7 +452,13 @@ class PaymentService:
             type(
                 "_LegacyProviderResult",
                 (),
-                {"value": ProviderReceipt(refund_id, operation.payment_id, operation.amount)},
+                {
+                    "value": ProviderReceipt(
+                        provider_refund_id=refund_id,
+                        payment_id=operation.payment_id,
+                        amount=operation.amount,
+                    )
+                },
             )()
         )
 

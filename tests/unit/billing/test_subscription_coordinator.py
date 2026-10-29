@@ -1,6 +1,5 @@
 """Coordinator contract tests: callers know commands/events, never provider shapes."""
 
-from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -58,14 +57,14 @@ def _active_store() -> InMemoryLifecyclePersistence:
         id="sub-1",
         user_id="user-1",
         plan_id="plan-1",
-        state=ActiveState(START, END),
+        state=ActiveState(period_start=START, period_end=END),
         version=3,
         observed_plan_id="plan-1",
     )
     return InMemoryLifecyclePersistence(
         {
             "sub-1": LifecycleRecord(
-                snapshot,
+                snapshot=snapshot,
                 customer_email="user@example.test",
                 provider_customer_id="cust-1",
                 provider_subscription_id="sub_memory_1",
@@ -80,7 +79,9 @@ async def test_create_authenticate_and_activate_workflow_preserves_entitlement_b
     persistence = InMemoryLifecyclePersistence(
         {
             "sub-1": LifecycleRecord(
-                SubscriptionSnapshot("sub-1", "user-1", "plan-1", CreatedState()),
+                snapshot=SubscriptionSnapshot(
+                    id="sub-1", user_id="user-1", plan_id="plan-1", state=CreatedState()
+                ),
                 customer_email="user@example.test",
             )
         }
@@ -89,9 +90,11 @@ async def test_create_authenticate_and_activate_workflow_preserves_entitlement_b
 
     created = await coordinator.apply(
         LifecycleRequest(
-            "sub-1",
-            CreateSubscription(CommandMetadata("create-1"), "plan-1"),
-            _context(),
+            subscription_id="sub-1",
+            input=CreateSubscription(
+                metadata=CommandMetadata(request_id="create-1"), plan_id="plan-1"
+            ),
+            context=_context(),
         ),
         "command-1",
     )
@@ -100,9 +103,11 @@ async def test_create_authenticate_and_activate_workflow_preserves_entitlement_b
 
     authenticated = await coordinator.observe(
         LifecycleRequest(
-            "sub-1",
-            SubscriptionAuthenticated(EventMetadata("event-auth", NOW)),
-            _context(),
+            subscription_id="sub-1",
+            input=SubscriptionAuthenticated(
+                metadata=EventMetadata(event_id="event-auth", occurred_at=NOW)
+            ),
+            context=_context(),
         ),
         "event-auth",
     )
@@ -111,9 +116,13 @@ async def test_create_authenticate_and_activate_workflow_preserves_entitlement_b
 
     activated = await coordinator.observe(
         LifecycleRequest(
-            "sub-1",
-            SubscriptionActivated(EventMetadata("event-active", NOW), START, END),
-            _context(),
+            subscription_id="sub-1",
+            input=SubscriptionActivated(
+                metadata=EventMetadata(event_id="event-active", occurred_at=NOW),
+                period_start=START,
+                period_end=END,
+            ),
+            context=_context(),
         ),
         "event-active",
     )
@@ -125,7 +134,9 @@ async def test_duplicate_command_and_event_are_no_provider_mutations() -> None:
     persistence = InMemoryLifecyclePersistence(
         {
             "sub-1": LifecycleRecord(
-                SubscriptionSnapshot("sub-1", "user-1", "plan-1", CreatedState()),
+                snapshot=SubscriptionSnapshot(
+                    id="sub-1", user_id="user-1", plan_id="plan-1", state=CreatedState()
+                ),
                 customer_email="user@example.test",
             )
         }
@@ -133,7 +144,9 @@ async def test_duplicate_command_and_event_are_no_provider_mutations() -> None:
     provider = InMemoryBillingProvider()
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     request = LifecycleRequest(
-        "sub-1", CreateSubscription(CommandMetadata("create-1"), "plan-1"), _context()
+        subscription_id="sub-1",
+        input=CreateSubscription(metadata=CommandMetadata(request_id="create-1"), plan_id="plan-1"),
+        context=_context(),
     )
 
     first = await coordinator.apply(request, "same-key")
@@ -150,18 +163,29 @@ async def test_upgrade_stages_before_capture_and_converges_once_after_capture() 
     persistence = _active_store()
     provider = InMemoryBillingProvider()
     # Seed the provider's known subscription through its public port.
-    await provider.execute(CreateSubscriptionOperation("plan-1", "cust-1", 0, 1, True, "seed"))
+    await provider.execute(
+        CreateSubscriptionOperation(
+            plan_id="plan-1",
+            customer_id="cust-1",
+            total_count=0,
+            quantity=1,
+            customer_notify=True,
+            correlation_id="seed",
+        )
+    )
     persistence.records["sub-1"] = LifecycleRecord(
-        persistence.records["sub-1"].snapshot,
+        snapshot=persistence.records["sub-1"].snapshot,
         provider_customer_id="cust-1",
         provider_subscription_id="sub_memory_1",
         provider_plan_id="plan-1",
     )
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     request = LifecycleRequest(
-        "sub-1",
-        ChangeSubscriptionPlan(CommandMetadata("change-1"), "plan-2", NOW),
-        PolicyContext(
+        subscription_id="sub-1",
+        input=ChangeSubscriptionPlan(
+            metadata=CommandMetadata(request_id="change-1"), new_plan_id="plan-2", effective_at=NOW
+        ),
+        context=PolicyContext(
             now=NOW,
             current_plan_amount=1000,
             target_plan_amount=2000,
@@ -186,7 +210,7 @@ async def test_upgrade_stages_before_capture_and_converges_once_after_capture() 
 
     captured = await coordinator.observe(
         PaymentCaptured(
-            EventMetadata("capture-1", NOW),
+            metadata=EventMetadata(event_id="capture-1", occurred_at=NOW),
             payment_id="payment-1",
             amount_paisa=pending.amount_paisa,
             currency=pending.currency,
@@ -209,16 +233,30 @@ async def test_upgrade_stages_before_capture_and_converges_once_after_capture() 
 async def test_scheduled_capture_reconciles_exact_pending_link_before_plan_change() -> None:
     persistence = _active_store()
     provider = InMemoryBillingProvider()
-    await provider.execute(CreateSubscriptionOperation("plan-1", "cust-1", 0, 1, True, "seed"))
-    persistence.records["sub-1"] = replace(
-        persistence.records["sub-1"],
-        provider_customer_id="cust-1",
-        provider_subscription_id="sub_memory_1",
-        provider_plan_id="plan-1",
+    await provider.execute(
+        CreateSubscriptionOperation(
+            plan_id="plan-1",
+            customer_id="cust-1",
+            total_count=0,
+            quantity=1,
+            customer_notify=True,
+            correlation_id="seed",
+        )
+    )
+    persistence.records["sub-1"] = persistence.records["sub-1"].model_copy(
+        update={
+            "provider_customer_id": "cust-1",
+            "provider_subscription_id": "sub_memory_1",
+            "provider_plan_id": "plan-1",
+        }
     )
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     staged = await coordinator.apply(
-        ChangeSubscriptionPlan(CommandMetadata("scheduled-upgrade"), "plan-2", NOW),
+        ChangeSubscriptionPlan(
+            metadata=CommandMetadata(request_id="scheduled-upgrade"),
+            new_plan_id="plan-2",
+            effective_at=NOW,
+        ),
         "scheduled-upgrade",
         subscription_id="sub-1",
         context=PolicyContext(
@@ -233,7 +271,9 @@ async def test_scheduled_capture_reconciles_exact_pending_link_before_plan_chang
     pending = staged.unwrap().snapshot.pending_upgrade
     assert pending is not None
     target = persistence.intents[pending.payment_link_key]
-    persistence.intents[pending.payment_link_key] = replace(target, status=IntentStatus.PENDING)
+    persistence.intents[pending.payment_link_key] = target.model_copy(
+        update={"status": IntentStatus.PENDING}
+    )
     sibling_key = "unrelated-payment-link"
     persistence.intents[sibling_key] = ProviderOperationIntent(
         key=sibling_key,
@@ -256,7 +296,7 @@ async def test_scheduled_capture_reconciles_exact_pending_link_before_plan_chang
 
     captured = await coordinator.observe(
         PaymentCaptured(
-            EventMetadata("scheduled-capture", NOW),
+            metadata=EventMetadata(event_id="scheduled-capture", occurred_at=NOW),
             payment_id="payment-scheduled",
             amount_paisa=pending.amount_paisa,
             currency=pending.currency,
@@ -292,8 +332,8 @@ async def test_scheduled_capture_unknown_link_leaves_pending_entitlement_unchang
         currency="INR",
     )
     before = persistence.records["sub-1"].snapshot
-    persistence.records["sub-1"] = replace(
-        persistence.records["sub-1"], snapshot=replace(before, pending_upgrade=pending)
+    persistence.records["sub-1"] = persistence.records["sub-1"].model_copy(
+        update={"snapshot": before.model_copy(update={"pending_upgrade": pending})}
     )
     persistence.intents[pending.payment_link_key] = ProviderOperationIntent(
         key=pending.payment_link_key,
@@ -320,7 +360,7 @@ async def test_scheduled_capture_unknown_link_leaves_pending_entitlement_unchang
 
     captured = await coordinator.observe(
         PaymentCaptured(
-            EventMetadata("unknown-capture", NOW),
+            metadata=EventMetadata(event_id="unknown-capture", occurred_at=NOW),
             payment_id="payment-unknown",
             amount_paisa=pending.amount_paisa,
             currency=pending.currency,
@@ -331,7 +371,9 @@ async def test_scheduled_capture_unknown_link_leaves_pending_entitlement_unchang
     )
 
     assert isinstance(captured, Failure)
-    assert persistence.records["sub-1"].snapshot == replace(before, pending_upgrade=pending)
+    assert persistence.records["sub-1"].snapshot == before.model_copy(
+        update={"pending_upgrade": pending}
+    )
     assert not any(
         call.operation.kind is ProviderOperationKind.CHANGE_SUBSCRIPTION_PLAN
         for call in provider.calls
@@ -346,7 +388,8 @@ async def test_scheduled_capture_unknown_link_leaves_pending_entitlement_unchang
         (ProviderUnavailableError(), ProviderErrorCode.UNAVAILABLE),
         (
             ProviderManualReviewRequiredError(
-                ProviderOperationKind.CHANGE_SUBSCRIPTION_PLAN, "manual"
+                operation=ProviderOperationKind.CHANGE_SUBSCRIPTION_PLAN,
+                correlation_id="manual",
             ),
             ProviderErrorCode.MANUAL_REVIEW_REQUIRED,
         ),
@@ -362,9 +405,11 @@ async def test_provider_failures_are_typed_and_not_hidden(
     coordinator = SubscriptionLifecycleCoordinator(provider=provider, persistence=persistence)
     result = await coordinator.apply(
         LifecycleRequest(
-            "sub-1",
-            CancelSubscription(CommandMetadata("cancel-1"), cancel_at_period_end=False),
-            _context(),
+            subscription_id="sub-1",
+            input=CancelSubscription(
+                metadata=CommandMetadata(request_id="cancel-1"), cancel_at_period_end=False
+            ),
+            context=_context(),
         ),
         "cancel-key",
     )
@@ -381,11 +426,12 @@ async def test_optimistic_conflict_is_returned_before_provider_mutation() -> Non
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     result = await coordinator.apply(
         LifecycleRequest(
-            "sub-1",
-            CancelSubscription(
-                CommandMetadata("stale", expected_version=2), cancel_at_period_end=True
+            subscription_id="sub-1",
+            input=CancelSubscription(
+                metadata=CommandMetadata(request_id="stale", expected_version=2),
+                cancel_at_period_end=True,
             ),
-            _context(),
+            context=_context(),
         ),
         "stale-key",
     )
@@ -399,13 +445,26 @@ async def test_optimistic_conflict_is_returned_before_provider_mutation() -> Non
 async def test_effect_translation_gates_remote_plan_until_matching_capture() -> None:
     persistence = _active_store()
     provider = InMemoryBillingProvider()
-    await provider.execute(CreateSubscriptionOperation("plan-1", "cust-1", 0, 1, True, "seed"))
+    await provider.execute(
+        CreateSubscriptionOperation(
+            plan_id="plan-1",
+            customer_id="cust-1",
+            total_count=0,
+            quantity=1,
+            customer_notify=True,
+            correlation_id="seed",
+        )
+    )
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     result = await coordinator.apply(
         LifecycleRequest(
-            "sub-1",
-            ChangeSubscriptionPlan(CommandMetadata("change-1"), "plan-2", NOW),
-            PolicyContext(
+            subscription_id="sub-1",
+            input=ChangeSubscriptionPlan(
+                metadata=CommandMetadata(request_id="change-1"),
+                new_plan_id="plan-2",
+                effective_at=NOW,
+            ),
+            context=PolicyContext(
                 now=NOW,
                 current_plan_amount=1000,
                 target_plan_amount=2000,
@@ -432,7 +491,7 @@ async def test_effect_translation_gates_remote_plan_until_matching_capture() -> 
 
     captured = await coordinator.observe(
         PaymentCaptured(
-            EventMetadata("capture-2", NOW),
+            metadata=EventMetadata(event_id="capture-2", occurred_at=NOW),
             payment_id="payment-2",
             amount_paisa=pending.amount_paisa,
             currency=pending.currency,

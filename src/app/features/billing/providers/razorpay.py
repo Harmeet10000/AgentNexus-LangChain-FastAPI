@@ -223,7 +223,9 @@ def _subscription_state(
         return Failure(
             ProviderOutcomeUnknownError(operation, correlation_id)
             if operation in _MUTATING_KINDS
-            else ProviderReconciliationRequiredError(operation, correlation_id)
+            else ProviderReconciliationRequiredError(
+                operation=operation, correlation_id=correlation_id
+            )
         )
     provider_id = payload.get("id")
     status = payload.get("status")
@@ -240,7 +242,9 @@ def _subscription_state(
                 message="Provider subscription response requires reconciliation",
             )
             if operation in _MUTATING_KINDS
-            else ProviderReconciliationRequiredError(operation, correlation_id)
+            else ProviderReconciliationRequiredError(
+                operation=operation, correlation_id=correlation_id
+            )
         )
     cancel_at_cycle_end = payload.get("cancel_at_cycle_end")
     return Success(
@@ -312,7 +316,9 @@ class RazorpayBillingProvider(BillingProvider):
         except RazorpayRetryableError as exc:
             exc.add_note(f"operation={kind}, correlation_id={correlation_id}")
             if kind in _MUTATING_KINDS:
-                return Failure(ProviderOutcomeUnknownError(kind, correlation_id))
+                return Failure(
+                    ProviderOutcomeUnknownError(operation=kind, correlation_id=correlation_id)
+                )
             if getattr(exc, "razorpay_status_code", None) == 429:
                 return Failure(
                     ProviderRateLimitedError(operation=kind, correlation_id=correlation_id)
@@ -324,7 +330,9 @@ class RazorpayBillingProvider(BillingProvider):
         except Exception as exc:  # noqa: BLE001 — third-party boundary sanitization
             exc.add_note(f"operation={kind}, correlation_id={correlation_id}")
             if kind in _MUTATING_KINDS:
-                return Failure(ProviderOutcomeUnknownError(kind, correlation_id))
+                return Failure(
+                    ProviderOutcomeUnknownError(operation=kind, correlation_id=correlation_id)
+                )
             return Failure(ProviderUnexpectedError(operation=kind, correlation_id=correlation_id))
 
     async def _execute(self, operation: ProviderOperation) -> ProviderResult[ProviderValue]:  # noqa: PLR0912, PLR0915, PLR0914 — closed provider union dispatch
@@ -344,11 +352,15 @@ class RazorpayBillingProvider(BillingProvider):
                 or email.lower() != operation.email.lower()
             ):
                 return Failure(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return Success(
                 ProviderSuccess(
-                    operation.kind, operation.correlation_id, ProviderCustomer(provider_id, email)
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderCustomer(provider_customer_id=provider_id, email=email),
                 )
             )
 
@@ -369,11 +381,15 @@ class RazorpayBillingProvider(BillingProvider):
                 or email.lower() != operation.email.lower()
             ):
                 return Failure(
-                    ProviderReconciliationRequiredError(operation.kind, operation.correlation_id)
+                    ProviderReconciliationRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return Success(
                 ProviderSuccess(
-                    operation.kind, operation.correlation_id, ProviderCustomer(provider_id, email)
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderCustomer(provider_customer_id=provider_id, email=email),
                 )
             )
 
@@ -466,7 +482,9 @@ class RazorpayBillingProvider(BillingProvider):
             ]
             if len(matches) != 1:
                 return Failure(
-                    ProviderManualReviewRequiredError(operation.kind, operation.correlation_id)
+                    ProviderManualReviewRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return _subscription_state(matches[0], operation.kind, operation.correlation_id)
 
@@ -483,15 +501,16 @@ class RazorpayBillingProvider(BillingProvider):
                 if state is None:
                     return Failure(
                         ProviderReconciliationRequiredError(
-                            operation.kind, operation.correlation_id
+                            operation=operation.kind,
+                            correlation_id=operation.correlation_id,
                         )
                     )
                 payments.append(state)
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderPaymentBatch(tuple(payments)),
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderPaymentBatch(payments=tuple(payments)),
                 )
             )
 
@@ -506,18 +525,22 @@ class RazorpayBillingProvider(BillingProvider):
             provider_id = payload.get("id")
             if not isinstance(provider_id, str) or not provider_id:
                 return Failure(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             status = payload.get("status")
             if not isinstance(status, str) or status not in _PAYMENT_LINK_STATUSES:
                 return Failure(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderPaymentLink(
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderPaymentLink(
                         provider_payment_link_id=provider_id,
                         short_url=payload.get("short_url")
                         if isinstance(payload.get("short_url"), str)
@@ -551,13 +574,18 @@ class RazorpayBillingProvider(BillingProvider):
             name = item.get("name") if isinstance(item, dict) else None
             if not isinstance(provider_id, str) or not provider_id:
                 return Failure(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderPlan(provider_id, name if isinstance(name, str) else operation.name),
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderPlan(
+                        provider_plan_id=provider_id,
+                        name=name if isinstance(name, str) else operation.name,
+                    ),
                 )
             )
 
@@ -571,20 +599,27 @@ class RazorpayBillingProvider(BillingProvider):
             ]
             if len(matches) != 1:
                 return Failure(
-                    ProviderManualReviewRequiredError(operation.kind, operation.correlation_id)
+                    ProviderManualReviewRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             provider_id = matches[0].get("id")
             if not isinstance(provider_id, str) or not provider_id:
                 return Failure(
-                    ProviderReconciliationRequiredError(operation.kind, operation.correlation_id)
+                    ProviderReconciliationRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             item = matches[0].get("item")
             name = item.get("name") if isinstance(item, dict) else None
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderPlan(provider_id, name if isinstance(name, str) else None),
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderPlan(
+                        provider_plan_id=provider_id,
+                        name=name if isinstance(name, str) else None,
+                    ),
                 )
             )
 
@@ -598,23 +633,29 @@ class RazorpayBillingProvider(BillingProvider):
             ]
             if len(matches) != 1:
                 return Failure(
-                    ProviderManualReviewRequiredError(operation.kind, operation.correlation_id)
+                    ProviderManualReviewRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             provider_id = matches[0].get("id")
             status = matches[0].get("status")
             if not isinstance(provider_id, str) or not provider_id:
                 return Failure(
-                    ProviderReconciliationRequiredError(operation.kind, operation.correlation_id)
+                    ProviderReconciliationRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             if not isinstance(status, str) or status not in _PAYMENT_LINK_STATUSES:
                 return Failure(
-                    ProviderReconciliationRequiredError(operation.kind, operation.correlation_id)
+                    ProviderReconciliationRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderPaymentLink(
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderPaymentLink(
                         provider_payment_link_id=provider_id,
                         short_url=matches[0].get("short_url")
                         if isinstance(matches[0].get("short_url"), str)
@@ -640,13 +681,19 @@ class RazorpayBillingProvider(BillingProvider):
                 or amount != operation.amount
             ):
                 return Failure(
-                    ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderReceipt(provider_id, operation.payment_id, operation.amount),
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderReceipt(
+                        provider_refund_id=provider_id,
+                        payment_id=operation.payment_id,
+                        amount=operation.amount,
+                    ),
                 )
             )
 
@@ -662,7 +709,9 @@ class RazorpayBillingProvider(BillingProvider):
             ]
             if len(matches) != 1:
                 return Failure(
-                    ProviderManualReviewRequiredError(operation.kind, operation.correlation_id)
+                    ProviderManualReviewRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             provider_id = matches[0].get("id")
             amount = matches[0].get("amount")
@@ -671,13 +720,19 @@ class RazorpayBillingProvider(BillingProvider):
             invalid_amount = isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0
             if invalid_provider_id or wrong_payment or invalid_amount:
                 return Failure(
-                    ProviderReconciliationRequiredError(operation.kind, operation.correlation_id)
+                    ProviderReconciliationRequiredError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderReceipt(provider_id, operation.payment_id, amount),
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderReceipt(
+                        provider_refund_id=provider_id,
+                        payment_id=operation.payment_id,
+                        amount=amount,
+                    ),
                 )
             )
 

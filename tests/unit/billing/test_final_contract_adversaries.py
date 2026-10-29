@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -109,9 +108,9 @@ class _CrashAfterChildPostProvider(InMemoryBillingProvider):
                 raise RuntimeError(message)
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderSubscriptionState(
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderSubscriptionState(
                         provider_subscription_id="sub-remote-1",
                         status="active",
                         plan_id=operation.plan_id,
@@ -121,9 +120,9 @@ class _CrashAfterChildPostProvider(InMemoryBillingProvider):
         if operation.kind is ProviderOperationKind.FIND_SUBSCRIPTION_BY_CORRELATION:
             return Success(
                 ProviderSuccess(
-                    operation.kind,
-                    operation.correlation_id,
-                    ProviderSubscriptionState(
+                    operation=operation.kind,
+                    correlation_id=operation.correlation_id,
+                    value=ProviderSubscriptionState(
                         provider_subscription_id="sub-remote-1",
                         status="active",
                         plan_id=PLAN_PROVIDER,
@@ -141,7 +140,9 @@ async def test_customer_child_intent_crash_is_replayable_without_a_second_subscr
     persistence = InMemoryLifecyclePersistence({"sub-child-crash": _created_record()})
     provider = _CrashAfterChildPostProvider()
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
-    command = CreateSubscription(CommandMetadata("create-child-crash"), PLAN_LOCAL)
+    command = CreateSubscription(
+        metadata=CommandMetadata(request_id="create-child-crash"), plan_id=PLAN_LOCAL
+    )
 
     with pytest.raises(RuntimeError, match="child POST"):
         await coordinator.apply(
@@ -326,9 +327,13 @@ async def test_cancel_chooses_latest_captured_payment_before_newer_failed_row() 
         execute_provider_operation=AsyncMock(
             return_value=Success(
                 ProviderSuccess(
-                    ProviderOperationKind.CREATE_REFUND,
-                    "cancel-refund",
-                    ProviderReceipt("rfnd-current-capture", "pay-captured-current", 1_000),
+                    operation=ProviderOperationKind.CREATE_REFUND,
+                    correlation_id="cancel-refund",
+                    value=ProviderReceipt(
+                        provider_refund_id="rfnd-current-capture",
+                        payment_id="pay-captured-current",
+                        amount=1_000,
+                    ),
                 )
             )
         )
@@ -561,9 +566,13 @@ async def test_cancel_receipt_mismatch_requires_manual_review_without_projection
         execute_provider_operation=AsyncMock(
             return_value=Success(
                 ProviderSuccess(
-                    ProviderOperationKind.CREATE_REFUND,
-                    "cancel-refund-mismatch",
-                    ProviderReceipt("rfnd-mismatch", receipt_payment_id, receipt_amount),
+                    operation=ProviderOperationKind.CREATE_REFUND,
+                    correlation_id="cancel-refund-mismatch",
+                    value=ProviderReceipt(
+                        provider_refund_id="rfnd-mismatch",
+                        payment_id=receipt_payment_id,
+                        amount=receipt_amount,
+                    ),
                 )
             )
         )
@@ -636,22 +645,28 @@ async def test_unknown_refund_replay_keeps_one_remote_mutation_and_one_receipt()
                     from app.features.billing.providers import ProviderOutcomeUnknownError
 
                     return Failure(
-                        ProviderOutcomeUnknownError(operation.kind, operation.correlation_id)
+                        ProviderOutcomeUnknownError(
+                            operation=operation.kind, correlation_id=operation.correlation_id
+                        )
                     )
             if operation.kind is ProviderOperationKind.FIND_REFUND_BY_CORRELATION:
                 self.refund_reads += 1
                 return Success(
                     ProviderSuccess(
-                        operation.kind,
-                        operation.correlation_id,
-                        ProviderReceipt("rfnd-replay", "pay-1", 500),
+                        operation=operation.kind,
+                        correlation_id=operation.correlation_id,
+                        value=ProviderReceipt(
+                            provider_refund_id="rfnd-replay", payment_id="pay-1", amount=500
+                        ),
                     )
                 )
             return await super().execute(operation)
 
     provider = _RefundProvider()
     coordinator = SubscriptionLifecycleCoordinator(InMemoryLifecyclePersistence(), provider)
-    operation = CreateRefundOperation("pay-1", 500, "refund-replay")
+    operation = CreateRefundOperation(
+        payment_id="pay-1", amount=500, correlation_id="refund-replay"
+    )
 
     first = await coordinator.execute_provider_operation(
         operation, subscription_id=None, idempotency_key="refund-replay"
@@ -782,8 +797,12 @@ async def test_capture_recovery_is_key_scoped_and_ignores_unrelated_failure() ->
     persistence = InMemoryLifecyclePersistence(
         {
             "sub-capture": LifecycleRecord(
-                SubscriptionSnapshot(
-                    "sub-capture", "user-1", "plan-1", ActiveState(NOW, NOW), version=1
+                snapshot=SubscriptionSnapshot(
+                    id="sub-capture",
+                    user_id="user-1",
+                    plan_id="plan-1",
+                    state=ActiveState(period_start=NOW, period_end=NOW),
+                    version=1,
                 ),
                 provider_subscription_id="provider-sub-1",
             )
@@ -813,13 +832,13 @@ async def test_webhook_capture_recovery_uses_coordinator_generated_payment_link_
     persistence = InMemoryLifecyclePersistence(
         {
             "sub-capture": LifecycleRecord(
-                SubscriptionSnapshot(
-                    "sub-capture",
-                    "user-1",
-                    "plan-1",
-                    ActiveState(
-                        datetime(2026, 10, 1, tzinfo=UTC),
-                        datetime(2026, 11, 1, tzinfo=UTC),
+                snapshot=SubscriptionSnapshot(
+                    id="sub-capture",
+                    user_id="user-1",
+                    plan_id="plan-1",
+                    state=ActiveState(
+                        period_start=datetime(2026, 10, 1, tzinfo=UTC),
+                        period_end=datetime(2026, 11, 1, tzinfo=UTC),
                     ),
                     version=1,
                     observed_plan_id="plan-1",
@@ -830,17 +849,26 @@ async def test_webhook_capture_recovery_uses_coordinator_generated_payment_link_
         }
     )
     provider = _CaptureRecoveryProvider()
-    await provider.execute(CreateSubscriptionOperation("plan-1", "cust-1", 0, 1, True, "seed"))
+    await provider.execute(
+        CreateSubscriptionOperation(
+            plan_id="plan-1",
+            customer_id="cust-1",
+            total_count=0,
+            quantity=1,
+            customer_notify=True,
+            correlation_id="seed",
+        )
+    )
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     staged = await coordinator.apply(
         LifecycleRequest(
-            "sub-capture",
-            ChangeSubscriptionPlan(
-                CommandMetadata("capture-command"),
-                "plan-2",
-                NOW,
+            subscription_id="sub-capture",
+            input=ChangeSubscriptionPlan(
+                metadata=CommandMetadata(request_id="capture-command"),
+                new_plan_id="plan-2",
+                effective_at=NOW,
             ),
-            PolicyContext(
+            context=PolicyContext(
                 now=NOW,
                 current_plan_amount=1_000,
                 target_plan_amount=2_000,
@@ -866,7 +894,7 @@ async def test_webhook_capture_recovery_uses_coordinator_generated_payment_link_
     # success state was finalized.  The existing lease forces reconciliation
     # to use a provider read, while the unrelated failing intent must remain
     # untouched.
-    persistence.intents[target.key] = replace(target, status=IntentStatus.PENDING)
+    persistence.intents[target.key] = target.model_copy(update={"status": IntentStatus.PENDING})
     unrelated = _capture_recovery_intent("unrelated-link", subscription_id="sub-capture")
     persistence.intents[unrelated.key] = unrelated
     subscription = SimpleNamespace(
@@ -1171,7 +1199,11 @@ async def _capture_completion_fixture(
         {
             "sub-capture-pair": LifecycleRecord(
                 snapshot=SubscriptionSnapshot(
-                    "sub-capture-pair", "user-1", PLAN_LOCAL, ActiveState(), version=1
+                    id="sub-capture-pair",
+                    user_id="user-1",
+                    plan_id=PLAN_LOCAL,
+                    state=ActiveState(),
+                    version=1,
                 ),
                 provider_subscription_id="sub_memory_1",
                 provider_plan_id="rp_current",
@@ -1192,13 +1224,23 @@ async def _capture_completion_fixture(
         operation=link,
         status=IntentStatus.SUCCEEDED,
         result=ProviderSuccess(
-            ProviderOperationKind.CREATE_PAYMENT_LINK,
-            link.correlation_id,
-            ProviderPaymentLink("plink-capture-pair", "https://example.test/pay/capture-pair"),
+            operation=ProviderOperationKind.CREATE_PAYMENT_LINK,
+            correlation_id=link.correlation_id,
+            value=ProviderPaymentLink(
+                provider_payment_link_id="plink-capture-pair",
+                short_url="https://example.test/pay/capture-pair",
+            ),
         ),
     )
     await provider.execute(
-        CreateSubscriptionOperation("rp_current", "cust-capture-pair", 0, 1, True, "seed-pair")
+        CreateSubscriptionOperation(
+            plan_id="rp_current",
+            customer_id="cust-capture-pair",
+            total_count=0,
+            quantity=1,
+            customer_notify=True,
+            correlation_id="seed-pair",
+        )
     )
     return SubscriptionLifecycleCoordinator(persistence, provider), persistence
 
@@ -1590,8 +1632,12 @@ async def test_capture_recovery_preserves_retryable_target_failure() -> None:
     persistence = InMemoryLifecyclePersistence(
         {
             "sub-capture": LifecycleRecord(
-                SubscriptionSnapshot(
-                    "sub-capture", "user-1", "plan-1", ActiveState(NOW, NOW), version=1
+                snapshot=SubscriptionSnapshot(
+                    id="sub-capture",
+                    user_id="user-1",
+                    plan_id="plan-1",
+                    state=ActiveState(period_start=NOW, period_end=NOW),
+                    version=1,
                 )
             )
         }
@@ -1649,8 +1695,8 @@ async def test_post_capture_credit_settlement_refunds_once_and_preserves_invoice
                     user_id="user-1",
                     plan_id=PLAN_LOCAL,
                     state=ActiveState(
-                        datetime(2026, 10, 1, tzinfo=UTC),
-                        datetime(2026, 11, 1, tzinfo=UTC),
+                        period_start=datetime(2026, 10, 1, tzinfo=UTC),
+                        period_end=datetime(2026, 11, 1, tzinfo=UTC),
                     ),
                     version=1,
                 ),
