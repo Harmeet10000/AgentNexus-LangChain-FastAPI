@@ -11,7 +11,7 @@ from graphiti_core import Graphiti
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.features.documents.service import (
+from app.features.documents.application.commands.upload_document import (
     _document_ingestion_lock_key,
     _release_document_ingestion_lock,
     run_document_ingestion_task,

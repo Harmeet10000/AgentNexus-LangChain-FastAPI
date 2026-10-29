@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING
 
 from returns.result import Success
 
-from app.features.documents import constants
-from app.features.documents.repository import DocumentRepository
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    DocumentRepository,
+)
+from app.features.documents.domain import constants
 
 if TYPE_CHECKING:
     from typing import Any

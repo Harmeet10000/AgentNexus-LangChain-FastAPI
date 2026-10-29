@@ -14,8 +14,8 @@ from app.connections.checkpointer import (
     setup_langgraph_checkpointer,
 )
 from app.features.agent_saul.graph import build_saul_graph
-from app.features.documents.service.evidence import build_evidence_service
-from app.features.documents.tools.bundle import build_tool_bundle
+from app.features.documents.application.evidence.service import build_evidence_service
+from app.features.documents.application.tools.bundle import build_tool_bundle
 from app.resilience.idempotency import (
     IdempotencyGuard,
 )
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
     from app.config.settings import Settings
     from app.extraction.langextract.service import AsyncExtractionService
-    from app.features.documents.service.evidence import EvidenceService
+    from app.features.documents.application.evidence.service import EvidenceService
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
     from app.utils.storage import StorageService
 
@@ -67,7 +67,7 @@ def provide_document_ingestion_graph(
     The graph resolves embeddings through the shared embedding layer.  Do not
     add an ``embedding_fn`` argument from older revisions.
     """
-    from app.features.documents.ingestion_graph import (  # noqa: PLC0415
+    from app.features.documents.ingestion.workflow import (  # noqa: PLC0415
         build_document_ingestion_graph,
     )
 

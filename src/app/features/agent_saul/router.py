@@ -30,7 +30,7 @@ from app.features.auth.api.http.dependencies import (
     get_account_store,
 )
 from app.features.auth.api.websocket.security import WebSocketSecurityViolation
-from app.features.documents.dependencies import DocumentAuthorizationDep
+from app.features.documents.api.http.dependencies import DocumentAuthorizationDep
 from app.kernel.result import render_result
 from app.observability.logging import logger
 from app.resilience.rate_limit import get_rate_limiter

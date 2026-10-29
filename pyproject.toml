@@ -531,7 +531,7 @@ section-order = [
 # functions, so typing.Any must stay a runtime import here.
 "src/app/resilience/idempotency.py" = ["TC001", "TC002", "TC003"]
 # Same @tool get_type_hints constraint holds at the tools' owning features.
-"src/app/features/documents/tools/*.py" = ["TC001", "TC002", "TC003"]
+"src/app/features/documents/application/tools/*.py" = ["TC001", "TC002", "TC003"]
 "src/app/features/crawler/tools/*.py" = ["TC001", "TC002", "TC003"]
 # Docs-site scripts are standalone tools, not package modules.
 "docs-site/scripts/*" = ["INP001", "TC003", "S101", "T201", "PLC0415", "PT018"]
@@ -573,9 +573,17 @@ section-order = [
 "src/app/lifecycle/lifespan.py" = [
     "PLC0415", # Late imports to break circular deps
 ]
-"src/app/features/documents/service/*.py" = [
+"src/app/features/documents/application/commands/*.py" = [
     "PLC0415", # Late imports to break circular deps
-    "TC001", # Service signatures reference DTO/repository types; resolved at runtime
+    "TC001", # Use-case signatures reference DTO/repository types; resolved at runtime
+]
+"src/app/features/documents/application/queries/*.py" = [
+    "PLC0415", # Late imports to break circular deps
+    "TC001", # Use-case signatures reference DTO/repository types; resolved at runtime
+]
+"src/app/features/documents/application/evidence/*.py" = [
+    "PLC0415", # Late imports to break circular deps
+    "TC001", # Use-case signatures reference DTO/repository types; resolved at runtime
 ]
 "src/app/middleware/server_middleware.py" = [
     "PLC0415", # Late imports to break circular deps
@@ -904,7 +912,7 @@ forbidden_modules = ["app.features"]
 # exemption: 4.3 moves the domain legal tool, 5.2 splits the source chunking
 # engines (policy already moved).
 ignore_imports = [
-    "app.extraction.docling.chunker -> app.features.documents.classification",
+    "app.extraction.docling.chunker -> app.features.documents.ingestion.chunking.classification",
     # The crawl4ai adapter constructs the engine it adapts; config stays
     # engine-owned because WebCrawler itself takes it.
     "app.connections.crawl4ai -> app.features.crawler.config",
@@ -946,6 +954,9 @@ source_modules = [
     # Auth use cases moved into the hexagonal application layer (wave-1
     # restructure); the wildcard above no longer matches the nested layout.
     "app.features.auth.application.**",
+    # Documents use cases moved into the hexagonal application layer (wave-2
+    # restructure); the wildcard above no longer matches the nested layout.
+    "app.features.documents.application.**",
     "app.features.billing.jobs",
     "app.features.billing.credits.jobs",
 ]

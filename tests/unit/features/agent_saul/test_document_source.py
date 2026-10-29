@@ -37,7 +37,7 @@ from app.features.agent_saul.exceptions import (
 from app.features.agent_saul.graph.nodes import make_ingestion_node
 from app.features.agent_saul.graph.state import WorkflowStatus
 from app.features.agent_saul.service import AgentSaulService, _document_preflight_error
-from app.features.documents.exceptions import DocumentDatabaseError, DocumentNotFoundError
+from app.features.documents.domain.errors import DocumentDatabaseError, DocumentNotFoundError
 
 if TYPE_CHECKING:
     from collections.abc import Callable

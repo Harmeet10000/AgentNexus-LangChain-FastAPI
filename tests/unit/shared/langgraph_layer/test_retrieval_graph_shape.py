@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any
 
-from app.features.documents.retrieval_graph.graph import build_retrieval_graph
+from app.features.documents.retrieval.graph.graph import build_retrieval_graph
 
 
 class _StubLlm:

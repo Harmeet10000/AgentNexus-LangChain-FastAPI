@@ -1161,7 +1161,7 @@ Verdict: not "riddled" everywhere, but a systemic, concentrated cluster: the doc
 
 Compliant (startup compile, the README claim):
 
-lifespan.py:251-303 compiles ingestion graph and Agent Saul once into app.state.ingestion_graph / app.state.saul_graph via lifecycle/graphs.py providers (provide_document_ingestion_graph:47, provide_saul_graph:83). Dependencies read them from app.state (features/ingestion/dependencies.py:26, features/agent_saul/dependencies.py:41) and fail closed with ServiceUnavailableException when absent.
+lifespan.py:251-303 compiles ingestion graph and Agent Saul once into app.state.ingestion_graph / app.state.saul_graph via lifecycle/graphs.py providers (provide_document_ingestion_graph:47, provide_saul_graph:83). Dependencies read them from app.state (features/documents/api/http/legacy_ingest_dependencies.py:26, features/agent_saul/dependencies.py:41) and fail closed with ServiceUnavailableException when absent.
 agent_saul/factory.py:113 docstring: "Called from build_saul_graph — never call this inside a node function." AgentRegistry holds pre-built create_agent(...) sub-agents and with_structured_output chains (factory.py:142-200); nodes receive them as closures (factory.py:209-230).
 Celery path: lifecycle/document_worker.py:65 compiles the ingestion graph once per forked worker child at worker_process_init, not per task.
 
@@ -1342,7 +1342,7 @@ Verdict: not "riddled" everywhere, but a systemic, concentrated cluster: the doc
 
 Compliant (startup compile, the README claim):
 
-lifespan.py:251-303 compiles ingestion graph and Agent Saul once into app.state.ingestion_graph / app.state.saul_graph via lifecycle/graphs.py providers (provide_document_ingestion_graph:47, provide_saul_graph:83). Dependencies read them from app.state (features/ingestion/dependencies.py:26, features/agent_saul/dependencies.py:41) and fail closed with ServiceUnavailableException when absent.
+lifespan.py:251-303 compiles ingestion graph and Agent Saul once into app.state.ingestion_graph / app.state.saul_graph via lifecycle/graphs.py providers (provide_document_ingestion_graph:47, provide_saul_graph:83). Dependencies read them from app.state (features/documents/api/http/legacy_ingest_dependencies.py:26, features/agent_saul/dependencies.py:41) and fail closed with ServiceUnavailableException when absent.
 agent_saul/factory.py:113 docstring: "Called from build_saul_graph — never call this inside a node function." AgentRegistry holds pre-built create_agent(...) sub-agents and with_structured_output chains (factory.py:142-200); nodes receive them as closures (factory.py:209-230).
 Celery path: lifecycle/document_worker.py:65 compiles the ingestion graph once per forked worker child at worker_process_init, not per task.
 

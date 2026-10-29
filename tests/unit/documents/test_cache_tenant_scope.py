@@ -1,7 +1,10 @@
 """Tenant identity is part of every document-response cache key."""
 
-from app.features.documents.dto import UnifiedSearchRequest
-from app.features.documents.service import _build_answer_cache_key, _build_cache_key
+from app.features.documents.api.http.dto import UnifiedSearchRequest
+from app.features.documents.application.queries.documents import (
+    _build_answer_cache_key,
+    _build_cache_key,
+)
 
 
 def test_search_cache_key_is_tenant_scoped() -> None:

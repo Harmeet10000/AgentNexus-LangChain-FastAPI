@@ -24,7 +24,7 @@ from app.connections.graphiti import (
 )
 from app.connections.redis import create_redis_client
 from app.extraction.langextract.service import AsyncExtractionService
-from app.features.documents.service import process_document_ingestion
+from app.features.documents.application.commands.upload_document import process_document_ingestion
 from app.lifecycle.graphs import graphiti_service, provide_document_ingestion_graph
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard

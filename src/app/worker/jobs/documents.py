@@ -8,8 +8,10 @@ from returns.result import Failure
 
 from app.config import get_settings
 from app.events import with_terminal_outbox
-from app.features.documents.repository import DocumentRepository
-from app.features.documents.service import run_document_ingestion_task
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    DocumentRepository,
+)
+from app.features.documents.application.commands.upload_document import run_document_ingestion_task
 from app.observability.logging import logger
 from app.shared.jobs.names import DOCUMENTS_INGEST, DOCUMENTS_INGEST_TERMINAL
 from app.utils import InfrastructureException, ServiceUnavailableException

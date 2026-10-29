@@ -9,9 +9,12 @@ from graphiti_core.errors import GraphitiError
 from sqlalchemy.dialects import postgresql
 
 from app.ai.graph.retry import TransientExternalError
-from app.features.documents.dto import UnifiedAskResponse
-from app.features.documents.repository import build_chunk_rows, build_chunk_upsert_statement
-from app.features.documents.service.query import (
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    build_chunk_rows,
+    build_chunk_upsert_statement,
+)
+from app.features.documents.api.http.dto import UnifiedAskResponse
+from app.features.documents.application.queries.documents import (
     _build_answer_cache_key,
     _graphiti_filter_chunk_ids,
 )

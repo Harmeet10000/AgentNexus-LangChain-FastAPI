@@ -2,7 +2,7 @@
 
 Kept only so Base.metadata still declares `document_vectors` and
 `alembic check` does not propose DROP. New code must use
-`app.features.documents.model.UnifiedDocument/UnifiedChunk`.
+`app.features.documents.domain.document.UnifiedDocument` / `app.features.documents.domain.chunk.UnifiedChunk`.
 Do not add new columns here.
 """
 

@@ -11,8 +11,8 @@ from app.ai.tools.registry import (
     get_tool_registry,
     register_default_tools,
 )
-from app.features.documents.tools.authorization import ToolRuntimeContext
-from app.features.documents.tools.bundle import AgentToolBundle
+from app.features.documents.application.tools.authorization import ToolRuntimeContext
+from app.features.documents.application.tools.bundle import AgentToolBundle
 
 from .nodes import (
     ClauseSegmentationOutput,

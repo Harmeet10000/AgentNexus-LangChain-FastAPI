@@ -19,12 +19,12 @@ from app.ai.generation import (
     TextGenerationStructuredResult,
     TextGenerationUnavailableError,
 )
-from app.features.documents.retrieval_graph import ContextGrade, RetrievedChunk
-from app.features.documents.service.query import (
+from app.features.documents.application.queries.documents import (
     _CONTEXT_GRADER_SYSTEM_PROMPT,
     ContextGrader,
     _grade_context,
 )
+from app.features.documents.retrieval.graph import ContextGrade, RetrievedChunk
 
 
 class _RecordingGrader:

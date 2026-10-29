@@ -17,22 +17,27 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from returns.result import Failure, Success
 
-from app.features.documents.dto import UnifiedSearchRequest
-from app.features.documents.exceptions import (
-    DocumentDatabaseError,
-    DocumentValidationError,
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    DocumentRepository,
 )
-from app.features.documents.repository import DocumentRepository
+from app.features.documents.api.http.dto import UnifiedSearchRequest
 
 # `_SEARCH_BRANCHES` is private and imported deliberately: the pairing between these labels and
 # `asyncio.gather`'s positional results is the thing under test, so asserting on it through a
 # public re-export would only test the re-export.
-from app.features.documents.service import _SEARCH_BRANCHES, DocumentQueryService
+from app.features.documents.application.queries.documents import (
+    _SEARCH_BRANCHES,
+    DocumentQueryService,
+)
+from app.features.documents.domain.errors import (
+    DocumentDatabaseError,
+    DocumentValidationError,
+)
 
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.features.documents.exceptions import DocumentResult
+    from app.features.documents.domain.errors import DocumentResult
 
 _EMPTY: Success[list[dict[str, Any]]] = Success([])
 
@@ -173,7 +178,7 @@ async def test_the_request_itself_fails_rather_than_answering_200(
     async def _fake_embed(*_args: object, **_kwargs: object) -> list[float]:
         return [0.0, 0.1, 0.2]
 
-    monkeypatch.setattr("app.features.documents.service.embed_text", _fake_embed)
+    monkeypatch.setattr("app.features.documents.application.queries.documents.embed_text", _fake_embed)
     repo = _StubRepository(
         bm25=_EMPTY,
         vector=_EMPTY,

@@ -41,7 +41,7 @@ The canonical policy seams are:
 | `features/auth/oauth.py` / `auth/service.py` OAuth callback | provider identity/email | OAuth identity establishment | No JWT role/permission claims are consumed. Verified provider identity and the persisted account/link policy are authoritative; step-up/link confirmation is tracked separately in #81. |
 | `worker/` jobs and task entry points | none | Worker authorization surface | No `TokenClaims`, `claims.role`, or `claims.permissions` consumer exists in worker code; jobs use persisted job/tenant ownership and provider boundaries. |
 | `features/documents/dependencies.py` | `sub` | Identity scoping | User ID only; no authorization decision from role/permissions. |
-| `features/ingestion/dependencies.py` | `sub` | Identity scoping | User ID only; no authorization decision from role/permissions. |
+| `features/documents/api/http/legacy_ingest_dependencies.py` | `sub` | Identity scoping | User ID only; no authorization decision from role/permissions. |
 | `mcp/server/middleware.py` | `sub` | Rate-limit identity | Subject keys throttling only; MCP catalog is read-only and has no role/permission gate. |
 | `security/tokens.py` | role/permissions serialization | Token compatibility | Emits and parses wire fields; never decides authorization. |
 | `features/auth/service.py` / `users/service.py` | live account role/permissions | Token issuance | Copies current account state into newly issued tokens; revision binds state. |

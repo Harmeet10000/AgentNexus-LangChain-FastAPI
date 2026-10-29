@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import inspect
 
-from app.features.documents.repository import (
+from app.features.documents.adapters.persistence.postgres.document_repository import (
     _FILTER_SQL,
     build_search_filter_params,
 )
-from app.features.documents.repository import (
+from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository as _Repository,
 )
 

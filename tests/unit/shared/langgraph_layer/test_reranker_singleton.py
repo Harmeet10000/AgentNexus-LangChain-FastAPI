@@ -4,7 +4,7 @@ import inspect
 
 import pytest
 
-from app.features.documents.retrieval_graph.reranker import (
+from app.features.documents.retrieval.reranking.reranker import (
     HostedReranker,
     get_configured_reranker,
     get_shared_reranker,
@@ -26,8 +26,8 @@ def test_accessor_returns_one_hosted_instance() -> None:
 
 
 def test_no_local_model_constructor_remains_at_call_sites() -> None:
-    from app.features.documents import service as documents_service
-    from app.features.documents.retrieval_graph import nodes as retrieval_nodes
+    from app.features.documents.application.queries import documents as documents_service
+    from app.features.documents.retrieval.graph import nodes as retrieval_nodes
 
     source = inspect.getsource(documents_service) + inspect.getsource(retrieval_nodes)
     assert "CrossEncoder" not in source

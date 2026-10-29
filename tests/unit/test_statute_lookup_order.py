@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app.features.documents.tools.retrieve_statute_section import (
+from app.features.documents.application.tools.retrieve_statute_section import (
     _fetch_statute_section,
 )
 
@@ -49,7 +49,7 @@ class _RecordingEngine:
 
 
 def test_statute_lookup_orders_null_years_last() -> None:
-    source = Path("src/app/features/documents/tools/retrieve_statute_section.py").read_text(
+    source = Path("src/app/features/documents/application/tools/retrieve_statute_section.py").read_text(
         encoding="utf-8"
     )
     assert "ORDER BY instrument_year DESC NULLS LAST" in source

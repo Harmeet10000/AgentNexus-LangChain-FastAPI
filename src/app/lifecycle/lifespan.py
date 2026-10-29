@@ -51,7 +51,7 @@ from app.features.auth.api.websocket.security import build_websocket_security_se
 from app.features.auth.application.token_audit_log import TokenAuditLog
 from app.features.auth.domain.user import User
 from app.features.billing.providers import RazorpayBillingProvider
-from app.features.documents.service import build_evidence_service
+from app.features.documents.application.evidence.service import build_evidence_service
 from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
 from app.lifecycle.graphs import (
     graphiti_service,

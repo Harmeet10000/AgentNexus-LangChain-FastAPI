@@ -9,13 +9,13 @@ from returns.result import Success
 if TYPE_CHECKING:
     from typing import Any
 
-from app.features.documents.retrieval_graph.graph import build_retrieval_graph
-from app.features.documents.retrieval_graph.nodes import (
+from app.features.documents.retrieval.graph.graph import build_retrieval_graph
+from app.features.documents.retrieval.graph.nodes import (
     FALLBACK_ANSWER,
     make_hybrid_retrieval_node,
     make_source_identifier_node,
 )
-from app.features.documents.retrieval_graph.state import QueryPlan
+from app.features.documents.retrieval.graph.state import QueryPlan
 
 
 def _plan(**overrides: Any) -> QueryPlan:
@@ -102,7 +102,7 @@ async def test_allowlist_reaches_branch_filter_params(monkeypatch: Any) -> None:
     async def _fake_embed(*args: Any, **kwargs: Any) -> list[float]:
         return [0.0, 0.1, 0.2]
 
-    monkeypatch.setattr("app.features.documents.retrieval_graph.nodes.embed_text", _fake_embed)
+    monkeypatch.setattr("app.features.documents.retrieval.graph.nodes.embed_text", _fake_embed)
     repo = _ResolvingRepo(["doc-1", "doc-2"])
     identifier = make_source_identifier_node(
         _CriteriaLlm({"jurisdictions": ["India"], "document_kinds": [], "matters": []}),
@@ -197,7 +197,7 @@ async def test_insufficient_context_widens_then_terminates(monkeypatch: Any) -> 
     async def _fake_embed(*args: Any, **kwargs: Any) -> list[float]:
         return [0.0, 0.1, 0.2]
 
-    monkeypatch.setattr("app.features.documents.retrieval_graph.nodes.embed_text", _fake_embed)
+    monkeypatch.setattr("app.features.documents.retrieval.graph.nodes.embed_text", _fake_embed)
     repo = _LoopRepo()
     graph = _loop_graph(repo)
 

@@ -8,6 +8,7 @@ test exercises PostgreSQL's real retrieval branches without leaving rows behind.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
@@ -20,15 +21,17 @@ from app.ai.evaluation.report import EvaluationReport, write_report
 from app.ai.evaluation.schema import load_golden_set
 from app.config import get_settings
 from app.connections import init_db
-from app.features.documents import service as document_service
-from app.features.documents.evaluation import (
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    DocumentRepository,
+)
+from app.features.documents.application.evaluation import (
     run_live_retrieval_eval,
     stored_document_kind,
     stored_jurisdiction,
 )
-from app.features.documents.models import UnifiedChunk, UnifiedDocument
-from app.features.documents.repository import DocumentRepository
-from app.features.documents.service import DocumentQueryService
+from app.features.documents.application.queries.documents import DocumentQueryService
+from app.features.documents.domain.chunk import UnifiedChunk
+from app.features.documents.domain.document import UnifiedDocument
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -150,7 +153,7 @@ async def test_live_retrieval_returns_real_identifiers(
         message = "retrieval evaluation unexpectedly constructed an LLM"
         raise AssertionError(message)
 
-    monkeypatch.setattr(document_service, "embed_text", embed_query)
+    monkeypatch.setattr(import_module("app.features.documents.application.queries.documents"), "embed_text", embed_query)
     engine, session_local = await init_db()
     async with session_local() as session:
         transaction = await session.begin()

@@ -256,7 +256,7 @@ def _annotate_structure_aware_chunks(
     """Record policy identity and recovered locus after hybrid chunking (tasks 3.2, 4.2)."""
     # Local imports keep the shared rag package free of an import-time cycle
     # with features.documents while still satisfying the write-path wiring.
-    from app.features.documents.classification import (
+    from app.features.documents.ingestion.chunking.classification import (
         recover_locus_from_text,
     )
     from app.retrieval.chunk_policy import resolve_chunk_policy

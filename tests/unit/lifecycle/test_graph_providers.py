@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.features.documents import ingestion_graph
+from app.features.documents.ingestion import workflow as ingestion_graph
 from app.lifecycle import graphs
 from app.lifecycle.graphs import provide_document_ingestion_graph
 

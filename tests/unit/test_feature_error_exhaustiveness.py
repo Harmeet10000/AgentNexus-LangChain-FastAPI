@@ -47,7 +47,7 @@ from app.features.crawler.exceptions import (
     CrawlerValidationError,
     crawler_error_to_http_status,
 )
-from app.features.documents.exceptions import (
+from app.features.documents.domain.errors import (
     DocumentChunkConflictError,
     DocumentConflictError,
     DocumentDatabaseError,
@@ -59,7 +59,7 @@ from app.features.documents.exceptions import (
     DocumentValidationError,
     document_error_to_http_status,
 )
-from app.features.ingestion.exceptions import (
+from app.features.documents.ingestion.legacy_errors import (
     IngestionGraphError,
     IngestionInternalError,
     IngestionPipelineError,

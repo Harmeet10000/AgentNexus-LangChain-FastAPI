@@ -26,14 +26,16 @@ from app.extraction.docling.docling_enhanced import (
     ExtractionStage,
 )
 from app.extraction.docling.models import DoclingEnhancementConfig
-from app.features.documents.constants import RRF_WEIGHT_TRIGRAM
-from app.features.documents.repository import build_search_filter_params
-from app.features.documents.service import (
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    build_search_filter_params,
+)
+from app.features.documents.application.queries.documents import (
     RETRIEVAL_BRANCHES,
     RetrievalBranchPolicy,
     _BranchInput,
     retrieve_fused,
 )
+from app.features.documents.domain.constants import RRF_WEIGHT_TRIGRAM
 from app.features.health.health_check import ALL_PROBES
 from app.lifecycle.lifespan import (
     STARTUP_POLICIES,

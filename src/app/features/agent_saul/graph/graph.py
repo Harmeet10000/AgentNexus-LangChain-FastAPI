@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from langgraph.graph.state import CompiledStateGraph
 
-    from app.features.documents.tools.bundle import AgentToolBundle
+    from app.features.documents.application.tools.bundle import AgentToolBundle
 
     from .factory import SaulGraphNodes
 

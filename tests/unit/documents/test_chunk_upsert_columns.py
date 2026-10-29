@@ -16,7 +16,10 @@ from datetime import UTC, datetime
 
 from sqlalchemy.dialects import postgresql
 
-from app.features.documents.repository import build_chunk_rows, build_chunk_upsert_statement
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    build_chunk_rows,
+    build_chunk_upsert_statement,
+)
 
 _CONFLICT_SET_COLUMNS = (
     "chunk_kind",

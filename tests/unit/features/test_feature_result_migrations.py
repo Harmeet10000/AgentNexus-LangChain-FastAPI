@@ -21,8 +21,11 @@ from app.features.billing.dunning.exceptions import DunningInfrastructureError
 from app.features.billing.dunning.service import DunningService
 from app.features.billing.plans.exceptions import PlanConflictError
 from app.features.billing.plans.service import PlanService
-from app.features.ingestion.exceptions import IngestionGraphError, IngestionPipelineError
-from app.features.ingestion.service import IngestionService
+from app.features.documents.ingestion.legacy_errors import (
+    IngestionGraphError,
+    IngestionPipelineError,
+)
+from app.features.documents.ingestion.legacy_service import IngestionService
 from app.features.profile.exceptions import ProfileAuthenticationError
 from app.features.profile.service import ProfileService
 from app.features.users.exceptions import UsersConflictError, UsersInfrastructureError

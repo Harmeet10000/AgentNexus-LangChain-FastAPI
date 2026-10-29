@@ -11,8 +11,10 @@ if TYPE_CHECKING:
     from typing import Any
 
 from app.features.auth.domain.tenancy import personal_tenant_id
-from app.features.documents.repository import build_chunk_rows
-from app.features.documents.tools.authorization import trusted_tool_context
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    build_chunk_rows,
+)
+from app.features.documents.application.tools.authorization import trusted_tool_context
 from app.retrieval.graphiti.client import (
     get_obligation_chain,
     search_for_precedent_chains,
@@ -138,16 +140,16 @@ async def test_graphiti_allowlist_without_tenant_does_not_issue_unscoped_search(
 
 
 def test_evidence_tools_hide_identity_and_document_scope_from_model_schema() -> None:
-    from app.features.documents.tools.get_obligation_chain import (
+    from app.features.documents.application.tools.get_obligation_chain import (
         make_get_obligation_chain_tool,
     )
-    from app.features.documents.tools.query_knowledge_graph import (
+    from app.features.documents.application.tools.query_knowledge_graph import (
         make_query_knowledge_graph_tool,
     )
-    from app.features.documents.tools.retrieve_statute_section import (
+    from app.features.documents.application.tools.retrieve_statute_section import (
         make_retrieve_statute_section_tool,
     )
-    from app.features.documents.tools.search_legal_precedents import (
+    from app.features.documents.application.tools.search_legal_precedents import (
         make_search_legal_precedents_tool,
     )
 

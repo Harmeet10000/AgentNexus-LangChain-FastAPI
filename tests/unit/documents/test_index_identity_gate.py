@@ -19,7 +19,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.features.documents import constants, repository
+from app.features.documents.adapters.persistence.postgres import document_repository as repository
+from app.features.documents.domain import constants
 
 _REPO_SOURCE = Path(repository.__file__).read_text(encoding="utf-8")
 

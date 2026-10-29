@@ -1,5 +1,5 @@
-from app.features.documents.classification import classify_document
-from app.features.documents.evaluation import stored_document_kind, stored_jurisdiction
+from app.features.documents.application.evaluation import stored_document_kind, stored_jurisdiction
+from app.features.documents.ingestion.chunking.classification import classify_document
 
 
 def test_golden_document_kinds_map_to_ingestion_kinds() -> None:

@@ -29,8 +29,8 @@ from app.features.agent_saul.document_source import (
     DocumentTextFailureCode,
     document_content_source_from_config,
 )
-from app.features.documents.dto import EvidenceSearchRequest, EvidenceSearchResponse
-from app.features.documents.tools.authorization import ToolRuntimeContext
+from app.features.documents.api.http.dto import EvidenceSearchRequest, EvidenceSearchResponse
+from app.features.documents.application.tools.authorization import ToolRuntimeContext
 from app.observability.logging import logger
 from app.shared.langchain_layer.messages import make_delegation_pair
 
@@ -81,7 +81,7 @@ from .state import (
 )
 
 if TYPE_CHECKING:
-    from app.features.documents.dto import EvidencePolicy
+    from app.features.documents.api.http.dto import EvidencePolicy
 
 _CLARIFICATION_THRESHOLD = 0.72
 _OCR_CONFIDENCE_THRESHOLD = 0.85

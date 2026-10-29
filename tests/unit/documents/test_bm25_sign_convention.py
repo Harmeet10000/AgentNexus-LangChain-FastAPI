@@ -12,7 +12,9 @@ import inspect
 from operator import itemgetter
 from pathlib import Path
 
-from app.features.documents import repository as repository_module
+from app.features.documents.adapters.persistence.postgres import (
+    document_repository as repository_module,
+)
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
 
 _REPO_SOURCE = Path(inspect.getfile(repository_module)).read_text(encoding="utf-8")

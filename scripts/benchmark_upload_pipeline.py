@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING
 from returns.result import Failure
 
 from app.config import get_settings
-from app.features.documents.classification import classify_document
-from app.features.documents.parser import parse_document
+from app.features.documents.ingestion.chunking.classification import classify_document
+from app.features.documents.ingestion.parsing.parser import parse_document
 from app.shared.upload_validation import read_bounded_upload
 
 if TYPE_CHECKING:

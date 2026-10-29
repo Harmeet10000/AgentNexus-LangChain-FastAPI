@@ -22,8 +22,10 @@ import pytest
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.documents.models import UnifiedChunk
-from app.features.documents.repository import DocumentRepository
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    DocumentRepository,
+)
+from app.features.documents.domain.chunk import UnifiedChunk
 from app.retrieval.embeddings import CHUNK_EMBEDDING_DIM
 from app.utils.embedding import (
     assert_stored_width_matches_configured,

@@ -19,11 +19,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import get_settings
 from app.connections.postgres import get_database_url
-from app.features.documents.models import UnifiedChunk, UnifiedDocument
-from app.features.documents.repository import (
+from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
     build_search_filter_params,
 )
+from app.features.documents.domain.chunk import UnifiedChunk
+from app.features.documents.domain.document import UnifiedDocument
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 

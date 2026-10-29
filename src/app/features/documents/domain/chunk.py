@@ -1,0 +1,218 @@
+"""Unified chunk SQLAlchemy model — the retrieval-truth chunk aggregate."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4  # noqa: TC003 — UUID resolved at runtime by SQLAlchemy mapper
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    Boolean,
+    Computed,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy import text as sa_text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import (  # noqa: TC002 — Mapped resolved at runtime by SQLAlchemy mapper
+    Mapped,
+    mapped_column,
+    relationship,
+)
+
+from app.retrieval.embeddings import CHUNK_EMBEDDING_DIM
+from database.base import Base
+
+if TYPE_CHECKING:
+    from app.features.documents.domain.document import UnifiedDocument
+
+# The width `chunks.embedding` is created with, captured once when this module is
+# imported. The single definition lives in `app.retrieval.embeddings` and is
+# re-exported here so existing `from ...domain.chunk import CHUNK_EMBEDDING_DIM`
+# readers keep working. Two reasons it is a named constant rather than an inline call:
+#
+# 1. It is the *stored* width. `get_settings()` is re-read on every call, but a
+#    SQLAlchemy column type is concrete for the life of the process — so the
+#    moment configuration changes underneath a running app, this constant and
+#    `EMBEDDING_DIMENSION` disagree, and that disagreement is exactly what the
+#    write guard in `document_repository._reject_width_mismatch` detects.
+# 2. Reading it back off the column (`__table__.c.embedding.type.dim`) is typed
+#    as the base `TypeEngine`, which declares no `dim` — so every consumer would
+#    need a narrowing dance or a suppression to get an `int` out.
+#
+# Not annotated `Final`: `from __future__ import annotations` makes the annotation
+# a string that is never evaluated, so the import would be typing-only and `TC003`
+# would ask for a type-checking block. The module-level SCREAMING_SNAKE name is
+# how this codebase already spells a constant.
+# (Value assigned in `app.retrieval.embeddings`; re-exported here for readers
+# of this module — `Vector(CHUNK_EMBEDDING_DIM)` below is unchanged.)
+
+
+class UnifiedChunk(Base):
+    """Single retrieval-truth searchable chunk row."""
+
+    __tablename__ = "chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "document_version",
+            "chunk_index",
+            name="uq_chunks_document_version_chunk_index",
+        ),
+        Index("ix_chunks_user_document", "user_id", "document_id"),
+        Index("ix_chunks_tenant_document", "tenant_id", "document_id"),
+        Index("ix_chunks_kind", "chunk_kind"),
+        Index(
+            "ix_chunks_kind_legal_contract",
+            "tenant_id",
+            postgresql_where=sa_text("chunk_kind = 'legal_contract'"),
+        ),
+        Index(
+            "ix_chunks_kind_legal_policy",
+            "tenant_id",
+            postgresql_where=sa_text("chunk_kind = 'legal_policy'"),
+        ),
+        Index(
+            "ix_chunks_kind_generic",
+            "tenant_id",
+            postgresql_where=sa_text("chunk_kind = 'generic'"),
+        ),
+        Index("ix_chunks_metadata_gin", "metadata_", postgresql_using="gin"),
+        Index("ix_chunks_graphiti_verified", "graphiti_verified"),
+        # The three retrieval branches. Declared here, not only in the migration,
+        # because an index present in the database and absent from the registry is
+        # one `alembic check` proposes to REMOVE — and `chunks_bm25_idx` is passed
+        # to `to_bm25query()` as a literal string, so a silent drop would make
+        # keyword retrieval match nothing without raising. The names are a query
+        # contract; see `features/documents/adapters/persistence/postgres/document_repository.py`.
+        # bm25 comes from pg_textsearch, diskann from vectorscale, gin_trgm_ops
+        # from pg_trgm — all three created by revision a5bd6b69a28e.
+        Index(
+            "chunks_bm25_idx",
+            "search_text",
+            postgresql_using="bm25",
+            # Values render through str() unquoted, so 'english' carries its own
+            # quotes — a bare "english" would emit an unquoted identifier.
+            postgresql_with={"text_config": "'english'", "k1": "1.2", "b": "0.75"},
+        ),
+        Index(
+            "chunks_embedding_idx",
+            "embedding",
+            postgresql_using="diskann",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "chunks_search_text_trgm_idx",
+            "search_text",
+            postgresql_using="gin",
+            postgresql_ops={"search_text": "gin_trgm_ops"},
+        ),
+        # Serves the legal-corpus statute point lookup (instrument + section),
+        # tenant-scoped and partial: every read is tenant-scoped, so user_id
+        # leads; the two identity columns next make the lookup one index
+        # descent. Year DESC NULLS LAST lets the newest dated version come off
+        # the same scan; NULL years (unversioned rows) sort after dated ones
+        # under PostgreSQL's DESC ordering. The partial predicate keeps the
+        # non-statute majority of chunks off the index entirely.
+        # Created by revision 0016; rescoped by revision 0017.
+        Index(
+            "ix_chunks_instrument_section",
+            "tenant_id",
+            "instrument_name",
+            "section_ref",
+            sa_text("instrument_year DESC NULLS LAST"),
+            postgresql_where=sa_text("instrument_name IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False, default="")
+    document_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(column="documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(String(length=255), nullable=False)
+    # Version of the parent document this chunk belongs to. Together with
+    # document_id and chunk_index it forms chunk identity — two versions of the
+    # same document coexist with distinguishable rows rather than overwriting.
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Stable contract identity within a multi-contract source file.  ``NULL``
+    # is the explicit legacy/unknown value; it is never treated as contract 0.
+    contract_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pipeline_version: Mapped[str] = mapped_column(
+        String(length=128), nullable=False, default="documents-v1"
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_kind: Mapped[str] = mapped_column(String(length=64), nullable=False, default="generic")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    preamble: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Structural address recovered from clause numbering (e.g. "3.2(a)"). Absent
+    # (NULL) when unknown — never an empty string, which would collide with a
+    # real locus of "" under uniqueness-by-convention and confuse consumers.
+    locus: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
+    clause_type: Mapped[str | None] = mapped_column(String(length=128), nullable=True)
+    page_no: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Width comes from the one configured value, not a literal. It resolves to the
+    # same 768 today, so this renders identically and `alembic check` proposes
+    # nothing — which is the point: this is the cheapest possible moment to remove
+    # the literal, before any row exists to migrate. Read at class-definition time
+    # because a SQLAlchemy column type must be concrete when the class body runs.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(CHUNK_EMBEDDING_DIM), nullable=True
+    )
+    metadata_: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict, nullable=False)
+    custom_metadata: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict, nullable=False)
+    quality_warnings: Mapped[list[object]] = mapped_column(JSONB, default=list, nullable=False)
+    graphiti_episode_id: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
+    graphiti_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Retain graphiti_verified for rolling-deploy compatibility.  This
+    # timestamp is the provenance signal exposed as graph_indexed to callers;
+    # it records graph observation, not legal truth.
+    graph_indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    search_text: Mapped[str] = mapped_column(
+        Text,
+        Computed(
+            sqltext="COALESCE(clause_type, '') || ' ' || "
+            "COALESCE(preamble, '') || ' ' || "
+            "COALESCE(content, '')",
+            persisted=True,
+        ),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    # ORM-owned, mirroring UnifiedDocument: the row builder supplies the
+    # timestamp and the chunk upsert's conflict set refreshes it explicitly.
+    # SQLAlchemy does not merge `onupdate` into an explicit DO UPDATE SET, so a
+    # server_default here would leave every chunk's updated_at equal to its
+    # creation time forever — populated, non-null, and dead. Revision
+    # f2a9c47b81de dropped the server default when ownership was settled.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(tz=UTC),
+        onupdate=lambda: datetime.now(tz=UTC),
+        nullable=False,
+    )
+    # Statute attributes, written through and read by change 3's
+    # legal-corpus-retrieval. Nullable until that change populates them;
+    # added to the database by revision f2a9c47b81de.
+    instrument_name: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
+    section_ref: Mapped[str | None] = mapped_column(String(length=255), nullable=True)
+    instrument_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # String-named for the same reason the inverse relationship is: the
+    # aggregates live in sibling modules and the registry resolves the name.
+    document: Mapped[UnifiedDocument] = relationship("UnifiedDocument", back_populates="chunks")

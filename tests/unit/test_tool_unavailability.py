@@ -62,7 +62,7 @@ async def _noop(*_a: Any, **_k: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_statute_tool_answers_unavailable_when_corpus_raises(monkeypatch: Any) -> None:
-    from app.features.documents.tools.retrieve_statute_section import (
+    from app.features.documents.application.tools.retrieve_statute_section import (
         make_retrieve_statute_section_tool,
     )
 
@@ -71,7 +71,7 @@ async def test_statute_tool_answers_unavailable_when_corpus_raises(monkeypatch: 
         raise SQLAlchemyError(message)
 
     monkeypatch.setattr(
-        "app.features.documents.tools.retrieve_statute_section._fetch_statute_section",
+        "app.features.documents.application.tools.retrieve_statute_section._fetch_statute_section",
         _raise,
     )
     tool = make_retrieve_statute_section_tool(
@@ -95,7 +95,7 @@ async def test_statute_tool_answers_unavailable_when_corpus_raises(monkeypatch: 
 
 @pytest.mark.asyncio
 async def test_precedent_search_answers_unavailable_when_corpus_raises(monkeypatch: Any) -> None:
-    from app.features.documents.tools.search_legal_precedents import (
+    from app.features.documents.application.tools.search_legal_precedents import (
         make_search_legal_precedents_tool,
     )
 
@@ -113,7 +113,7 @@ async def test_precedent_search_answers_unavailable_when_corpus_raises(monkeypat
         _idempotency(),
     )
     monkeypatch.setattr(
-        "app.features.documents.tools.search_legal_precedents._search_statutes_postgres",
+        "app.features.documents.application.tools.search_legal_precedents._search_statutes_postgres",
         _raise,
     )
     result = await tool.ainvoke(
@@ -135,7 +135,7 @@ async def test_a_partial_source_set_sets_basis_unknown_and_keeps_the_survivor(
 ) -> None:
     """One leg unreachable + one leg answered → ok envelope, basis_unknown=True,
     insufficient_basis withheld (None), survivor results retained."""
-    from app.features.documents.tools.search_legal_precedents import (
+    from app.features.documents.application.tools.search_legal_precedents import (
         make_search_legal_precedents_tool,
     )
 
@@ -149,7 +149,7 @@ async def test_a_partial_source_set_sets_basis_unknown_and_keeps_the_survivor(
 
     tool = make_search_legal_precedents_tool(_Graphiti(), object(), _idempotency())
     monkeypatch.setattr(
-        "app.features.documents.tools.search_legal_precedents._search_statutes_postgres",
+        "app.features.documents.application.tools.search_legal_precedents._search_statutes_postgres",
         _raise,
     )
     result = await tool.ainvoke(
@@ -173,7 +173,7 @@ async def test_a_partial_source_set_sets_basis_unknown_and_keeps_the_survivor(
 async def test_graphiti_outage_is_not_rendered_as_empty_precedent_success(
     monkeypatch: Any,
 ) -> None:
-    from app.features.documents.tools.search_legal_precedents import (
+    from app.features.documents.application.tools.search_legal_precedents import (
         make_search_legal_precedents_tool,
     )
     from app.retrieval.graphiti.schemas import GraphitiAvailability, GraphitiSearchOutcome
@@ -189,7 +189,7 @@ async def test_graphiti_outage_is_not_rendered_as_empty_precedent_success(
         return []
 
     monkeypatch.setattr(
-        "app.features.documents.tools.search_legal_precedents._search_statutes_postgres",
+        "app.features.documents.application.tools.search_legal_precedents._search_statutes_postgres",
         _statutes,
     )
 

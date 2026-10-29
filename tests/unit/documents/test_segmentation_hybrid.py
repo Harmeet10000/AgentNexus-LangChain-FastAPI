@@ -10,7 +10,7 @@ and a long document is covered in full.
 
 from __future__ import annotations
 
-from app.features.documents.classification import (
+from app.features.documents.ingestion.chunking.classification import (
     ClassifiedDocument,
     ParsedDocument,
     classify_document,

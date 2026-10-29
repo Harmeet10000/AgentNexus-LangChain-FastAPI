@@ -2,7 +2,7 @@
 
 from app.features.auth.domain.errors import AuthInfrastructureError
 from app.features.billing.plans.exceptions import PlanInfrastructureError
-from app.features.documents.exceptions import DocumentDatabaseError
+from app.features.documents.domain.errors import DocumentDatabaseError
 
 
 def test_relational_database_errors_are_not_retryable() -> None:

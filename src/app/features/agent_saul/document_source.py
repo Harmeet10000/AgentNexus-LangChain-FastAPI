@@ -31,9 +31,11 @@ from returns.result import Failure, Result, Success
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.features.documents.exceptions import DocumentNotFoundError
-from app.features.documents.models import UnifiedChunk
-from app.features.documents.repository import DocumentRepository
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    DocumentRepository,
+)
+from app.features.documents.domain.chunk import UnifiedChunk
+from app.features.documents.domain.errors import DocumentNotFoundError
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -44,7 +46,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
     from sqlalchemy.sql.selectable import Select
 
-    from app.features.documents.exceptions import DocumentDatabaseError
+    from app.features.documents.domain.errors import DocumentDatabaseError
 
 # ---------------------------------------------------------------------------
 # Failure taxonomy (caller-side union, translated into feature unions at edges)

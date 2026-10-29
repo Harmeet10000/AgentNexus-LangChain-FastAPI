@@ -13,12 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.ai.graph.retry import TransientExternalError
-from app.features.documents.retrieval_graph import nodes as retrieval_nodes
-from app.features.documents.retrieval_graph.nodes import (
+from app.features.documents.retrieval.graph import nodes as retrieval_nodes
+from app.features.documents.retrieval.graph.nodes import (
     make_graph_retrieval_node,
     make_query_analyzer_node,
 )
-from app.features.documents.retrieval_graph.state import QueryPlan
+from app.features.documents.retrieval.graph.state import QueryPlan
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
 
 if TYPE_CHECKING:

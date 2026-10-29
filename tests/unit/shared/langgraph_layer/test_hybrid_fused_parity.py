@@ -10,12 +10,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from app.features.documents.constants import RRF_WEIGHT_TRIGRAM
-from app.features.documents.dto import UnifiedSearchRequest
-from app.features.documents.retrieval_graph import nodes as retrieval_nodes
-from app.features.documents.retrieval_graph.nodes import make_hybrid_retrieval_node
-from app.features.documents.retrieval_graph.state import QueryPlan
-from app.features.documents.service import DocumentQueryService, retrieve_fused
+from app.features.documents.api.http.dto import UnifiedSearchRequest
+from app.features.documents.application.queries.documents import (
+    DocumentQueryService,
+    retrieve_fused,
+)
+from app.features.documents.domain.constants import RRF_WEIGHT_TRIGRAM
+from app.features.documents.retrieval.graph import nodes as retrieval_nodes
+from app.features.documents.retrieval.graph.nodes import make_hybrid_retrieval_node
+from app.features.documents.retrieval.graph.state import QueryPlan
 
 if TYPE_CHECKING:
     from typing import Any
@@ -77,7 +80,7 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(retrieval_nodes, "embed_text", _fake_embed)
-    monkeypatch.setattr("app.features.documents.service.embed_text", _fake_embed)
+    monkeypatch.setattr("app.features.documents.application.queries.documents.embed_text", _fake_embed)
     weights = [0.6, 0.4, RRF_WEIGHT_TRIGRAM]
     repo = _StubRepo()
 

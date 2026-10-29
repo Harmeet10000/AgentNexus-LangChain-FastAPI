@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -13,11 +14,16 @@ from sqlalchemy import delete, func, select
 
 from app.config import get_settings
 from app.connections import init_db
-from app.features.documents import service as document_service
-from app.features.documents.ingestion_graph import build_document_ingestion_graph
-from app.features.documents.models import UnifiedChunk, UnifiedDocument
-from app.features.documents.repository import DocumentRepository
-from app.features.documents.service import process_document_ingestion, run_document_ingestion_task
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    DocumentRepository,
+)
+from app.features.documents.application.commands.upload_document import (
+    process_document_ingestion,
+    run_document_ingestion_task,
+)
+from app.features.documents.domain.chunk import UnifiedChunk
+from app.features.documents.domain.document import UnifiedDocument
+from app.features.documents.ingestion.workflow import build_document_ingestion_graph
 from app.resilience.idempotency import IdempotencyGuard
 from app.utils.storage import StorageService
 
@@ -46,7 +52,7 @@ async def test_uploaded_fixture_reaches_chunk_rows_through_the_compiled_graph(
     async def embed_texts(texts: list[str], **_kwargs: object) -> list[list[float]]:
         return [[0.0] * width for _ in texts]
 
-    monkeypatch.setattr(document_service, "embed_texts", embed_texts)
+    monkeypatch.setattr(import_module("app.features.documents.application.commands.upload_document"), "embed_texts", embed_texts)
     graph = build_document_ingestion_graph(
         object_store=cast("Any", object_store),
         graphiti=None,

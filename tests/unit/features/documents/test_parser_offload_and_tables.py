@@ -32,8 +32,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.features.documents import parser as parser_module
-from app.features.documents.parser import DocumentExtractionBudgetError, parse_document
+from app.features.documents.ingestion.parsing import parser as parser_module
+from app.features.documents.ingestion.parsing.parser import (
+    DocumentExtractionBudgetError,
+    parse_document,
+)
 
 if TYPE_CHECKING:
     from typing import Any

@@ -12,13 +12,17 @@ from typing import TYPE_CHECKING
 
 from returns.result import Success
 
-from app.features.documents.constants import PHRASE_OVERFETCH_MULTIPLE
-from app.features.documents.repository import _phrase_like_pattern
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    _phrase_like_pattern,
+)
+from app.features.documents.domain.constants import PHRASE_OVERFETCH_MULTIPLE
 
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.features.documents.repository import DocumentRepository
+    from app.features.documents.adapters.persistence.postgres.document_repository import (
+        DocumentRepository,
+    )
 
 
 def test_phrase_pattern_escapes_wildcard_and_escape_characters() -> None:
@@ -60,7 +64,9 @@ class _CapturingSession:
 
 
 def _repository(session: _CapturingSession) -> DocumentRepository:
-    from app.features.documents.repository import DocumentRepository
+    from app.features.documents.adapters.persistence.postgres.document_repository import (
+        DocumentRepository,
+    )
 
     return DocumentRepository(session)  # type: ignore[arg-type]
 

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from app.features.documents.classification import PreparedChunk
-from app.features.documents.constants import CHUNKS_UNIQUE_CONSTRAINT_NAME
-from app.features.documents.models import UnifiedChunk
-from app.features.documents.repository import build_chunk_rows
+from app.features.documents.adapters.persistence.postgres.document_repository import (
+    build_chunk_rows,
+)
+from app.features.documents.domain.chunk import UnifiedChunk
+from app.features.documents.domain.constants import CHUNKS_UNIQUE_CONSTRAINT_NAME
+from app.features.documents.ingestion.chunking.classification import PreparedChunk
 
 
 def test_unique_constraint_includes_document_version() -> None:

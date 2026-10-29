@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.features.documents.classification import (
+from app.features.documents.ingestion.chunking.classification import (
     PreparedChunk,
     recover_clause_numbering,
 )

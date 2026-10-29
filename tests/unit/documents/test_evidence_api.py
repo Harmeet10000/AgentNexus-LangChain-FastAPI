@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 from returns.result import Success
 
-from app.features.documents.dto import EvidenceSearchRequest
-from app.features.documents.service import evidence as evidence_module
-from app.features.documents.service.evidence import (
+from app.features.documents.api.http.dto import EvidenceSearchRequest
+from app.features.documents.application.evidence import service as evidence_module
+from app.features.documents.application.evidence.service import (
     EvidenceHandle,
     EvidenceService,
     InMemoryEvidenceHandleStore,
