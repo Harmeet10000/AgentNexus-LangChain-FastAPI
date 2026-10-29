@@ -1,4 +1,5 @@
 import traceback
+from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -166,13 +167,16 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
     )
 
 
-def register_exception_handlers(app: FastAPI) -> None:
-    """Install :func:`global_exception_handler` for every error class the app can raise.
+def exception_handler_bindings() -> tuple[
+    tuple[type[Exception], Callable[[Request, Exception], Awaitable[Response]]], ...
+]:
+    """The installation contract for the global exception handler.
 
-    **Load-bearing. Deleting a line here silently deletes a branch of the handler above —
-    no exception, no warning, no failing import, no lint finding.** The application shipped
-    for months with three of that handler's four branches unreachable for exactly this
-    reason. Do not "simplify" this to the single ``Exception`` registration it replaced.
+    **Load-bearing. Deleting a row here silently deletes a branch of the
+    handler above — no exception, no warning, no failing import, no lint
+    finding.** The application shipped for months with three of that
+    handler's four branches unreachable for exactly this reason. Do not
+    "simplify" this to the single ``Exception`` registration it replaced.
 
     Starlette splits ``add_exception_handler`` across two middlewares, and they are not
     interchangeable:
@@ -211,10 +215,25 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     ``WebSocketRequestValidationError`` is deliberately left with FastAPI's own handler. It
     closes the socket with a code; a websocket scope cannot send an HTTP JSON envelope.
+
+    Order is irrelevant — resolution is by MRO specificity, not insertion — but is kept
+    broad-to-narrow to read as the fallback chain it behaves like.
     """
-    # Order is irrelevant — resolution is by MRO specificity, not insertion — but is kept
-    # broad-to-narrow to read as the fallback chain it behaves like.
-    app.add_exception_handler(Exception, global_exception_handler)
-    app.add_exception_handler(StarletteHTTPException, global_exception_handler)
-    app.add_exception_handler(RequestValidationError, global_exception_handler)
-    app.add_exception_handler(APIException, global_exception_handler)
+    return (
+        (Exception, global_exception_handler),
+        (StarletteHTTPException, global_exception_handler),
+        (RequestValidationError, global_exception_handler),
+        (APIException, global_exception_handler),
+    )
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """Install the rows from :func:`exception_handler_bindings` on the app.
+
+    ``tests/unit/middleware/test_exception_handler_registry_closure.py`` asserts every
+    row lands in ``app.exception_handlers`` and that the MRO dispatch resolves each
+    branch back to this module's handler — a deleted row now fails CI instead of
+    rendering a branch unreachable in production for months.
+    """
+    for exc_class, handler in exception_handler_bindings():
+        app.add_exception_handler(exc_class, handler)
