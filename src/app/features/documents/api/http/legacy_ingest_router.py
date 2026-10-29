@@ -25,7 +25,7 @@ from app.features.documents.ingestion.legacy_errors import IngestionValidationEr
 from app.features.documents.ingestion.legacy_service import IngestionService
 from app.kernel.result import render_result
 from app.observability.logging import logger
-from app.resilience.rate_limit import get_rate_limiter
+from app.shared.rate_limit import get_rate_limiter
 from app.shared.upload_validation import read_bounded_upload, upload_issue_details
 from app.utils import APIResponse
 

@@ -1,0 +1,169 @@
+"""Fixed-window provider quota limiter, Redis-backed (keys ``rate:*:min/hour``)."""
+
+from typing import Any
+
+from redis.asyncio import Redis
+
+from app.shared.rate_limit.application.policy import RATE_LIMIT_CONFIGS, RateLimitScope
+
+
+class RateLimiter:
+    """Rate limiter using fastapi-limiter and Redis backend."""
+
+    def __init__(self, redis_client: Redis | None = None):
+        self.redis_client = redis_client
+
+    async def check_rate_limit(
+        self,
+        identifier: str,
+        scope: RateLimitScope,
+    ) -> tuple[bool, dict[str, Any]]:
+        """
+        Check if rate limit is exceeded.
+
+        Args:
+            identifier: User identifier (user_id or IP)
+            scope: Rate limit scope
+
+        Returns:
+            Tuple of (is_allowed, rate_limit_info)
+        """
+        if not self.redis_client:
+            return True, {}
+
+        config = RATE_LIMIT_CONFIGS.get(scope)
+        if not config:
+            return True, {}
+
+        minute_key = f"rate:{scope.value}:{identifier}:min"
+        hour_key = f"rate:{scope.value}:{identifier}:hour"
+
+        minute_count = await self.redis_client.get(minute_key)
+        hour_count = await self.redis_client.get(hour_key)
+
+        current_minute = int(minute_count) if minute_count else 0
+        current_hour = int(hour_count) if hour_count else 0
+
+        if current_minute >= config.per_minute:
+            ttl_minute = await self.redis_client.ttl(minute_key)
+            return False, {
+                "error": "Rate limit exceeded",
+                "limit": config.per_minute,
+                "window": "minute",
+                "retry_after": ttl_minute if ttl_minute > 0 else 60,
+            }
+
+        if current_hour >= config.per_hour:
+            ttl_hour = await self.redis_client.ttl(hour_key)
+            return False, {
+                "error": "Rate limit exceeded",
+                "limit": config.per_hour,
+                "window": "hour",
+                "retry_after": ttl_hour if ttl_hour > 0 else 3600,
+            }
+
+        return True, {
+            "remaining_minute": config.per_minute - current_minute - 1,
+            "remaining_hour": config.per_hour - current_hour - 1,
+        }
+
+    async def acquire(
+        self,
+        identifier: str,
+        scope: RateLimitScope,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Atomically consume one request from both rate-limit windows."""
+        if not self.redis_client:
+            return True, {}
+
+        config = RATE_LIMIT_CONFIGS.get(scope)
+        if config is None:
+            return True, {}
+
+        minute_key = f"rate:{scope.value}:{identifier}:min"
+        hour_key = f"rate:{scope.value}:{identifier}:hour"
+        # NOTE: expiry is set only on the first increment of a window. Setting
+        # EXPIRE on every call would extend the window on each request and pin
+        # steady traffic above the limit forever.
+        pipe = self.redis_client.pipeline(transaction=True)
+        pipe.incr(minute_key)
+        pipe.incr(hour_key)
+        minute_count, hour_count = await pipe.execute()
+        if minute_count == 1:
+            await self.redis_client.expire(minute_key, 60)
+        if hour_count == 1:
+            await self.redis_client.expire(hour_key, 3600)
+
+        if minute_count > config.per_minute or hour_count > config.per_hour:
+            exceeded_minute = minute_count > config.per_minute
+            retry_after = await self.redis_client.ttl(minute_key if exceeded_minute else hour_key)
+            return False, {
+                "error": "Rate limit exceeded",
+                "limit": config.per_minute if exceeded_minute else config.per_hour,
+                "window": "minute" if exceeded_minute else "hour",
+                "retry_after": max(int(retry_after), 0),
+            }
+
+        return True, {
+            "remaining_minute": config.per_minute - minute_count,
+            "remaining_hour": config.per_hour - hour_count,
+        }
+
+    async def increment_rate_limit(
+        self,
+        identifier: str,
+        scope: RateLimitScope,
+    ) -> None:
+        """Increment rate limit counter."""
+        if not self.redis_client:
+            return
+
+        minute_key = f"rate:{scope.value}:{identifier}:min"
+        hour_key = f"rate:{scope.value}:{identifier}:hour"
+
+        pipe = self.redis_client.pipeline()
+        pipe.incr(minute_key)
+        pipe.expire(minute_key, 60)
+        pipe.incr(hour_key)
+        pipe.expire(hour_key, 3600)
+        await pipe.execute()
+
+    async def get_remaining(
+        self,
+        identifier: str,
+        scope: RateLimitScope,
+    ) -> dict[str, int]:
+        """Get remaining rate limit quota."""
+        if not self.redis_client:
+            return {"remaining_minute": 0, "remaining_hour": 0}
+
+        config = RATE_LIMIT_CONFIGS.get(scope)
+        if not config:
+            return {"remaining_minute": 0, "remaining_hour": 0}
+
+        minute_key = f"rate:{scope.value}:{identifier}:min"
+        hour_key = f"rate:{scope.value}:{identifier}:hour"
+
+        minute_count = await self.redis_client.get(minute_key)
+        hour_count = await self.redis_client.get(hour_key)
+
+        current_minute = int(minute_count) if minute_count else 0
+        current_hour = int(hour_count) if hour_count else 0
+
+        return {
+            "remaining_minute": max(0, config.per_minute - current_minute),
+            "remaining_hour": max(0, config.per_hour - current_hour),
+        }
+
+
+_rate_limiter: RateLimiter | None = None
+
+
+def build_rate_limiter(redis_client: Redis | None = None) -> RateLimiter:
+    """Get rate limiter instance."""
+    global _rate_limiter  # noqa: PLW0603
+    if _rate_limiter is None:
+        _rate_limiter = RateLimiter(redis_client)
+    elif redis_client is not None:
+        _rate_limiter.redis_client = redis_client
+    return _rate_limiter

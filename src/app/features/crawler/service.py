@@ -15,7 +15,7 @@ from app.features.crawler.crawler import CrawlResult, WebCrawler
 from app.features.crawler.processor import GeminiProcessor
 from app.features.crawler.processor import SchemaType as ProcessorSchemaType
 from app.observability.logging import logger, trace_layer
-from app.resilience.rate_limit import RateLimiter, RateLimitScope
+from app.shared.rate_limit import RateLimiter, RateLimitScope
 
 from .constants import CrawlMode
 from .dto import (

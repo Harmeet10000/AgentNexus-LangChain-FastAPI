@@ -7,8 +7,8 @@ from fastapi import Request
 from app.features.crawler.crawler import WebCrawler
 from app.features.crawler.processor import GeminiProcessor
 from app.features.crawler.service import CrawlerService
-from app.resilience.rate_limit import RateLimiter
 from app.shared.jobs import JobBus
+from app.shared.rate_limit import RateLimiter
 from app.utils import ServiceUnavailableException
 
 from .job_store import CrawlJobStore
@@ -38,7 +38,7 @@ async def get_crawler_service(request: Request) -> CrawlerService:
 
 async def get_rate_limiter(request: Request) -> RateLimiter:
     """Get rate limiter instance with Redis from app.state."""
-    from app.resilience.rate_limit import build_rate_limiter
+    from app.shared.rate_limit import build_rate_limiter
 
     redis_client: Redis | None = getattr(request.app.state, "redis", None)
     return build_rate_limiter(redis_client=redis_client)

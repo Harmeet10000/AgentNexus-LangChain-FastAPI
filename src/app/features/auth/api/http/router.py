@@ -10,8 +10,8 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import Re
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import AuthAuthenticationError, AuthValidationError
 from app.kernel.result import render_result
-from app.resilience.rate_limit import get_rate_limiter
 from app.security.tokens import OAUTH_STATE_COOKIE
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse, http_response
 
 from .dependencies import (

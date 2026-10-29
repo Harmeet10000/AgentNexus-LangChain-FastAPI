@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fakeredis.aioredis import FakeRedis
 
-from app.resilience.rate_limit import RateLimiter, RateLimitScope
+from app.shared.rate_limit import RateLimiter, RateLimitScope
 
 
 class _SpyRedis(FakeRedis):

@@ -8,7 +8,7 @@ from returns.result import Failure
 from app.config import get_settings
 from app.features.documents.domain.errors import DocumentValidationError
 from app.kernel.result import render_result
-from app.resilience.rate_limit import get_rate_limiter
+from app.shared.rate_limit import get_rate_limiter
 from app.shared.upload_validation import read_bounded_upload, upload_issue_details
 from app.utils import APIResponse
 

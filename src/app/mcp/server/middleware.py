@@ -7,8 +7,8 @@ from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 from starlette.middleware import Middleware
 
 from app.config import get_settings
-from app.resilience.rate_limit import RateLimitService
 from app.security.tokens import decode_token
+from app.shared.rate_limit import RateLimitService
 from app.utils import UnauthorizedException
 
 if TYPE_CHECKING:

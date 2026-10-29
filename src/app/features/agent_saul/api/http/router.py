@@ -35,7 +35,7 @@ from app.features.auth.api.http.dependencies import CurrentAuthorizationContext,
 from app.features.documents.api.http.dependencies import DocumentAuthorizationDep
 from app.kernel.result import render_result
 from app.observability.logging import logger
-from app.resilience.rate_limit import get_rate_limiter
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 if TYPE_CHECKING:
