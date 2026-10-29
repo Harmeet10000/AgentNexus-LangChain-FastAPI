@@ -38,9 +38,12 @@ from app.features.agent_saul.runtime import (
     resolve_ws_session,
     thread_owner_violates,
 )
-from app.features.auth.exceptions import AuthInfrastructureError
-from app.features.auth.repository import SessionData
-from app.features.auth.websocket_security import WebSocketSecurityContext, WebSocketSecurityService
+from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
+from app.features.auth.api.websocket.security import (
+    WebSocketSecurityContext,
+    WebSocketSecurityService,
+)
+from app.features.auth.domain.errors import AuthInfrastructureError
 from app.security.tokens import TokenClaims
 from app.utils import ServiceUnavailableException
 

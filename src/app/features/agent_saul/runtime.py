@@ -28,13 +28,13 @@ from redis.asyncio import Redis
 from returns.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.features.auth.tenancy import LegalRole
+from app.features.auth.domain.tenancy import LegalRole
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
     from returns.result import Result
 
-    from app.features.auth.repository import SessionData
+    from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
 
 # ---------------------------------------------------------------------------
 # App-state component reads — one implementation, both scopes

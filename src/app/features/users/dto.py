@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.features.auth.models import UserRole
+from app.features.auth.domain.user import UserRole
 
 
 class PaginatedData[T](BaseModel):

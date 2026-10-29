@@ -42,8 +42,11 @@ from app.features.agent_saul.runtime import (
 )
 from app.features.agent_saul.transcript.export import TranscriptExporter
 from app.features.agent_saul.transcript.repository import ChatTranscriptRepository
-from app.features.auth.dependencies import WebSocketClaims, get_refresh_token_repository
-from app.features.auth.websocket_security import WebSocketSecurityContext, WebSocketSecurityService
+from app.features.auth.api.http.dependencies import WebSocketClaims, get_refresh_token_repository
+from app.features.auth.api.websocket.security import (
+    WebSocketSecurityContext,
+    WebSocketSecurityService,
+)
 from app.observability.logging import logger
 
 # The `_ws` variants below are WS-scoped siblings of their HTTP twins, not

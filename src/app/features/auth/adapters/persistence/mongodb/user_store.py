@@ -21,16 +21,20 @@ from returns.result import Failure, Success
 if TYPE_CHECKING:
     from returns.result import Result
 
-    from .exceptions import AuthError
-    from .models import LegalRole, User, UserRole
-else:
-    from .models import ROLE_PERMISSIONS, LegalRole, OAuthAccount, User, UserRole
+    from app.features.auth.domain.errors import AuthError
 
-from .exceptions import (
+from app.features.auth.domain.errors import (
     AuthConflictError,
     AuthInfrastructureError,
     AuthNotFoundError,
     AuthValidationError,
+)
+from app.features.auth.domain.tenancy import LegalRole
+from app.features.auth.domain.user import (
+    ROLE_PERMISSIONS,
+    OAuthAccount,
+    User,
+    UserRole,
 )
 
 

@@ -2,8 +2,8 @@ import math
 
 from returns.result import Failure, Success
 
-from app.features.auth.models import User, UserRole
-from app.features.auth.repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.domain.user import User, UserRole
 from app.observability.logging import logger, trace_layer
 from app.security.tokens import create_impersonation_token
 

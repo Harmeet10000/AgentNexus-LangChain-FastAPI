@@ -5,13 +5,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Response
 from returns.result import Failure, Success
 
-from app.features.auth.dependencies import (
+from app.kernel.result import render_result
+from app.utils import APIResponse
+
+from .dependencies import (
     TenantMembershipServiceDep,
     require_tenant_membership_admin,
 )
-from app.features.auth.dto import UpdateSelfReviewRequest, UpdateTenantMembershipRequest
-from app.kernel.result import render_result
-from app.utils import APIResponse
+from .dto import UpdateSelfReviewRequest, UpdateTenantMembershipRequest
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 _require_tenant_admin = Depends(require_tenant_membership_admin())

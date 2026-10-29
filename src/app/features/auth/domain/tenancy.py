@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from app.kernel.tenancy import (
+    personal_tenant_id,  # re-export: single canonical definition lives in the kernel
+)
+
 
 class LegalRole(StrEnum):
     """Tenant-scoped legal workflow role."""
@@ -38,14 +42,4 @@ def normalize_legal_role(value: LegalRole | str) -> LegalRole:
     return legacy if legacy is not None else LegalRole(value)
 
 
-def personal_tenant_id(user_id: str) -> str:
-    """Return the stable tenant used by the one-user backfill.
-
-    The prefix avoids confusing a legacy user id with a tenant id when both
-    appear in logs, cache keys, Graphiti groups, or migration diagnostics.
-    """
-
-    if not user_id:
-        message = "user_id must not be empty"
-        raise ValueError(message)
-    return f"personal:{user_id}"
+__all__ = ["LegalRole", "normalize_legal_role", "personal_tenant_id"]

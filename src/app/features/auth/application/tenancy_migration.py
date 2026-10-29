@@ -16,12 +16,14 @@ from pymongo.errors import PyMongoError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
+    TenantMembershipRepository,
+    normalize_legal_roles,
+)
+from app.features.auth.domain.tenancy import LegalRole, personal_tenant_id
+from app.features.auth.domain.tenancy_models import Tenant, TenantMembership
+from app.features.auth.domain.user import User
 from app.observability.logging import logger
-
-from .models import LegalRole, User
-from .tenancy import personal_tenant_id
-from .tenant_models import Tenant, TenantMembership
-from .tenant_repository import TenantMembershipRepository, normalize_legal_roles
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

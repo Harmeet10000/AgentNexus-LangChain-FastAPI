@@ -11,8 +11,8 @@ import pytest
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.auth.repository import SessionData
-from app.features.auth.websocket_security import (
+from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
+from app.features.auth.api.websocket.security import (
     WebSocketSecurityContext,
     WebSocketSecurityService,
     WebSocketSessionRevokedError,
@@ -22,7 +22,9 @@ from app.security.tokens import TokenClaims
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.features.auth.repository import RefreshTokenRepository
+    from app.features.auth.adapters.persistence.mongodb.account_repository import (
+        RefreshTokenRepository,
+    )
 
 pytestmark = pytest.mark.unit
 

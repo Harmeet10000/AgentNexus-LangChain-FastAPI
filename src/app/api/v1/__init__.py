@@ -2,8 +2,8 @@
 
 from app.api.envelope import StrictEnvelopeAPIRouter
 from app.features.agent_saul.router import router as agent_saul_router
-from app.features.auth.router import router as auth_router
-from app.features.auth.tenant_router import router as tenant_router
+from app.features.auth.api.http.router import router as auth_router
+from app.features.auth.api.http.tenant_router import router as tenant_router
 from app.features.crawler.router import router as crawler_router
 from app.features.documents.router import router as documents_router
 from app.features.health.router import router as health_router

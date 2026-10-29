@@ -9,9 +9,9 @@ import pytest
 from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.features.auth.account_store import AuthAccount
-from app.features.auth.models import UserRole
-from app.features.auth.service import AuthService
+from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccount
+from app.features.auth.application.service import AuthService
+from app.features.auth.domain.user import UserRole
 from app.security.passwords import hash_token
 
 if TYPE_CHECKING:
@@ -152,7 +152,7 @@ async def test_publish_outbox_preserves_diagnostics_in_internal_log_only(
             bound_fields.update(kwargs)
             return _BoundLogger()
 
-    monkeypatch.setattr("app.features.auth.service.logger", _Logger())
+    monkeypatch.setattr("app.features.auth.application.service.logger", _Logger())
 
     async def stage(**_kwargs: object) -> str:
         exc = SQLAlchemyError("postgres unavailable")
@@ -216,7 +216,7 @@ async def test_resend_failure_is_visible_and_retry_stages_fresh_current_intent(
     payloads: list[dict[str, object]] = []
     attempts = 0
 
-    monkeypatch.setattr("app.features.auth.service.generate_token", lambda: next(tokens))
+    monkeypatch.setattr("app.features.auth.application.service.generate_token", lambda: next(tokens))
 
     async def stage(**kwargs: object) -> str:
         nonlocal attempts

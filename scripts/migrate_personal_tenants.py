@@ -21,13 +21,13 @@ import sys
 from app.config import get_settings
 from app.connections.mongodb import close_mongo_client, create_mongo_client
 from app.connections.postgres import close_db_engine, init_db
-from app.features.auth.account_store import BeanieAuthAccountStore
-from app.features.auth.models import User
-from app.features.auth.tenant_migration import (
+from app.features.auth.adapters.persistence.mongodb.user_store import BeanieAuthAccountStore
+from app.features.auth.domain.user import User
+from app.features.auth.application.tenancy_migration import (
     PersonalTenantMigration,
     check_tenant_readiness,
 )
-from app.features.auth.tenant_repository import TenantMembershipService
+from app.features.auth.adapters.persistence.postgres.tenancy_repository import TenantMembershipService
 
 
 async def _run(*, dry_run: bool, check: bool, reconcile: bool, limit: int) -> dict[str, object]:

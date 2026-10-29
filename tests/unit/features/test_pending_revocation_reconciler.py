@@ -10,11 +10,11 @@ import pytest
 from fakeredis.aioredis import FakeRedis
 from returns.result import Failure, Success
 
-from app.features.auth.exceptions import AuthInfrastructureError
-from app.features.auth.pending_revocation import (
+from app.features.auth.application.revocation.pending import (
     PendingRevocationConfig,
     PendingRevocationReconciler,
 )
+from app.features.auth.domain.errors import AuthInfrastructureError
 
 pytestmark = pytest.mark.unit
 

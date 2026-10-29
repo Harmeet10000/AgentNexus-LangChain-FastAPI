@@ -15,7 +15,7 @@ from sqlalchemy import delete, func, select, text, update
 
 from app.events.model import OutboxEvent
 from app.events.writer import with_terminal_outbox
-from app.features.auth.tenancy import personal_tenant_id
+from app.kernel.tenancy import personal_tenant_id
 from app.observability.logging import logger
 from app.shared.jobs import EnqueueOptions, JobBus, prepare_job, require_direct_receipt
 from app.shared.jobs.names import DOCUMENTS_INGEST

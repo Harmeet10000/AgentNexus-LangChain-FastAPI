@@ -10,6 +10,27 @@ from returns.result import Failure, Success
 from starlette.requests import HTTPConnection
 
 from app.connections.redis import get_redis
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.user_store import (
+    AuthAccount,
+    AuthAccountStore,
+    BeanieAuthAccountStore,
+)
+from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
+    TenantMembershipService,
+)
+from app.features.auth.application.service import AuthService
+from app.features.auth.domain.errors import (
+    AuthAuthenticationError,
+    AuthAuthorizationError,
+    AuthConflictError,
+    AuthInfrastructureError,
+    AuthNotFoundError,
+    AuthResult,
+    AuthValidationError,
+)
+from app.features.auth.domain.tenancy import LegalRole
+from app.features.auth.domain.user import Permission, UserRole
 from app.observability.logging import set_request_actor
 from app.security.tokens import TokenClaims, decode_token
 from app.utils import (
@@ -20,25 +41,6 @@ from app.utils import (
     UnauthorizedException,
     ValidationException,
 )
-
-from .account_store import (
-    AuthAccount,
-    AuthAccountStore,
-    BeanieAuthAccountStore,
-)
-from .exceptions import (
-    AuthAuthenticationError,
-    AuthAuthorizationError,
-    AuthConflictError,
-    AuthInfrastructureError,
-    AuthNotFoundError,
-    AuthResult,
-    AuthValidationError,
-)
-from .models import LegalRole, Permission, UserRole
-from .repository import RefreshTokenRepository
-from .service import AuthService
-from .tenant_repository import TenantMembershipService
 
 _http_bearer = HTTPBearer(auto_error=False)
 _ACCESS_TOKEN_TYPE = "access"  # noqa: S105 — token type constant, not a password

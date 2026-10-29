@@ -17,7 +17,7 @@ from pyrate_limiter import BucketFullException, Limiter, Rate
 from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
 from returns.result import Failure
 
-from app.features.auth.websocket_revocation import (
+from app.features.auth.application.revocation.websocket import (
     REVOCATION_CLOSE_LATENCY,
     REVOCATION_CLOSED,
     REVOCATION_CURSOR_MARKER_FIELD,
@@ -36,8 +36,10 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
 
     from app.config import Settings
-    from app.features.auth.repository import RefreshTokenRepository
-    from app.features.auth.websocket_revocation import WebSocketRevocationEvent
+    from app.features.auth.adapters.persistence.mongodb.account_repository import (
+        RefreshTokenRepository,
+    )
+    from app.features.auth.application.revocation.websocket import WebSocketRevocationEvent
 
 # Task 3.2: New sorted set key patterns
 _USER_PRESENCE_KEY = "ws:user:{}"  # Sorted set: member=connection_id, score=last_touch_epoch
@@ -699,14 +701,17 @@ class WebSocketSecurityService:
                 continue
             event_revision = event.authz_revision
             context_revision = context.claims.authz_revision
-            if event_revision is not None and context_revision is not None and context_revision > event_revision:
+            if (
+                event_revision is not None
+                and context_revision is not None
+                and context_revision > event_revision
+            ):
                 continue
             if event.scope == "session":
                 if event.session_id == context.session_id:
                     matching.append(connection_id)
-            elif (
-                context.session_id != event.except_session_id
-                and (event.session_ids is None or context.session_id in event.session_ids)
+            elif context.session_id != event.except_session_id and (
+                event.session_ids is None or context.session_id in event.session_ids
             ):
                 matching.append(connection_id)
 

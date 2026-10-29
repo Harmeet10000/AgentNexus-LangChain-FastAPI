@@ -10,15 +10,21 @@ import pytest
 from fakeredis.aioredis import FakeRedis
 from returns.result import Failure, Success
 
-from app.features.auth.account_store import InMemoryAuthAccountStore, NewAuthAccount
-from app.features.auth.exceptions import (
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    SessionData,
+)
+from app.features.auth.adapters.persistence.mongodb.user_store import (
+    InMemoryAuthAccountStore,
+    NewAuthAccount,
+)
+from app.features.auth.application.oauth import OAuthUserInfo
+from app.features.auth.application.service import AuthService
+from app.features.auth.domain.errors import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
 )
-from app.features.auth.oauth import OAuthUserInfo
-from app.features.auth.repository import RefreshTokenRepository, SessionData
-from app.features.auth.service import AuthService
 from app.security.passwords import hash_password
 from app.security.tokens import TokenClaims
 
@@ -75,10 +81,10 @@ async def test_public_oauth_callback_never_links_by_email() -> None:
     store, repo, account_id, _ = await _account_and_session()
     service = AuthService(store, repo)
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             return_value=OAuthUserInfo(
                 email="local@example.com",
                 provider_user_id="google-subject",
@@ -109,10 +115,10 @@ async def test_link_callback_requires_confirmation_and_consumes_action_once() ->
         Success,
     )
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             return_value=OAuthUserInfo(
                 email="provider@example.com",
                 provider_user_id="google-subject",
@@ -199,10 +205,10 @@ async def test_link_callback_requires_provider_email_verification() -> None:
         state="unverified-provider-state",
     )
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             return_value=OAuthUserInfo(
                 email="provider@example.com",
                 provider_user_id="google-subject",
@@ -229,10 +235,10 @@ async def test_link_callback_rejects_provider_mixup_and_old_session() -> None:
         state="provider-bound-state",
     )
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             return_value=OAuthUserInfo(
                 email="provider@example.com",
                 provider_user_id="github-subject",

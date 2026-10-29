@@ -14,21 +14,31 @@ from fastapi import Response
 from returns.result import Failure, Success
 
 from app.connections.redis import get_redis
-from app.features.auth.account_store import InMemoryAuthAccountStore, NewAuthAccount
-from app.features.auth.dependencies import (
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    SessionData,
+)
+from app.features.auth.adapters.persistence.mongodb.user_store import (
+    InMemoryAuthAccountStore,
+    NewAuthAccount,
+)
+from app.features.auth.api.http.dependencies import (
     AuthorizationContext,
     get_optional_refresh_token_repository,
     get_token_claims,
     require_permission,
     require_role,
 )
-from app.features.auth.dto import SessionResponse
-from app.features.auth.exceptions import AuthAuthenticationError, AuthInfrastructureError
-from app.features.auth.models import Permission, UserRole
-from app.features.auth.oauth import OAuthProviderConfig, OAuthUserInfo, fetch_oauth_userinfo
-from app.features.auth.repository import RefreshTokenRepository, SessionData
-from app.features.auth.service import AuthService
-from app.features.auth.token_audit_log import TokenAuditLog
+from app.features.auth.api.http.dto import SessionResponse
+from app.features.auth.application.oauth import (
+    OAuthProviderConfig,
+    OAuthUserInfo,
+    fetch_oauth_userinfo,
+)
+from app.features.auth.application.service import AuthService
+from app.features.auth.application.token_audit_log import TokenAuditLog
+from app.features.auth.domain.errors import AuthAuthenticationError, AuthInfrastructureError
+from app.features.auth.domain.user import Permission, UserRole
 from app.features.billing.credits.router import get_credit_balance, get_credit_history
 from app.features.users.service import UserAdminService
 from app.security.tokens import TokenClaims
@@ -71,7 +81,7 @@ async def test_http_claims_fail_closed_when_redis_session_is_missing() -> None:
     repo = AsyncMock()
     repo.get_session.return_value = Success(None)
     with (
-        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims()),
         pytest.raises(UnauthorizedException, match="Session expired or revoked"),
     ):
         await get_token_claims("raw-token", repo)
@@ -93,14 +103,14 @@ async def test_redis_dependency_reports_retryable_startup_failure() -> None:
 
 async def test_http_claims_skip_redis_for_stateless_impersonation() -> None:
     repo = AsyncMock()
-    with patch("app.features.auth.dependencies.decode_token", return_value=_claims(sid=None)):
+    with patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims(sid=None)):
         result = await get_token_claims("raw-token", repo)
     assert result.sid is None
     repo.get_session.assert_not_awaited()
 
 
 async def test_stateless_impersonation_survives_missing_redis_dependency() -> None:
-    with patch("app.features.auth.dependencies.decode_token", return_value=_claims(sid=None)):
+    with patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims(sid=None)):
         result = await get_token_claims("raw-token", None)
 
     assert result.sid is None
@@ -118,7 +128,7 @@ async def test_optional_session_repository_is_none_when_redis_failed_startup() -
 
 async def test_stateful_claims_fail_retryably_when_redis_dependency_is_missing() -> None:
     with (
-        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims()),
         pytest.raises(InfrastructureException, match="Session store unavailable"),
     ):
         await get_token_claims("raw-token", None)
@@ -128,7 +138,7 @@ async def test_http_claims_fail_closed_when_redis_verification_fails() -> None:
     repo = AsyncMock()
     repo.get_session.return_value = Failure(RuntimeError("redis unavailable"))
     with (
-        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims()),
         pytest.raises(UnauthorizedException, match="Unable to verify session"),
     ):
         await get_token_claims("raw-token", repo)
@@ -140,7 +150,7 @@ async def test_http_claims_surfaces_redis_outage_as_retryable_failure() -> None:
         AuthInfrastructureError(message="redis unavailable", source="test")
     )
     with (
-        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims()),
         pytest.raises(InfrastructureException, match="Session store unavailable"),
     ):
         await get_token_claims("raw-token", repo)
@@ -191,7 +201,7 @@ async def test_http_claims_validate_session_owner_and_expiry(
     repo = AsyncMock()
     repo.get_session.return_value = Success(session)
     with (
-        patch("app.features.auth.dependencies.decode_token", return_value=_claims()),
+        patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims()),
         pytest.raises(UnauthorizedException, match=message),
     ):
         await get_token_claims("raw-token", repo)
@@ -204,7 +214,7 @@ async def test_http_claims_reject_authorization_revision_mismatch() -> None:
     )
     with (
         patch(
-            "app.features.auth.dependencies.decode_token", return_value=_claims(authz_revision=0)
+            "app.features.auth.api.http.dependencies.decode_token", return_value=_claims(authz_revision=0)
         ),
         pytest.raises(UnauthorizedException, match="Session expired or revoked"),
     ):
@@ -395,10 +405,10 @@ async def test_verified_provider_cannot_link_unverified_local_account() -> None:
     service = AuthService(account_store, AsyncMock())
 
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             return_value=OAuthUserInfo(
                 email=account.email,
                 provider_user_id="google-1",
@@ -424,10 +434,10 @@ async def test_unverified_provider_cannot_link_verified_local_account() -> None:
     service = AuthService(account_store, AsyncMock())
 
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             return_value=OAuthUserInfo(
                 email=account.email,
                 provider_user_id="google-1",
@@ -448,10 +458,10 @@ async def test_google_unverified_email_cannot_create_account() -> None:
     account_store = InMemoryAuthAccountStore()
     service = AuthService(account_store, AsyncMock())
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             return_value=OAuthUserInfo(
                 email="new@example.com",
                 provider_user_id="google-1",
@@ -468,10 +478,10 @@ async def test_oauth_authlib_failure_is_handled() -> None:
     account_store = InMemoryAuthAccountStore()
     service = AuthService(account_store, AsyncMock())
     with (
-        patch("app.features.auth.service.verify_oauth_state", return_value=True),
-        patch("app.features.auth.service.get_oauth_config"),
+        patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
+        patch("app.features.auth.application.service.get_oauth_config"),
         patch(
-            "app.features.auth.service.fetch_oauth_userinfo",
+            "app.features.auth.application.service.fetch_oauth_userinfo",
             side_effect=AuthlibBaseError(description="provider unavailable"),
         ),
     ):
@@ -520,7 +530,7 @@ async def test_github_userinfo_uses_primary_verified_email_endpoint(
             )
 
     client = _Client()
-    monkeypatch.setattr("app.features.auth.oauth.AsyncOAuth2Client", lambda **_kwargs: client)
+    monkeypatch.setattr("app.features.auth.application.oauth.AsyncOAuth2Client", lambda **_kwargs: client)
     config = OAuthProviderConfig(
         client_id="client",
         client_secret="secret",

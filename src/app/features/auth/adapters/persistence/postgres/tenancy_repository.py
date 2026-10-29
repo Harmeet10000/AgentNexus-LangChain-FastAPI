@@ -15,25 +15,23 @@ from returns.result import Failure, Success
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.observability.logging import logger
-
-from .exceptions import (
+from app.features.auth.domain.errors import (
     AuthAuthorizationError,
     AuthConflictError,
     AuthInfrastructureError,
     AuthNotFoundError,
 )
-from .models import LegalRole
-from .tenancy import normalize_legal_role
-from .tenant_models import Tenant, TenantMembership
+from app.features.auth.domain.tenancy import LegalRole, normalize_legal_role
+from app.features.auth.domain.tenancy_models import Tenant, TenantMembership
+from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from .account_store import AuthAccountStore
-    from .exceptions import AuthResult
+    from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccountStore
+    from app.features.auth.domain.errors import AuthResult
 
 
 def normalize_legal_roles(roles: Iterable[LegalRole | str]) -> tuple[LegalRole, ...]:

@@ -3,7 +3,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from .models import LegalRole
+from app.features.auth.domain.tenancy import LegalRole
 
 # ── Requests ──────────────────────────────────────────────────────────────────
 

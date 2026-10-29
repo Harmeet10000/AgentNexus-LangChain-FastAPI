@@ -8,23 +8,23 @@ from pydantic import ValidationError
 from pymongo.errors import PyMongoError
 from returns.result import Failure
 
-from app.features.auth.dependencies import get_current_user, get_current_user_result
-from app.features.auth.exceptions import (
+from app.features.auth.adapters.persistence.mongodb.account_repository import UserRepository
+from app.features.auth.api.http.dependencies import get_current_user, get_current_user_result
+from app.features.auth.domain.errors import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthInfrastructureError,
     AuthNotFoundError,
     AuthResult,
 )
-from app.features.auth.models import User
-from app.features.auth.repository import UserRepository
+from app.features.auth.domain.user import User
 from app.features.documents.exceptions import DocumentDatabaseError, DocumentNotFoundError
 from app.kernel.errors import ErrorKind
 from app.kernel.result import render_result
 from app.security.tokens import TokenClaims
 from app.utils import UnauthorizedException
 
-_AUTH_REPOSITORY = Path("src/app/features/auth/repository.py")
+_AUTH_REPOSITORY = Path("src/app/features/auth/adapters/persistence/mongodb/account_repository.py")
 
 
 def test_feature_classification_is_constant_and_not_serialized() -> None:
@@ -90,8 +90,8 @@ async def test_mongo_failure_is_retryable_without_rollback(monkeypatch: pytest.M
         message = "mongo unavailable"
         raise PyMongoError(message)
 
-    monkeypatch.setattr("app.features.auth.repository.User.email", "email", raising=False)
-    monkeypatch.setattr("app.features.auth.repository.User.find_one", fail_find_one)
+    monkeypatch.setattr("app.features.auth.adapters.persistence.mongodb.account_repository.User.email", "email", raising=False)
+    monkeypatch.setattr("app.features.auth.adapters.persistence.mongodb.account_repository.User.find_one", fail_find_one)
 
     result = await UserRepository.find_by_email("user@example.com")
 

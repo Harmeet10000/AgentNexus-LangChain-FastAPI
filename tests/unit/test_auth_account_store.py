@@ -9,14 +9,14 @@ import pytest
 from fastapi import Response
 from returns.result import Failure, Success
 
-from app.features.auth.account_store import (
+from app.features.auth.adapters.persistence.mongodb.user_store import (
     BeanieAuthAccountStore,
     InMemoryAuthAccountStore,
     NewAuthAccount,
     OAuthAccountInput,
 )
-from app.features.auth.exceptions import AuthConflictError, AuthInfrastructureError
-from app.features.auth.models import LegalRole, UserRole
+from app.features.auth.domain.errors import AuthConflictError, AuthInfrastructureError
+from app.features.auth.domain.user import LegalRole, UserRole
 from app.kernel.result import render_result
 
 pytestmark = pytest.mark.unit

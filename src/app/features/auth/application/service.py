@@ -26,11 +26,36 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
     from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
-    from .account_store import AuthAccount, AuthAccountStore
-    from .dto import LoginRequest, RegisterRequest
-    from .exceptions import AuthResult
-    from .repository import OAuthLinkIntent, RefreshTokenRepository
+    from app.features.auth.adapters.persistence.mongodb.account_repository import (
+        OAuthLinkIntent,
+        RefreshTokenRepository,
+    )
+    from app.features.auth.adapters.persistence.mongodb.user_store import (
+        AuthAccount,
+        AuthAccountStore,
+    )
+    from app.features.auth.api.http.dto import LoginRequest, RegisterRequest
+    from app.features.auth.domain.errors import AuthResult
 
+from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
+from app.features.auth.adapters.persistence.mongodb.user_store import (
+    NewAuthAccount,
+    OAuthAccountInput,
+)
+from app.features.auth.api.http.dto import (
+    OAuthLinkConfirmationResponse,
+    SessionResponse,
+    TokenResponse,
+    UserResponse,
+)
+from app.features.auth.domain.errors import (
+    AuthAuthenticationError,
+    AuthAuthorizationError,
+    AuthConflictError,
+    AuthInfrastructureError,
+    AuthNotFoundError,
+    AuthValidationError,
+)
 from app.security.passwords import (
     generate_token,
     hash_password,
@@ -47,18 +72,7 @@ from app.security.tokens import (
     verify_oauth_state,
 )
 
-from .account_store import NewAuthAccount, OAuthAccountInput
-from .dto import OAuthLinkConfirmationResponse, SessionResponse, TokenResponse, UserResponse
-from .exceptions import (
-    AuthAuthenticationError,
-    AuthAuthorizationError,
-    AuthConflictError,
-    AuthInfrastructureError,
-    AuthNotFoundError,
-    AuthValidationError,
-)
 from .oauth import fetch_oauth_userinfo, get_oauth_config
-from .repository import SessionData
 
 _OAUTH_LINK_RECENT_AUTH_SECONDS = 15 * 60
 _REFRESH_FAMILY_GRACE_SECONDS = 10

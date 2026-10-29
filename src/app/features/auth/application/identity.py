@@ -18,14 +18,13 @@ from beanie.operators import Inc, Set
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
+from app.features.auth.domain.errors import AuthInfrastructureError, AuthValidationError
+from app.features.auth.domain.user import User
 from app.observability.logging import logger, trace_layer
 
-from .exceptions import AuthInfrastructureError, AuthValidationError
-from .models import User
-
 if TYPE_CHECKING:
-    from .exceptions import AuthResult
-    from .models import UserRole
+    from app.features.auth.domain.errors import AuthResult
+    from app.features.auth.domain.user import UserRole
 
 
 @trace_layer("repository")

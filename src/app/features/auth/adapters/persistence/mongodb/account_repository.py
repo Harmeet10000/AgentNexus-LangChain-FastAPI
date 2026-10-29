@@ -13,14 +13,13 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
-from app.features.auth.websocket_revocation import (
+from app.features.auth.application.revocation.websocket import (
     new_event,
     publish_event,
     publish_user_revocation_events,
 )
-from app.observability.logging import logger, trace_layer
-
-from .exceptions import (
+from app.features.auth.application.token_audit_log import TokenAuditLog
+from app.features.auth.domain.errors import (
     AuthAuthenticationError,
     AuthConflictError,
     AuthInfrastructureError,
@@ -28,8 +27,8 @@ from .exceptions import (
     AuthResult,
     AuthValidationError,
 )
-from .models import OAuthAccount, User
-from .token_audit_log import TokenAuditLog
+from app.features.auth.domain.user import OAuthAccount, User
+from app.observability.logging import logger, trace_layer
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable

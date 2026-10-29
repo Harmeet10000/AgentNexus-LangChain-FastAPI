@@ -7,12 +7,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 from returns.result import Failure, Success
 
-from app.features.auth.dependencies import (
+from app.features.auth.api.http.dependencies import (
     AuthorizationContext,
     CurrentVerifiedUser,
     require_role,
 )
-from app.features.auth.models import UserRole
+from app.features.auth.domain.user import UserRole
 from app.kernel.result import render_result
 from app.utils import APIResponse
 

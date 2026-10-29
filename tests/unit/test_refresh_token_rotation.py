@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING
 import pytest
 from returns.result import Success
 
-from app.features.auth.repository import RefreshTokenRepository, SessionData
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    SessionData,
+)
 from app.security.tokens import derive_refresh_token_material
 
 if TYPE_CHECKING:

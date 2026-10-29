@@ -10,7 +10,7 @@ import pytest
 if TYPE_CHECKING:
     from typing import Any
 
-from app.features.auth.tenancy import personal_tenant_id
+from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.repository import build_chunk_rows
 from app.features.documents.tools.authorization import trusted_tool_context
 from app.retrieval.graphiti.client import (

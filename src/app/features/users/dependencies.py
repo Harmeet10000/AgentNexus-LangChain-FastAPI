@@ -2,8 +2,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from app.features.auth.dependencies import get_refresh_token_repository
-from app.features.auth.repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.api.http.dependencies import get_refresh_token_repository
 
 from .repository import UserAdminRepository
 from .service import UserAdminService

@@ -33,10 +33,10 @@ from app.connections import (
     close_redis_client,
     close_tavily_http_client,
     create_crawl4ai_crawler,
+    create_httpx_client,
     create_mongo_client,
     create_outbox_relay,
     create_tavily_http_client,
-    get_shared_httpx_client,
     init_db,
     init_neo4j,
     setup_cognee,
@@ -46,10 +46,10 @@ from app.connections import (
 )
 from app.connections.celery_producer import DirectPublicationAdapter
 from app.events.writer import PostgresOutboxAdapter
-from app.features.auth.models import User
-from app.features.auth.repository import RefreshTokenRepository
-from app.features.auth.token_audit_log import TokenAuditLog
-from app.features.auth.websocket_security import build_websocket_security_service
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.api.websocket.security import build_websocket_security_service
+from app.features.auth.application.token_audit_log import TokenAuditLog
+from app.features.auth.domain.user import User
 from app.features.billing.providers import RazorpayBillingProvider
 from app.features.documents.service import build_evidence_service
 from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
@@ -58,6 +58,9 @@ from app.lifecycle.graphs import (
     provide_langgraph_checkpointer,
     provide_saul_graph,
 )
+from app.mcp.client.manager import build_mcp_client_manager
+from app.mcp.mcp import close_mcp_client_manager
+from app.mcp.server.tools import bind_mcp_client_manager
 from app.middleware import initialize_fastapi_guard
 from app.observability import shutdown_otel
 from app.observability.logging import logger
@@ -513,7 +516,7 @@ async def _run_startup_policy(app: FastAPI, settings: Any, policy: StartupPolicy
 
 
 async def _shutdown_resources(app: FastAPI) -> None:
-    """Close application resources while always flushing observability providers."""
+    """Close application resources. Called under a timeout; OTEL flushes in the caller."""
     try:
         if hasattr(app.state, "langgraph_checkpointer"):
             await teardown_langgraph_checkpointer(app.state.langgraph_checkpointer)
@@ -546,6 +549,11 @@ async def _shutdown_resources(app: FastAPI) -> None:
             websocket_security.close()
             logger.info("WebSocket rate limiters closed")
 
+        mcp_manager = getattr(app.state, "mcp_manager", None)
+        if mcp_manager is not None:
+            await close_mcp_client_manager(mcp_manager)
+            logger.info("MCP upstream client sessions closed")
+
         await close_httpx_client(getattr(app.state, "httpx_client", None))
 
         tavily_http_client = getattr(app.state, "tavily_http_client", None)
@@ -570,7 +578,6 @@ async def _shutdown_resources(app: FastAPI) -> None:
                 tg.create_task(coro=close_neo4j_driver(driver=neo4j_driver))
     finally:
         logger.bind(status="stopped").info("Application shutdown complete")
-        shutdown_otel()
 
 
 @asynccontextmanager
@@ -666,6 +673,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         coro=app.state.websocket_security.run_revocation_listener(),
     )
 
+    # MCP client manager: the lifespan owns it and closes it at shutdown
+    # (app.state per architecture rules). Handlers read the explicit runtime
+    # binding; the @cache singleton this replaces never released its upstream
+    # sessions and could not be closed from here.
+    app.state.mcp_manager = build_mcp_client_manager()
+    bind_mcp_client_manager(app.state.mcp_manager)
+
     # Optional dependencies boot through the policy registry in order. The
     # Neo4j/Graphiti consistency warnings below stay inline: they cross-cut two
     # policies (the TaskGroup neo4j result and the graphiti policy outcome) and
@@ -684,7 +698,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         logger.warning("State inconsistency: Neo4j driver available but Graphiti not initialised")
 
     # Initialize HTTPX client (HTTP/2 + connection pooling)
-    app.state.httpx_client = get_shared_httpx_client()
+    app.state.httpx_client = create_httpx_client()
     logger.info("HTTPX client initialized with HTTP/2")
     # Initialize Tavily HTTP client
     app.state.tavily_http_client = await create_tavily_http_client()
@@ -704,4 +718,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
         yield
     finally:
         logger.bind(status="stopping").info("Application shutting down")
-        await _shutdown_resources(app)
+        # Resource closes can themselves hang (e.g. a driver close against a
+        # wedged network); bound the whole drain so uvicorn's connection cap
+        # is never what decides whether OTEL and final logs get flushed.
+        try:
+            async with asyncio.timeout(settings.APP_SHUTDOWN_TIMEOUT):
+                await _shutdown_resources(app)
+        except TimeoutError:
+            logger.bind(
+                timeout_seconds=settings.APP_SHUTDOWN_TIMEOUT,
+            ).error("Shutdown drain timed out — forcing exit, some resources may be leaked")
+        finally:
+            shutdown_otel()

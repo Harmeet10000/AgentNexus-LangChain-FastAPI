@@ -15,7 +15,7 @@ import json
 from redis.asyncio import Redis
 
 from app.config import get_settings
-from app.features.auth.session_index_repair import SessionIndexRepair
+from app.features.auth.application.session_index_repair import SessionIndexRepair
 
 
 def _parser() -> argparse.ArgumentParser:

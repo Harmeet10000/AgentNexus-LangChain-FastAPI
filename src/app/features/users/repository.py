@@ -4,7 +4,16 @@ from beanie.operators import Or, RegEx
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
-from app.features.auth.exceptions import (
+from app.features.auth.application.identity import (
+    clear_session_revocation_pending as clear_identity_session_revocation_pending,
+)
+from app.features.auth.application.identity import (
+    delete_user_document,
+    get_user_document,
+    set_user_active,
+    set_user_role,
+)
+from app.features.auth.domain.errors import (
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
@@ -13,16 +22,7 @@ from app.features.auth.exceptions import (
     AuthNotFoundError,
     AuthValidationError,
 )
-from app.features.auth.identity import (
-    clear_session_revocation_pending as clear_identity_session_revocation_pending,
-)
-from app.features.auth.identity import (
-    delete_user_document,
-    get_user_document,
-    set_user_active,
-    set_user_role,
-)
-from app.features.auth.models import User, UserRole
+from app.features.auth.domain.user import User, UserRole
 from app.observability.logging import logger, trace_layer
 
 from .exceptions import (
@@ -77,7 +77,7 @@ class UserAdminRepository:
     """Admin-scoped user queries.
 
     Raw document reads/writes go through auth's identity contract
-    (`app.features.auth.identity`); failures are translated into the users
+    (`app.features.auth.application.identity`); failures are translated into the users
     error union here. The admin listing query stays local to this use case.
     """
 

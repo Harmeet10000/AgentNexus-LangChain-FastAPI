@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, File, Request, Response, UploadFile
 from returns.result import Failure
 
-from app.features.auth.dependencies import CurrentVerifiedUser
-from app.features.auth.dto import UserResponse
+from app.features.auth.api.http.dependencies import CurrentVerifiedUser
+from app.features.auth.api.http.dto import UserResponse
 from app.kernel.result import render_result
 from app.security.tokens import TokenClaims
 from app.utils import APIResponse, http_response
@@ -84,7 +84,7 @@ async def change_password(
         TokenClaims,
         __import__("fastapi").Depends(
             __import__(
-                "app.features.auth.dependencies", fromlist=["get_token_claims"]
+                "app.features.auth.api.http.dependencies", fromlist=["get_token_claims"]
             ).get_token_claims
         ),
     ],

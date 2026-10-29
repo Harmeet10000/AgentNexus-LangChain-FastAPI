@@ -4,8 +4,8 @@ from fastapi import APIRouter
 
 from app.api.envelope import StrictEnvelopeAPIRouter
 from app.features.agent_saul.router import router as agent_saul_router
-from app.features.auth.router import router as auth_router
-from app.features.auth.tenant_router import router as tenant_router
+from app.features.auth.api.http.router import router as auth_router
+from app.features.auth.api.http.tenant_router import router as tenant_router
 from app.features.billing.credits.router import admin_router as credit_admin_router
 from app.features.billing.credits.router import internal_router as credit_internal_router
 from app.features.billing.dunning.router import router as dunning_router

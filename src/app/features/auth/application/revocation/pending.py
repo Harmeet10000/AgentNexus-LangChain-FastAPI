@@ -22,9 +22,9 @@ from beanie import PydanticObjectId
 from returns.result import Failure
 
 from app.connections.mongodb import close_mongo_client, create_mongo_client
-from app.features.auth.models import User
-from app.features.auth.repository import RefreshTokenRepository
-from app.features.auth.token_audit_log import TokenAuditLog
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.application.token_audit_log import TokenAuditLog
+from app.features.auth.domain.user import User
 from app.features.users.repository import UserAdminRepository
 from app.observability.logging import logger
 
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from returns.result import Result
 
     from app.config import Settings
-    from app.features.auth.exceptions import AuthError
+    from app.features.auth.domain.errors import AuthError
     from app.features.users.exceptions import UsersError
 
 
@@ -221,7 +221,9 @@ class PendingRevocationReconciler:
             selected = await self._get_user_with_deadline(user_id, deadline)
             users = [selected] if selected is not None else []
         else:
-            users = await self._list_pending_with_deadline(self._config.batch_size, offset, deadline)
+            users = await self._list_pending_with_deadline(
+                self._config.batch_size, offset, deadline
+            )
         queue_depth = len(users)
         if self._count_pending is not None:
             try:
@@ -257,19 +259,21 @@ class PendingRevocationReconciler:
                 continue
             if dry_run:
                 state = await self._read_retry_state(str(user.id), user.role_revision, deadline)
-                preview = (*report.preview, {
-                    "user_id": str(user.id),
-                    "revision": user.role_revision,
-                    "action": (
-                        "deferred"
-                        if (state.poisoned or state.next_attempt_at > self._clock()) and not force
-                        else "would_revoke"
-                    ),
-                })
+                preview = (
+                    *report.preview,
+                    {
+                        "user_id": str(user.id),
+                        "revision": user.role_revision,
+                        "action": (
+                            "deferred"
+                            if (state.poisoned or state.next_attempt_at > self._clock())
+                            and not force
+                            else "would_revoke"
+                        ),
+                    },
+                )
                 report = replace(report, preview=preview)
-            result = await self._process_user(
-                user, dry_run=dry_run, force=force, deadline=deadline
-            )
+            result = await self._process_user(user, dry_run=dry_run, force=force, deadline=deadline)
             report = replace(
                 report,
                 attempted=report.attempted + result.get("attempted", 0),
@@ -388,8 +392,7 @@ class PendingRevocationReconciler:
         # A legacy marker has no timestamp. Treat it as oldest rather than
         # silently allowing it to disappear from the operational alert.
         pending = [
-            getattr(u, "session_revocation_pending_at", None)
-            or datetime.fromtimestamp(0, UTC)
+            getattr(u, "session_revocation_pending_at", None) or datetime.fromtimestamp(0, UTC)
             for u in users
             if u.session_revocation_pending
         ]

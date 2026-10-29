@@ -18,9 +18,12 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 from redis.exceptions import RedisError, ResponseError
 
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    _SESSION_KEY,
+    _USER_SESSIONS_KEY,
+    SessionData,
+)
 from app.observability.logging import logger
-
-from .repository import _SESSION_KEY, _USER_SESSIONS_KEY, SessionData
 
 if TYPE_CHECKING:
     from typing import Any

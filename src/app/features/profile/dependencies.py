@@ -4,13 +4,13 @@ from typing import TYPE_CHECKING
 
 from fastapi import Request
 
-from app.features.auth.dependencies import get_account_store, get_refresh_token_repository
+from app.features.auth.api.http.dependencies import get_account_store, get_refresh_token_repository
 from app.utils import ServiceUnavailableException
 
 from .service import ProfileService
 
 if TYPE_CHECKING:
-    from app.features.auth.account_store import AuthAccountStore
+    from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccountStore
     from app.utils.storage import StorageService
 
 

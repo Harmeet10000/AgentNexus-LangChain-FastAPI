@@ -1,6 +1,6 @@
 """Relational and document-store errors retain opposite retry semantics."""
 
-from app.features.auth.exceptions import AuthInfrastructureError
+from app.features.auth.domain.errors import AuthInfrastructureError
 from app.features.billing.plans.exceptions import PlanInfrastructureError
 from app.features.documents.exceptions import DocumentDatabaseError
 

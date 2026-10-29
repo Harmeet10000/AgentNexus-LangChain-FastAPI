@@ -1,7 +1,7 @@
 from returns.result import Failure, Success
 
-from app.features.auth.account_store import AuthAccount, AuthAccountStore
-from app.features.auth.repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccount, AuthAccountStore
 from app.observability.logging import logger, trace_layer
 from app.security.passwords import hash_password, verify_password
 from app.utils.storage import StorageService, uri_to_location

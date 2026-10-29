@@ -15,13 +15,13 @@ import pytest
 from returns.result import Failure, Success
 
 from app.config import get_settings
-from app.features.auth.exceptions import AuthInfrastructureError
-from app.features.auth.repository import SessionData
-from app.features.auth.websocket_security import (
+from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
+from app.features.auth.api.websocket.security import (
     WebSocketSecurityContext,
     WebSocketSessionRevokedError,
     build_websocket_security_service,
 )
+from app.features.auth.domain.errors import AuthInfrastructureError
 from app.observability.logging import logger
 from app.security.tokens import TokenClaims
 
@@ -104,7 +104,9 @@ def logs():
 @pytest.fixture
 async def service_with_store(redis):
     """Service with the session-repo slot ready for callers to swap a stub."""
-    from app.features.auth.repository import RefreshTokenRepository
+    from app.features.auth.adapters.persistence.mongodb.account_repository import (
+        RefreshTokenRepository,
+    )
 
     service = await build_websocket_security_service(redis, get_settings())
     yield service, RefreshTokenRepository(redis)

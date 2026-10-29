@@ -6,6 +6,9 @@ from returns.result import Failure
 
 from app.config import get_settings
 from app.connections.redis import get_redis
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.application.service import AuthService
+from app.features.auth.domain.errors import AuthAuthenticationError, AuthValidationError
 from app.kernel.result import render_result
 from app.resilience.rate_limit import get_rate_limiter
 from app.security.tokens import OAUTH_STATE_COOKIE
@@ -33,9 +36,6 @@ from .dto import (
     UserResponse,
     VerifyEmailRequest,
 )
-from .exceptions import AuthAuthenticationError, AuthValidationError
-from .repository import RefreshTokenRepository
-from .service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

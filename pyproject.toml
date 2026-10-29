@@ -600,9 +600,9 @@ section-order = [
 "src/database/schemas/chat_messages.py" = ["F401"] # shim re-export
 "src/database/schemas/__init__.py" = ["F401"] # shim re-export
 "**/_*.py" = ["ANN201"] # Private modules
-"src/app/features/auth/router.py" = ["S105"]
-"src/app/features/auth/oauth.py" = ["S105", "S106"]
-"src/app/features/auth/service.py" = [
+"src/app/features/auth/api/http/router.py" = ["S105"]
+"src/app/features/auth/application/oauth.py" = ["S105", "S106"]
+"src/app/features/auth/application/service.py" = [
     "PLC0415", # Late imports to break circular deps
     "S105",
     "S106",
@@ -941,5 +941,12 @@ forbidden_modules = ["app.features", "app.worker", "app.connections"]
 [[tool.importlinter.contracts]]
 name = "Domain use cases do not import task entry points"
 type = "forbidden"
-source_modules = ["app.features.*.service", "app.features.billing.jobs", "app.features.billing.credits.jobs"]
+source_modules = [
+    "app.features.*.service",
+    # Auth use cases moved into the hexagonal application layer (wave-1
+    # restructure); the wildcard above no longer matches the nested layout.
+    "app.features.auth.application.**",
+    "app.features.billing.jobs",
+    "app.features.billing.credits.jobs",
+]
 forbidden_modules = ["app.worker"]

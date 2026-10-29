@@ -25,8 +25,11 @@ from fastapi import WebSocketException
 from returns.result import Success
 
 from app.config import get_settings
-from app.features.auth.repository import RefreshTokenRepository, SessionData
-from app.features.auth.websocket_security import (
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    SessionData,
+)
+from app.features.auth.api.websocket.security import (
     WebSocketRateLimitExceededError,
     WebSocketSecurityContext,
     WebSocketSessionRevokedError,

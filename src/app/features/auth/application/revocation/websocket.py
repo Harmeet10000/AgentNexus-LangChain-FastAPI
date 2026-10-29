@@ -107,9 +107,7 @@ async def publish_event(redis: Redis, event: WebSocketRevocationEvent) -> bool:
     """Best-effort durable publication; pull checks remain the security gate."""
     try:
         fields = {
-            key: value
-            for key, value in event.model_dump(mode="json").items()
-            if value is not None
+            key: value for key, value in event.model_dump(mode="json").items() if value is not None
         }
         if event.session_ids is not None:
             fields["session_ids"] = json.dumps(event.session_ids, separators=(",", ":"))

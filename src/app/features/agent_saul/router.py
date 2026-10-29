@@ -21,15 +21,15 @@ from fastapi.responses import StreamingResponse
 from returns.result import Failure
 
 from app.config import get_settings
-from app.features.auth.account_store import AuthAccountStore
-from app.features.auth.dependencies import (
+from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccountStore
+from app.features.auth.api.http.dependencies import (
     CurrentAuthorizationContext,
     CurrentClaims,
     TenantMembershipServiceDep,
     WebSocketAuthorizationContext,
     get_account_store,
 )
-from app.features.auth.websocket_security import WebSocketSecurityViolation
+from app.features.auth.api.websocket.security import WebSocketSecurityViolation
 from app.features.documents.dependencies import DocumentAuthorizationDep
 from app.kernel.result import render_result
 from app.observability.logging import logger

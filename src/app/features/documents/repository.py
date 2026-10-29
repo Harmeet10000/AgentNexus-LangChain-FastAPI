@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.features.auth.tenancy import personal_tenant_id
+from app.features.auth.domain.tenancy import personal_tenant_id
 from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
