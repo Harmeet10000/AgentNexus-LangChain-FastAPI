@@ -87,12 +87,14 @@ DEFAULT_STOP_AFTER_ATTEMPTS = 3
 DEFAULT_MAX_WAIT_SECONDS = 5.0
 
 
-def is_transient(exc: BaseException) -> bool:
+def is_transient(exc: BaseException | FeatureError) -> bool:
     """Decide whether *exc* may be attempted again.
 
     A failure is transient when it is a member of
     :data:`TRANSIENT_EXCEPTION_TYPES` or when its type opts in explicitly via
-    the kernel ``FeatureError.retryable`` flag. Control-flow signals that
+    the kernel ``FeatureError.retryable`` flag. ``FeatureError`` is a Pydantic
+    model rather than a ``BaseException``, so the union is the honest input
+    type. Control-flow signals that
     descend from ``Exception`` (LangGraph pauses) are NOT members here — a
     boundary that can observe a pause must exclude it explicitly, the way
     ``app.ai.graph.retry`` does.
@@ -102,7 +104,7 @@ def is_transient(exc: BaseException) -> bool:
     return isinstance(exc, FeatureError) and exc.retryable
 
 
-def is_retryable_failure(failure: BaseException) -> bool:
+def is_retryable_failure(failure: BaseException | FeatureError) -> bool:
     """Result-side twin of :func:`is_transient`.
 
     ``returns.result`` failures carry the error object, so the same verdict
