@@ -26,7 +26,7 @@ from app.extraction.langextract.service import (
     ExtractionSucceeded,
 )
 from app.features.agent_saul.graph.state import ClauseSegment, ClauseType
-from app.features.auth.tenancy import personal_tenant_id
+from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.access_audit import (
     DocumentAccessAuditEvent,
     DocumentAccessAuditRecorder,
@@ -1071,9 +1071,11 @@ async def _extract_document_knowledge(
                     and same_checkpoint_version
                 ):
                     raw_classes = raw_metadata.get("knowledge_extraction_classes", ())
-                    classes = tuple(
-                        value for value in raw_classes if isinstance(value, str)
-                    ) if isinstance(raw_classes, list) else ()
+                    classes = (
+                        tuple(value for value in raw_classes if isinstance(value, str))
+                        if isinstance(raw_classes, list)
+                        else ()
+                    )
                     return ExtractionSucceeded(
                         documents=(),
                         budget=budget,

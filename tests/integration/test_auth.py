@@ -14,18 +14,18 @@ import pytest
 from fakeredis.aioredis import FakeRedis
 from returns.result import Failure
 
-from app.features.auth.account_store import (
+from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.user_store import (
     InMemoryAuthAccountStore,
     NewAuthAccount,
     OAuthAccountInput,
 )
-from app.features.auth.dto import (
+from app.features.auth.api.http.dto import (
     LoginRequest,
     RegisterRequest,
 )
-from app.features.auth.exceptions import AuthConflictError
-from app.features.auth.repository import RefreshTokenRepository
-from app.features.auth.service import AuthService
+from app.features.auth.application.service import AuthService
+from app.features.auth.domain.errors import AuthConflictError
 from app.security.passwords import hash_password
 from app.security.tokens import decode_token
 from app.utils.exceptions import (
@@ -59,7 +59,7 @@ async def create_account_in_store(
     **kwargs,
 ):
     """Helper to create an account in the store with hashed password."""
-    from app.features.auth.account_store import NewAuthAccount
+    from app.features.auth.adapters.persistence.mongodb.user_store import NewAuthAccount
     from app.security.passwords import hash_password
 
     new_account = NewAuthAccount(
@@ -392,9 +392,9 @@ class TestAuthOAuth:
 
     async def test_oauth_callback_new_user(self, auth_service: AuthService):
         with (
-            patch("app.features.auth.service.fetch_oauth_userinfo") as mock_fetch,
-            patch("app.features.auth.service.get_oauth_config") as mock_config,
-            patch("app.features.auth.service.verify_oauth_state", return_value=True),
+            patch("app.features.auth.application.service.fetch_oauth_userinfo") as mock_fetch,
+            patch("app.features.auth.application.service.get_oauth_config") as mock_config,
+            patch("app.features.auth.application.service.verify_oauth_state", return_value=True),
         ):
             mock_fetch.return_value = MagicMock(
                 email="oauth@example.com",

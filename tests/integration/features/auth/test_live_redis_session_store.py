@@ -20,9 +20,12 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
-from app.features.auth import repository as repository_module
-from app.features.auth.exceptions import AuthInfrastructureError
-from app.features.auth.repository import RefreshTokenRepository, SessionData
+from app.features.auth.adapters.persistence.mongodb import account_repository as repository_module
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    SessionData,
+)
+from app.features.auth.domain.errors import AuthInfrastructureError
 from app.security.tokens import derive_refresh_token_material
 
 if TYPE_CHECKING:

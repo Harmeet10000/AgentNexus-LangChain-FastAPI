@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import Depends, Request
 from langgraph.graph.state import CompiledStateGraph
 
-from app.features.auth.dependencies import CurrentClaims
+from app.features.auth.api.http.dependencies import CurrentClaims
 from app.utils import ServiceUnavailableException
 
 

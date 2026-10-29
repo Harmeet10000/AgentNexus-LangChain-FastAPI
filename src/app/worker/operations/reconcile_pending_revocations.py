@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from app.config import get_settings
 from app.connections.redis import close_redis_client, create_redis_client
-from app.features.auth.pending_revocation import (
+from app.features.auth.application.revocation.pending import (
     build_production_reconciler,
     close_production_resources,
 )

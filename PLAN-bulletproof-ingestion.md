@@ -326,6 +326,54 @@ anything this plan would duplicate:
 
 ---
 
+3. Late-2026 grade
+Dimension	Your state	Late-2026 bar	Verdict
+Hybrid retrieval	3 branches + weighted RRF, LLM-set weights	Standard	✅ At bar
+Reranking	Cross-encoder, live path, top-5	Standard	✅ At bar
+Adaptive retrieval	Query plan w/ rewrite loop + grading	Good systems	✅ At bar
+Grounding	Char-offset citations + verification gate + coverage disclosure	Best-in-class legal	✅ Ahead of nearly everyone
+Knowledge graph	Bi-temporal (Graphiti) but zero edges	Graph-RAG as fusion branch	⚠️ Half-built (Phase D)
+Chunking	Structure-aware, zero-overlap, typed clauses extracted	Good; contextual retrieval missing	⚠️ Below top tier
+Contextual retrieval	preamble column exists, always empty; search text is clause_type ‖ preamble ‖ content	Table stakes for top-tier since 2024	❌ The gap
+Evaluation	4 golden queries (5 lines incl. header), provenance-validated in CI	Hundreds of labeled queries, CI-gated recall/nDCG	❌ The binding constraint
+Feedback loop	None	Usage → eval fuel	❌ Missing
+Observability	Structured logs; no per-stage traces/cost	Per-stage spans, budgets, escape-rate metrics	⚠️ Partial (harden change specs it)
+Does it land in the 0.01%?
+No — but you're asking the wrong percentile question. Calibrated honestly:
+
+The median production "RAG system" in 2026 is chunk→embed→vector-search→stuff-in-prompt: no reranker, no grading, no eval, citations that don't verify. You are far past that — top ~5% on engineering discipline.
+What keeps you out of the top 1% on quality is not missing exotica — it's that almost none of your sophisticated machinery is measured. Four golden queries means your adaptive weights, your reranker, your fusion constants (why k=60? why trigram 1.2?) are all folklore. An unmeasured great architecture performs like a mediocre one, because nobody can tell the difference.
+The 0.01% (Harvey-grade legal AI, Perplexity-grade citation systems) are separated by exactly one thing: eval depth compounding weekly. They know their recall@10 per query class to two decimals; every architecture change is eval-gated; user feedback flows back into labeled data. Everything else follows from that.
+So the target I'd set: top decile of production legal RAG within a quarter. That's achievable solo, and it's the tier where the product becomes defensible.
+
+4. The S-tier roadmap (ordered by leverage; slots in as "Phase G" of the plan)
+G1 — Fuel the eval harness (do this first, before any architecture change). Grow evals/golden/legal_retrieval_v1.jsonl from 4 → 150–300 labeled queries: mine your real uploads, cover every doc-kind × jurisdiction × difficulty × query-style (obligation lookup, cross-reference, "does X allow Y", temporal). Add recall@k, MRR, nDCG to the runner; report in CI first, gate later. You already have the skeleton (provenance validator, experiments/reports dirs) — it's an engine with no fuel. Without this, G2–G8 are guesses.
+
+G2 — Contextual retrieval (highest-ROI single upgrade). The preamble column has been empty since migration 0003 created it; your search text is clause_type ‖ preamble ‖ content. At ingest, write a 1–2 sentence "where this chunk sits in the document" summary per chunk (amortize cost by caching the doc-level context, per Anthropic's contextual-embeddings approach) into that column. Legal text is uniquely dependent on context — "the term 'Effective Date' means…" or "as set forth in Section 4.2" is meaningless in an isolated chunk. Measure the jump on G1. This is also the legitimate harvest of ingestion_kb's one good idea — done in path A, where it belongs.
+
+G3 — Finish the retrieval unification (plan Phase F / todo 252). ask and the retrieval graph are the same machine written twice. Keep the graph (it buys checkpointing, per-node tracing, resumability), route /search/ask + /legal/ask through it, delete the inline duplicate. This is the one deletion the plan permits, because it's duplication, not capability.
+
+G4 — Light the graph edges (plan Phase D / todo 136), then promote Graphiti to a retrieval branch. With edges in place, upgrade _graphiti_filter_chunk_ids from a filter to a fourth fused branch: obligation-chain traversal results fused into the RRF with a measured weight. That's graph-RAG done right — a retrieval strategy with a number attached, not a chat gimmick.
+
+G5 — Small-to-big retrieval. You already store the structural tree and extract typed clauses. Index at clause level, return at section level: retrieve the clause, hydrate its parent section for generation. For contract QA this consistently buys recall without precision loss. Your zero-overlap structure-aware chunking is the right foundation — legal documents are pre-chunked by their authors (numbered sections); don't let anyone sell you "semantic chunking" for this corpus.
+
+G6 — Per-stage tracing + budgets. One trace span per loop stage (plan → embed → branches → fusion → rerank → grade → generate) with token/cost/latency attribution, plus the harden change's budgets. The three metrics that matter most: answer-cache hit rate, grade-loop escape rate (how often iteration 2 also fails — the most diagnostic number for a self-corrective loop), and cost per answered query.
+
+G7 — Feedback loop. Capture thumbs / citation-clicks, auto-promote corrected queries into the golden set with human review. This is the compounding engine — it's literally how the 0.01% stay there.
+
+G8 — Measure-before-keeping niceties: late chunking (pool long-context embeddings per chunk), multi-query expansion for the keyword legs, semantic cache for near-duplicate queries.
+
+What not to do: don't add agentic multi-hop retrieval before G1 (you'd be optimizing unmeasured); don't rip out pgvector for late-interaction infra (PLAID/ColBERT is an infra tax — pgvector + cross-encoder is fine until the eval says otherwise); don't add more LLM stages without cost attribution; don't wire graph tools for the agent before Phase D gives them edges to walk.
+
+For the chosen ones
+The 0.01% separator is measurement, not architecture. Every serious team reads the same papers; the top systems differ in labeled queries answered per week. Your four-query gold set is why your brilliant loop can't prove it's brilliant — and G1 is days of work, not months.
+Your rarest asset is already built and nobody talks about it: span-grounded citations + the cross-store verification gate (_verify_legal_chunks). Most "grounding" in 2026 is a prompt saying "cite your sources." Yours is mechanical verification that the cited text exists at named offsets. That's the legal-market differentiator; the eval set is how you prove it to buyers.
+The empty preamble column is a tombstone with the answer written on it. You built the wrong version once (ingestion_kb's per-chunk LLM fan-out, disconnected), deleted it, and left the column behind. G2 is the right version: same column, same search-text concatenation, but in the live pipeline and amortized. When a schema keeps a column no code fills, the schema is arguing with you.
+Grade-loop escape rate is the metric nobody logs and everybody needs. A self-corrective loop that escapes 40% of the time isn't self-corrective — it's a 2× latency tax with a fallback answer. Log it from G6 day one, per query class.
+Unmeasured sophistication is indistinguishable from luck. k=60 and trigram-weight 1.2 are constant-named opinions. The day G1 lands, they become measurements — and the day one of them moves your nDCG, you'll understand why the eval set came before every other upgrade.
+
+
+
 ## For the chosen ones
 
 - **Connectivity is what refactors validate — nothing else.** The 503 endpoint

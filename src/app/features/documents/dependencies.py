@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.connections import get_postgres_db, get_redis
-from app.features.auth.dependencies import AuthorizationContext, CurrentAuthorizationContext
+from app.features.auth.api.http.dependencies import (
+    AuthorizationContext,
+    CurrentAuthorizationContext,
+)
 from app.shared.langchain_layer import build_chat_model
 from app.utils import InfrastructureException
 from app.utils.storage import StorageService

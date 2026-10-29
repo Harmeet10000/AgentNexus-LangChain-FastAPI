@@ -16,7 +16,7 @@ from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.generation import TextGenerationRequest
 from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.config import get_settings
-from app.features.auth.tenancy import personal_tenant_id
+from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.access_audit import (
     DocumentAccessAuditEvent,
     DocumentAccessAuditRecorder,
@@ -473,11 +473,7 @@ class DocumentQueryService:
                 tenant_id=resolved_tenant,
                 requested_document_ids=scope,
                 document_ids=document_ids,
-                reason=(
-                    "requested document scope is empty"
-                    if allowed_doc_ids == ()
-                    else None
-                ),
+                reason=("requested document scope is empty" if allowed_doc_ids == () else None),
                 outcome="denied" if allowed_doc_ids == () else None,
             ),
         )
@@ -835,11 +831,7 @@ class DocumentQueryService:
                 tenant_id=resolved_tenant,
                 requested_document_ids=scope,
                 document_ids=document_ids,
-                reason=(
-                    "requested document scope is empty"
-                    if allowed_doc_ids == ()
-                    else None
-                ),
+                reason=("requested document scope is empty" if allowed_doc_ids == () else None),
                 outcome="denied" if allowed_doc_ids == () else None,
             ),
         )
@@ -1145,9 +1137,7 @@ async def _graphiti_filter_chunk_ids(
         return []
     try:
         raw_results = await retry_immediate(
-            lambda: graphiti.search(
-                query=query, group_ids=group_ids, num_results=20
-            ),
+            lambda: graphiti.search(query=query, group_ids=group_ids, num_results=20),
             label="documents_graphiti_filter",
         )
     except (GraphitiError, TransientExternalError, ValueError, TypeError):

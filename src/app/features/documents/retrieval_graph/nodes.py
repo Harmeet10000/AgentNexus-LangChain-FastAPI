@@ -284,14 +284,11 @@ def make_graph_retrieval_node(
         if not document_ids or not state.get("tenant_id"):
             return {"graph_chunk_ids": []}
         versions = {
-            document_id: version
-            for document_id, version, _ in state.get("document_versions", [])
+            document_id: version for document_id, version, _ in state.get("document_versions", [])
         }
         scoped_contracts = {
             document_id: (indexes, legacy_null)
-            for document_id, _version, indexes, legacy_null in state.get(
-                "document_contracts", []
-            )
+            for document_id, _version, indexes, legacy_null in state.get("document_contracts", [])
         }
         scopes = []
         for document_id in document_ids:

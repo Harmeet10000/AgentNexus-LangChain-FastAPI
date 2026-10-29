@@ -238,7 +238,9 @@ async def _record_ingestion_failure(
         )
     else:
         if isinstance(status_result, Failure):
-            log_expected_failure(error=status_result.failure(), operation="record_ingestion_failure")
+            log_expected_failure(
+                error=status_result.failure(), operation="record_ingestion_failure"
+            )
     session = getattr(repo, "session", None)
     if session is not None:
         try:

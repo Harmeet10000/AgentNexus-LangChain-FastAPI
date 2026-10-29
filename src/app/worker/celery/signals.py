@@ -2,7 +2,7 @@
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
 
-from app.features.auth.pending_revocation import close_production_resources
+from app.features.auth.application.revocation.pending import close_production_resources
 from app.observability.logging import logger
 from app.worker.celery.task import ResilientTask
 from app.worker.execution import runtime

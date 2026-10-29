@@ -16,9 +16,12 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Success
 
-from app.features.auth import repository as repository_module
-from app.features.auth.repository import RefreshTokenRepository, SessionData
-from app.features.auth.session_index_repair import SessionIndexRepair
+from app.features.auth.adapters.persistence.mongodb import account_repository as repository_module
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    SessionData,
+)
+from app.features.auth.application.session_index_repair import SessionIndexRepair
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

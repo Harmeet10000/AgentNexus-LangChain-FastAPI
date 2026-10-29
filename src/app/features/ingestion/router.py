@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Response, UploadFile, status
 from returns.result import Failure
 
 from app.config import get_settings
-from app.features.auth.dependencies import AuthorizationContext
+from app.features.auth.api.http.dependencies import AuthorizationContext
 from app.features.documents.dependencies import DocumentAuthorizationDep, DocumentCommandServiceDep
 from app.kernel.result import render_result
 from app.observability.logging import logger

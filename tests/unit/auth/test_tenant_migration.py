@@ -6,12 +6,14 @@ import pytest
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
-from app.features.auth.exceptions import AuthInfrastructureError
-from app.features.auth.models import LegalRole
-from app.features.auth.tenancy import personal_tenant_id
-from app.features.auth.tenant_migration import PersonalTenantMigration
-from app.features.auth.tenant_models import Tenant, TenantMembership
-from app.features.auth.tenant_repository import TenantMembershipService
+from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
+    TenantMembershipService,
+)
+from app.features.auth.application.tenancy_migration import PersonalTenantMigration
+from app.features.auth.domain.errors import AuthInfrastructureError
+from app.features.auth.domain.tenancy import personal_tenant_id
+from app.features.auth.domain.tenancy_models import Tenant, TenantMembership
+from app.features.auth.domain.user import LegalRole
 
 
 class FakeUser:
@@ -240,7 +242,9 @@ async def test_sql_commit_marks_failed_mongo_mirror_for_reconciliation() -> None
 
 
 def test_legacy_admin_legal_role_normalizes_to_corpus_admin() -> None:
-    from app.features.auth.tenant_repository import normalize_legal_roles
+    from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
+        normalize_legal_roles,
+    )
 
     assert normalize_legal_roles(("admin",)) == (LegalRole.CORPUS_ADMIN,)
 
@@ -274,7 +278,7 @@ async def test_sql_tenant_selection_requires_selector_for_multiple_memberships()
 
 @pytest.mark.asyncio
 async def test_readiness_accepts_personal_plus_valid_team_memberships() -> None:
-    from app.features.auth.tenant_migration import check_tenant_readiness
+    from app.features.auth.application.tenancy_migration import check_tenant_readiness
 
     store = FakeStore()
     user = FakeUser("ready-user", tenant_id="team-a")

@@ -28,22 +28,25 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
-from app.features.auth import repository as repository_module
-from app.features.auth.dependencies import get_token_claims
-from app.features.auth.exceptions import AuthAuthenticationError, AuthInfrastructureError
-from app.features.auth.models import UserRole
-from app.features.auth.pending_revocation import (
+from app.features.auth.adapters.persistence.mongodb import account_repository as repository_module
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    SessionData,
+)
+from app.features.auth.api.http.dependencies import get_token_claims
+from app.features.auth.api.websocket.security import WebSocketSecurityService
+from app.features.auth.application.revocation.pending import (
     PendingRevocationConfig,
     PendingRevocationReconciler,
 )
-from app.features.auth.repository import RefreshTokenRepository, SessionData
-from app.features.auth.websocket_revocation import (
+from app.features.auth.application.revocation.websocket import (
     REVOCATION_STREAM_KEY,
     new_event,
     publish_event,
     publish_user_revocation_events,
 )
-from app.features.auth.websocket_security import WebSocketSecurityService
+from app.features.auth.domain.errors import AuthAuthenticationError, AuthInfrastructureError
+from app.features.auth.domain.user import UserRole
 from app.features.users.exceptions import UsersInfrastructureError
 from app.features.users.service import UserAdminService
 from app.security.tokens import TokenClaims, derive_refresh_token_material
@@ -450,7 +453,7 @@ async def test_revocation_timeout_still_closes_a_stuck_socket(
     redis_harness: _RedisHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.features.auth import websocket_security as websocket_security_module
+    from app.features.auth.api.websocket import security as websocket_security_module
 
     monkeypatch.setattr(websocket_security_module, "_REVOCATION_CLOSE_TIMEOUT_SECONDS", 0.01)
     worker = _revocation_service(redis_harness.client)
@@ -725,14 +728,14 @@ async def test_real_redis_rejects_malformed_expired_owner_and_epoch_records(
     assert await store.store_session(session) == Success(None)
 
     monkeypatch.setattr(
-        "app.features.auth.dependencies.decode_token",
+        "app.features.auth.api.http.dependencies.decode_token",
         lambda _token: _claims(user_id="other-user", session_id=session.session_id, revision=4),
     )
     with pytest.raises(UnauthorizedException, match="Session expired or revoked"):
         await get_token_claims("raw", store)
 
     monkeypatch.setattr(
-        "app.features.auth.dependencies.decode_token",
+        "app.features.auth.api.http.dependencies.decode_token",
         lambda _token: _claims(user_id=user_id, session_id=session.session_id, revision=3),
     )
     with pytest.raises(UnauthorizedException, match="Session expired or revoked"):
@@ -741,7 +744,7 @@ async def test_real_redis_rejects_malformed_expired_owner_and_epoch_records(
     expired = session.model_copy(update={"expires_at": datetime.now(UTC) - timedelta(seconds=1)})
     await redis.client.set(store._session_key(session.session_id), expired.model_dump_json())
     monkeypatch.setattr(
-        "app.features.auth.dependencies.decode_token",
+        "app.features.auth.api.http.dependencies.decode_token",
         lambda _token: _claims(user_id=user_id, session_id=session.session_id, revision=4),
     )
     with pytest.raises(UnauthorizedException, match="Session expired or revoked"):

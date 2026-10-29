@@ -3,7 +3,7 @@
 import pytest
 from fastapi.datastructures import Headers, QueryParams
 
-from app.features.auth.dependencies import _websocket_tenant_selector
+from app.features.auth.api.http.dependencies import _websocket_tenant_selector
 from app.utils import ForbiddenException
 
 

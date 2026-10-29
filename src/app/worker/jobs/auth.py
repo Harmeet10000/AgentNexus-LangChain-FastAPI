@@ -25,7 +25,7 @@ from app.connections.mailer import (
     config_from_settings,
     send_template,
 )
-from app.features.auth.pending_revocation import build_production_reconciler
+from app.features.auth.application.revocation.pending import build_production_reconciler
 from app.observability.logging import logger
 from app.shared.jobs.names import (
     AUTH_PENDING_REVOCATION_RECONCILE,

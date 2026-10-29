@@ -562,9 +562,7 @@ class EvidenceService:
                 principal_id=principal_id,
                 tenant_id=tenant_id,
                 requested_document_ids=allowed_doc_ids,
-                document_ids=(
-                    (response.items[0].evidence.document_id,) if response.items else ()
-                ),
+                document_ids=((response.items[0].evidence.document_id,) if response.items else ()),
                 evidence_ids=(evidence_id,),
                 thread_id=thread_id,
                 run_id=run_id,

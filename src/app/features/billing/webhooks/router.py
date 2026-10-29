@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from pydantic import ValidationError
 from returns.result import Failure, Success
 
-from app.features.auth.dependencies import require_role
-from app.features.auth.models import UserRole
+from app.features.auth.api.http.dependencies import require_role
+from app.features.auth.domain.user import UserRole
 from app.kernel.result import render_result
 from app.observability.logging import logger
 from app.utils import APIResponse

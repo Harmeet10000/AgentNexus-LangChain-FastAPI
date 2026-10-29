@@ -60,10 +60,13 @@ _tal_mock.TokenAuditLog.find.return_value.update = AsyncMock(return_value=None)
 _tal_instance = MagicMock()
 _tal_instance.insert = AsyncMock(return_value=None)
 _tal_mock.TokenAuditLog.return_value = _tal_instance
-sys.modules["app.features.auth.token_audit_log"] = _tal_mock
+sys.modules["app.features.auth.application.token_audit_log"] = _tal_mock
 
-from app.features.auth.repository import RefreshTokenRepository, UserRepository
-from app.features.auth.service import AuthService
+from app.features.auth.adapters.persistence.mongodb.account_repository import (
+    RefreshTokenRepository,
+    UserRepository,
+)
+from app.features.auth.application.service import AuthService
 
 
 @pytest.fixture
@@ -83,7 +86,9 @@ def auth_service(refresh_token_repo) -> AuthService:
 
 
 def make_mock_user(**kwargs) -> MagicMock:
-    from app.features.auth.models import User  # local import to avoid import-order side effects
+    from app.features.auth.domain.user import (
+        User,  # local import to avoid import-order side effects
+    )
 
     user = MagicMock(spec=User)
     user.id = kwargs.get("id", "507f1f77bcf86cd799439011")

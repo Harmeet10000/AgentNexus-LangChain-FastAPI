@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, Path, Query, Request, Response, status
 
-from app.features.auth.dependencies import CurrentVerifiedUser
+from app.features.auth.api.http.dependencies import CurrentVerifiedUser
 from app.features.billing.subscriptions.models import SubscriptionStatus
 from app.kernel.result import render_result
 from app.utils import APIResponse
