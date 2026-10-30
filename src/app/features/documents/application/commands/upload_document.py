@@ -654,6 +654,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
                 "document_version": job.document_version,
                 "attempt": job.attempt,
                 "task_id": job.task_id,
+                "graph_relationships_status": relationship_state.status.value,
             },
         )
     return Success(
@@ -1072,7 +1073,7 @@ def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> 
     )
 
 
-async def _extract_document_knowledge(  # noqa: PLR0914 — one extraction pass keeps all phase locals together
+async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extraction pass keeps all phase locals together
     *,
     runtime: IngestionRuntime,
     job: IngestionJob,
@@ -1168,16 +1169,22 @@ async def _extract_document_knowledge(  # noqa: PLR0914 — one extraction pass 
                         if isinstance(raw_classes, list)
                         else ()
                     )
+                    # Restore the relationship-phase truth persisted with the
+                    # same checkpoint instead of overwriting it with a fresh
+                    # not-attempted state.
+                    restored_relationships = _relationship_state_from_metadata(raw_metadata)
+                    if restored_relationships is None:
+                        restored_relationships = GraphRelationshipsState(
+                            status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                            reason="knowledge_extraction_checkpoint_reused",
+                        )
                     return (
                         ExtractionSucceeded(
                             documents=(),
                             budget=budget,
                             extraction_classes=classes,
                         ),
-                        GraphRelationshipsState(
-                            status=GraphRelationshipsStatus.NOT_ATTEMPTED,
-                            reason="knowledge_extraction_checkpoint_reused",
-                        ),
+                        restored_relationships,
                     )
     # A retry starts a fresh wall-clock window, but its ledger is cumulative.
     # Keeping this transition here (once per ingestion attempt, before the
@@ -1215,11 +1222,18 @@ async def _extract_document_knowledge(  # noqa: PLR0914 — one extraction pass 
             )
         )
         if isinstance(outcome, ExtractionFailed):
+            # Aggregate, never replace: boundaries processed before the failure
+            # already produced relationship-phase states that must survive.
             return (
                 outcome,
-                GraphRelationshipsState(
-                    status=GraphRelationshipsStatus.NOT_ATTEMPTED,
-                    reason=f"knowledge_extraction_failed:{outcome.code.value}",
+                aggregate_relationship_states(
+                    [
+                        *relationship_states,
+                        GraphRelationshipsState(
+                            status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                            reason=f"knowledge_extraction_failed:{outcome.code.value}",
+                        ),
+                    ]
                 ),
             )
         budget = outcome.budget

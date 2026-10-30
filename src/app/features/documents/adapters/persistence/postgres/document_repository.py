@@ -1196,7 +1196,12 @@ class DocumentRepository:
             )
             if tenant_id is not None:
                 statement = statement.where(UnifiedChunk.tenant_id == tenant_id)
-            if allowed_doc_ids:
+            if allowed_doc_ids is not None:
+                # Fail closed: only ``None`` omits the allowlist.  An empty
+                # allowlist is an explicit empty scope and must match no
+                # documents — ``x = ANY('{}')`` is FALSE in PostgreSQL, so
+                # passing the empty sequence through keeps the predicate and
+                # every row out.
                 statement = statement.where(
                     UnifiedChunk.document_id == uuid_any("allowed_doc_ids", allowed_doc_ids)
                 )

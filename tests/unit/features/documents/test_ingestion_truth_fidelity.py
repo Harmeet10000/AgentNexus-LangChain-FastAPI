@@ -293,6 +293,153 @@ def test_aggregate_relationship_states_distinct_empty_cases() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint reuse and partial-failure aggregation
+
+
+async def test_checkpoint_reuse_restores_persisted_relationship_state() -> None:
+    """A retry rehydrating the checkpoint must not overwrite the truth it carries."""
+    from types import SimpleNamespace
+
+    from returns.result import Success as _Success
+
+    from app.features.documents.application.commands.upload_document import (
+        _extract_document_knowledge,
+    )
+    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+
+    class _CheckpointRepo:
+        async def fetch_status(self, **_kwargs: object) -> _Success[dict[str, Any]]:
+            return _Success(
+                {
+                    "document_metadata": {
+                        "knowledge_extraction": "complete",
+                        "knowledge_extraction_document_version": 1,
+                        "knowledge_extraction_classes": ["payment"],
+                        "graph_relationships": {
+                            "status": "skipped_not_implemented",
+                            "reason": "relationship_extraction_not_implemented",
+                            "relationships_attempted": 0,
+                            "relationships_succeeded": 0,
+                        },
+                    }
+                }
+            )
+
+    runtime = SimpleNamespace(repo=_CheckpointRepo(), extraction=object())
+    _outcome, state = await _extract_document_knowledge(
+        runtime=cast("Any", runtime),
+        job=_job(),
+        boundaries=[
+            ContractBoundary(
+                contract_index=0,
+                markdown="clause",
+                start_char=0,
+                end_char=6,
+            )
+        ],
+        jurisdiction=None,
+        document_type="generic",
+    )
+    assert state.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
+    assert state.reason == "relationship_extraction_not_implemented"
+
+
+async def test_checkpoint_reuse_falls_back_to_not_attempted_without_state() -> None:
+    from types import SimpleNamespace
+
+    from returns.result import Success as _Success
+
+    from app.features.documents.application.commands.upload_document import (
+        _extract_document_knowledge,
+    )
+    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+
+    class _LegacyCheckpointRepo:
+        async def fetch_status(self, **_kwargs: object) -> _Success[dict[str, Any]]:
+            return _Success(
+                {
+                    "document_metadata": {
+                        "knowledge_extraction": "complete",
+                        "knowledge_extraction_document_version": 1,
+                    }
+                }
+            )
+
+    runtime = SimpleNamespace(repo=_LegacyCheckpointRepo(), extraction=object())
+    _outcome, state = await _extract_document_knowledge(
+        runtime=cast("Any", runtime),
+        job=_job(),
+        boundaries=[
+            ContractBoundary(contract_index=0, markdown="clause", start_char=0, end_char=6)
+        ],
+        jurisdiction=None,
+        document_type="generic",
+    )
+    assert state.status is GraphRelationshipsStatus.NOT_ATTEMPTED
+    assert state.reason == "knowledge_extraction_checkpoint_reused"
+
+
+async def test_later_boundary_extraction_failure_keeps_earlier_states() -> None:
+    from types import SimpleNamespace
+
+    import langextract as lx
+
+    from app.extraction.langextract.service import ExtractionFailed
+    from app.features.documents.application.commands.upload_document import (
+        _extract_document_knowledge,
+    )
+    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+
+    class _SwitchProvider:
+        """Succeeds for boundary 0, raises (provider error) for boundary 1."""
+
+        def extract(self, request: Any) -> tuple[Any, ...]:
+            if request.contract_index == 0:
+                return (
+                    lx.data.AnnotatedDocument(
+                        text="clause one",
+                        extractions=[
+                            lx.data.Extraction(
+                                extraction_class="payment",
+                                extraction_text="clause one",
+                                char_interval=lx.data.CharInterval(start_pos=0, end_pos=10),
+                            )
+                        ],
+                    ),
+                )
+            message = "provider down"
+            raise RuntimeError(message)
+
+    class _Writer:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            return "episode-1"
+
+    runtime = SimpleNamespace(
+        repo=_Repo(),
+        extraction=AsyncExtractionService(_SwitchProvider()),
+        graph_writer=_Writer(),
+        idempotency=_Idempotency(),
+    )
+    boundaries = [
+        ContractBoundary(contract_index=0, markdown="clause one", start_char=0, end_char=10),
+        ContractBoundary(contract_index=1, markdown="clause two", start_char=0, end_char=10),
+    ]
+    outcome, state = await _extract_document_knowledge(
+        runtime=cast("Any", runtime),
+        job=_job(),
+        boundaries=boundaries,
+        jurisdiction=None,
+        document_type="generic",
+    )
+    assert isinstance(outcome, ExtractionFailed)
+    # Boundary 0's skipped-not-implemented truth must survive boundary 1's
+    # extraction failure — the aggregate never collapses back to not_attempted.
+    assert state.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
+    assert state.reason == "relationship_extraction_not_implemented"
+
+
+# ---------------------------------------------------------------------------
 # Fidelity measurements
 
 
@@ -427,6 +574,126 @@ def test_degradation_warnings_silent_when_healthy() -> None:
     )
     assert fidelity_degradation_warnings(metrics) == []
     assert metrics.table_loss_ratio <= 0.0
+
+
+# ---------------------------------------------------------------------------
+# OCR warning semantics (F2) and plausibility upper bound (F3)
+
+
+def test_ocr_warning_suppressed_for_coverage_without_confidence() -> None:
+    metrics = build_fidelity_metrics(
+        parsed=ParsedDocument(
+            title="Doc",
+            markdown="Alpha body.",
+            page_count=2,
+            ocr_source_coverage_ratio=0.5,
+        ),
+        boundaries=(
+            BoundaryFidelityInputs(
+                markdown="Alpha body.",
+                chunks=(
+                    _chunk("Alpha body.").model_copy(
+                        update={"source_start_char": 0, "source_end_char": 11}
+                    ),
+                ),
+            ),
+        ),
+        chunk_count=1,
+        document_kind="generic",
+        thresholds=FidelityThresholds(ocr_confidence_min=0.5),
+    )
+    codes = {warning.code for warning in fidelity_degradation_warnings(metrics)}
+    assert "FIDELITY_OCR_CONFIDENCE_LOW" not in codes
+    # Page coverage alone does not make OCR measured — the confidence signal is
+    # unavailable and stays an explicit unavailable state.
+    assert metrics.ocr_status == "unavailable"
+    assert metrics.ocr_confidence is None
+    assert "ocr_confidence" in metrics.unavailable_metrics
+
+
+def test_ocr_warning_suppressed_when_threshold_disabled() -> None:
+    metrics = build_fidelity_metrics(
+        parsed=ParsedDocument(
+            title="Doc",
+            markdown="Alpha body.",
+            page_count=1,
+            ocr_confidence=0.2,
+            ocr_source_coverage_ratio=1.0,
+        ),
+        boundaries=(
+            BoundaryFidelityInputs(
+                markdown="Alpha body.",
+                chunks=(
+                    _chunk("Alpha body.").model_copy(
+                        update={"source_start_char": 0, "source_end_char": 11}
+                    ),
+                ),
+            ),
+        ),
+        chunk_count=1,
+        document_kind="generic",
+        thresholds=FidelityThresholds(ocr_confidence_min=0.0),
+    )
+    codes = {warning.code for warning in fidelity_degradation_warnings(metrics)}
+    assert "FIDELITY_OCR_CONFIDENCE_LOW" not in codes
+
+
+def test_ocr_warning_fires_for_finite_confidence_below_enabled_threshold() -> None:
+    metrics = build_fidelity_metrics(
+        parsed=ParsedDocument(
+            title="Doc",
+            markdown="Alpha body.",
+            page_count=1,
+            ocr_confidence=0.2,
+            ocr_source_coverage_ratio=1.0,
+        ),
+        boundaries=(
+            BoundaryFidelityInputs(
+                markdown="Alpha body.",
+                chunks=(
+                    _chunk("Alpha body.").model_copy(
+                        update={"source_start_char": 0, "source_end_char": 11}
+                    ),
+                ),
+            ),
+        ),
+        chunk_count=1,
+        document_kind="generic",
+        thresholds=FidelityThresholds(ocr_confidence_min=0.5),
+    )
+    codes = {warning.code for warning in fidelity_degradation_warnings(metrics)}
+    assert "FIDELITY_OCR_CONFIDENCE_LOW" in codes
+
+
+def test_plausibility_upper_bound_counts_every_chunk_emitting_item() -> None:
+    """Heading items can each emit a chunk; the old text-only bound false-flagged.
+
+    Six headings + six short sections with eight chunks is structurally normal,
+    but the previous upper bound (text sections only) called it implausible.
+    """
+    markdown = "\n\n".join(
+        f"## Heading {index}\n\nBody paragraph {index} with text." for index in range(6)
+    )
+    state = measure_chunk_plausibility(
+        source_markdown=markdown, chunk_count=8, document_kind="generic"
+    )
+    assert state.verdict is ChunkPlausibilityVerdict.PLAUSIBLE
+    assert state.expected_chunk_count_upper is not None
+    assert state.expected_chunk_count_upper >= 12
+
+
+def test_plausibility_upper_bound_accounts_for_split_sections(monkeypatch: Any) -> None:
+    """A section exceeding max_tokens contributes ceil(tokens/max_tokens) chunks."""
+    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+
+    monkeypatch.setattr(fidelity_module, "get_tokenizer", lambda: _FixedTokenizer(2_000))
+    markdown = "One long section body. " * 50
+    # One text item of 2000 tokens splits into ceil(2000/512)=4 chunks.
+    state = fidelity_module.measure_chunk_plausibility(
+        source_markdown=markdown, chunk_count=4, document_kind="generic"
+    )
+    assert state.verdict is ChunkPlausibilityVerdict.PLAUSIBLE
+    assert state.expected_chunk_count_upper == 4
 
 
 # ---------------------------------------------------------------------------

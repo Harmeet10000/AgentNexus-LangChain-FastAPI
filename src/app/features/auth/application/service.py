@@ -151,9 +151,7 @@ class AuthService:
             log_expected_failure(error, operation="email_exists")
             return Failure(error)
         if email_exists_result.unwrap():
-            return Failure(
-                AuthConflictError(message="Email already registered", source="auth_service")
-            )
+            return await self._retry_or_reject_existing_registration(dto.email)
 
         verification_token = generate_token()
         new_account = NewAuthAccount(
@@ -180,6 +178,34 @@ class AuthService:
 
         logger.bind(user_id=resolved.id).info("User registered")
         return Success(_to_user_response(resolved))
+
+    async def _retry_or_reject_existing_registration(self, email: str) -> AuthResult[UserResponse]:
+        """Finish a prior registration whose SQL provisioning never completed.
+
+        The email existing is only a hard conflict for accounts whose
+        provisioning lifecycle is not durably pending.  A pending account means
+        the first registration created Mongo state but the authoritative SQL
+        personal tenant/membership never committed; provisioning is idempotent,
+        so the retry converges instead of dead-ending the client on
+        ``USER_CONFLICT``.  Provisioning failures keep the original behavior:
+        a typed failure, the account stays pending, no session.
+        """
+        existing_result = await self._account_store.find_by_email(email)
+        if isinstance(existing_result, Failure):
+            error = existing_result.failure()
+            log_expected_failure(error, operation="register_existing_lookup")
+            return Failure(error)
+        existing = existing_result.unwrap()
+        if existing is None or existing.provisioning_state != ProvisioningState.PENDING:
+            return Failure(
+                AuthConflictError(message="Email already registered", source="auth_service")
+            )
+
+        provision_result = await self._provision_personal_tenant(existing)
+        if isinstance(provision_result, Failure):
+            return Failure(provision_result.failure())
+        logger.bind(user_id=existing.id).info("User registered")
+        return Success(_to_user_response(existing))
 
     async def _provision_personal_tenant(
         self, account: AuthAccount

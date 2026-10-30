@@ -69,7 +69,11 @@ class FakeProvisioningSession:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
-        await self._finish(exc_type is None)
+        # A plain session exit closes the session without committing: staged
+        # writes are discarded and the simulated commit failure is reserved
+        # for the transaction boundary opened by ``begin()``.
+        self._staged_tenants.clear()
+        self._staged_memberships.clear()
 
     def begin(self) -> FakeTransaction:
         return FakeTransaction(self)

@@ -136,11 +136,13 @@ def measure_chunk_plausibility(
 ) -> ChunkPlausibilityState:
     """Detect zero-chunk output for a non-empty document and out-of-bounds counts.
 
-    The hybrid chunker never emits a chunk larger than the policy's token bound
-    and never splits an atomic section, so the plausible chunk count is bounded
-    below by ``ceil(total_tokens / max_tokens)`` and above by the number of
-    atomic sections the structure pass produced.  Outside either bound — or zero
-    chunks for a non-empty document — is implausible.
+    The hybrid chunker never emits a chunk larger than the policy's token
+    bound, so the plausible chunk count is bounded below by
+    ``ceil(total_tokens / max_tokens)``.  Every structure item (headings and
+    text sections alike) can emit its own chunk, and any item exceeding the
+    token bound is split into ``ceil(item_tokens / max_tokens)`` chunks, so the
+    count is bounded above by ``len(items)`` plus those split extras.  Outside
+    either bound — or zero chunks for a non-empty document — is implausible.
     """
     if not source_markdown.strip():
         return ChunkPlausibilityState(
@@ -158,9 +160,11 @@ def measure_chunk_plausibility(
             reason="Non-empty document produced zero chunks (empty output).",
             chunk_count=0,
         )
-    sections = [item for item in _structure_markdown(source_markdown) if item.kind == "text"]
+    items = _structure_markdown(source_markdown)
     try:
-        total_tokens = len(get_tokenizer().encode(source_markdown))
+        tokenizer = get_tokenizer()
+        total_tokens = len(tokenizer.encode(source_markdown))
+        item_tokens = [len(tokenizer.encode(item.text)) for item in items]
     except Exception as exc:  # noqa: BLE001 — plausibility degrades to unavailable, never fails ingestion
         exc.add_note("operation=fidelity_chunk_plausibility_token_count")
         return ChunkPlausibilityState(
@@ -170,7 +174,8 @@ def measure_chunk_plausibility(
         )
     max_tokens = resolve_chunk_policy(document_kind).max_tokens
     lower = max(1, math.ceil(total_tokens / max_tokens))
-    upper = max(lower, len(sections) or 1)
+    split_extras = sum(max(0, math.ceil(tokens / max_tokens) - 1) for tokens in item_tokens)
+    upper = max(lower, len(items) + split_extras, 1)
     if chunk_count < lower or chunk_count > upper:
         return ChunkPlausibilityState(
             verdict=ChunkPlausibilityVerdict.IMPLAUSIBLE,
@@ -274,7 +279,11 @@ def build_fidelity_metrics(
         unavailable.append("ocr_confidence")
     if ocr_coverage is None:
         unavailable.append("ocr_source_coverage_ratio")
-    ocr_measured = ocr_confidence is not None or ocr_coverage is not None
+    # ``ocr_status`` reflects whether OCR *confidence* was measured — the
+    # quality signal.  Page text coverage alone does not make OCR measured;
+    # coverage with unavailable confidence stays an explicit OCR-unavailable
+    # record rather than an implied-healthy one.
+    ocr_measured = ocr_confidence is not None and math.isfinite(ocr_confidence)
     table_loss = (
         (structural.tables_total - structural.tables_preserved) / structural.tables_total
         if structural.tables_total > 0
@@ -334,21 +343,19 @@ def fidelity_degradation_warnings(metrics: IngestionFidelityMetrics) -> list[Qua
                 severity="warning",
             )
         )
-    if metrics.ocr_status == "measured" and (
-        metrics.ocr_confidence is None or metrics.ocr_confidence < thresholds.ocr_confidence_min
+    if (
+        metrics.ocr_confidence is not None
+        and math.isfinite(metrics.ocr_confidence)
+        and thresholds.ocr_confidence_min > 0.0
+        and metrics.ocr_confidence < thresholds.ocr_confidence_min
     ):
         warnings.append(
             QualityWarning(
                 stage="fidelity",
                 code="FIDELITY_OCR_CONFIDENCE_LOW",
                 message=(
-                    "OCR confidence "
-                    + (
-                        "unavailable"
-                        if metrics.ocr_confidence is None
-                        else f"{metrics.ocr_confidence:.3f}"
-                    )
-                    + f" is below the configured minimum {thresholds.ocr_confidence_min:.3f}."
+                    f"OCR confidence {metrics.ocr_confidence:.3f} is below the enabled "
+                    f"minimum {thresholds.ocr_confidence_min:.3f}."
                 ),
                 severity="warning",
             )

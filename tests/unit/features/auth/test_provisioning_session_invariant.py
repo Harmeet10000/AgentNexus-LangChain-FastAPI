@@ -223,3 +223,30 @@ async def test_refresh_with_sql_unavailable_returns_retryable_infrastructure_err
     assert isinstance(refreshed, Failure)
     assert isinstance(refreshed.failure(), AuthInfrastructureError)
     assert refreshed.failure().retryable is True
+
+
+@pytest.mark.asyncio
+async def test_register_retry_completes_provisioning_for_pending_account() -> None:
+    """A pending account's second registration retries provisioning instead of dead-ending."""
+    service, sql, accounts, _redis = build_service()
+    sql.fail_next_commit = True
+
+    first = await service.register(RegisterRequest(email="retry@example.com", password="ValidPass1"))
+    assert isinstance(first, Failure)
+    assert isinstance(first.failure(), AuthInfrastructureError)
+    sql.fail_next_commit = False
+
+    second = await service.register(
+        RegisterRequest(email="retry@example.com", password="ValidPass1")
+    )
+    assert isinstance(second, Success)
+    account = (await accounts.find_by_email("retry@example.com")).unwrap()
+    assert account is not None
+    assert (personal_tenant_id(account.id), account.id) in sql.memberships
+
+    # Once the lifecycle is no longer pending, the conflict semantics return.
+    third = await service.register(
+        RegisterRequest(email="retry@example.com", password="ValidPass1")
+    )
+    assert isinstance(third, Failure)
+    assert third.failure().code.value == "USER_CONFLICT"

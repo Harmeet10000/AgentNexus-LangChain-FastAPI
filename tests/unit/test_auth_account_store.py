@@ -15,7 +15,11 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
     NewAuthAccount,
     OAuthAccountInput,
 )
-from app.features.auth.domain.errors import AuthConflictError, AuthInfrastructureError
+from app.features.auth.domain.errors import (
+    AuthConflictError,
+    AuthInfrastructureError,
+    AuthValidationError,
+)
 from app.features.auth.domain.user import LegalRole, UserRole
 from app.kernel.result import render_result
 
@@ -289,6 +293,7 @@ async def test_beanie_tenant_binding_reports_stale_rejection_when_guard_matches_
 
     class _Current:
         id = "507f1f77bcf86cd799439011"
+        tenant_id = "personal:507f1f77bcf86cd799439011"
         tenant_role_revision = 9
 
     async def _current_user(_account_id: str):
@@ -307,3 +312,88 @@ async def test_beanie_tenant_binding_reports_stale_rejection_when_guard_matches_
 
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), AuthConflictError)
+
+
+async def test_inmemory_tenant_binding_cas_is_scoped_to_the_mirrored_tenant() -> None:
+    """A different tenant's first mirror write can never lose to another tenant's revision."""
+    store = InMemoryAuthAccountStore()
+    created = await store.create(
+        NewAuthAccount(email="cross@example.com", password_hash="hash", is_verified=True)
+    )
+    assert isinstance(created, Success)
+    account_id = created.unwrap().id
+
+    # Mirror currently holds tenant A at revision 5.
+    bound = await store.set_tenant_binding(
+        account_id,
+        tenant_id="tenant-a",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=5,
+    )
+    assert isinstance(bound, Success)
+
+    # Tenant B's authoritative revision starts at 1; the mirror switch is valid.
+    switched = await store.set_tenant_binding(
+        account_id,
+        tenant_id="tenant-b",
+        legal_roles=(LegalRole.REVIEWER,),
+        role_revision=1,
+    )
+    assert isinstance(switched, Success)
+    mirrored = (await store.find_by_id(account_id)).unwrap()
+    assert mirrored is not None
+    assert mirrored.tenant_id == "tenant-b"
+    assert mirrored.tenant_role_revision == 1
+
+    # The stale rejection only applies within the same tenant.
+    stale = await store.set_tenant_binding(
+        account_id,
+        tenant_id="tenant-b",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=0,
+    )
+    assert isinstance(stale, Failure)
+    assert isinstance(stale.failure(), AuthConflictError)
+
+
+async def test_beanie_tenant_binding_guard_is_tenant_scoped() -> None:
+    collection = _FakeCollection({"_id": "updated"})
+
+    class _BindingUser:
+        collection_ref = collection
+
+        @classmethod
+        def get_pymongo_collection(cls):
+            return cls.collection_ref
+
+    store = BeanieAuthAccountStore()
+    store._User = _BindingUser
+
+    result = await store.set_tenant_binding(
+        "507f1f77bcf86cd799439011",
+        tenant_id="tenant-b",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=1,
+    )
+
+    assert isinstance(result, Success)
+    filter_ = collection.filter
+    assert filter_ is not None
+    revision_guard = filter_["$or"]
+    # First-write/switch-to-another-tenant must bypass another tenant's revision.
+    assert {"tenant_id": {"$ne": "tenant-b"}} in revision_guard
+    assert {"tenant_role_revision": {"$lte": 1}} in revision_guard
+
+
+async def test_beanie_tenant_binding_rejects_malformed_account_id() -> None:
+    store = BeanieAuthAccountStore()
+
+    result = await store.set_tenant_binding(
+        "not-a-bson-id",
+        tenant_id="personal:not-a-bson-id",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=0,
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), AuthValidationError)

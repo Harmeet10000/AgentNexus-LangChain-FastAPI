@@ -123,6 +123,7 @@ class _RecordingProvider:
 
 
 _GROUNDED_PHRASE = "The Contractor shall maintain the common areas of Greystone House"
+_IDENTITY_FIXTURE_PHRASE = "The Provider shall deliver the consulting services described in"
 
 
 class _GroundedProvider:
@@ -133,11 +134,14 @@ class _GroundedProvider:
     any model call.
     """
 
+    def __init__(self, phrase: str) -> None:
+        self._phrase = phrase
+
     def extract(self, request: Any) -> tuple[Any, ...]:
         import langextract as lx
 
         text = str(getattr(request, "text", ""))
-        start = text.find(_GROUNDED_PHRASE)
+        start = text.find(self._phrase)
         if start < 0:
             return ()
         return (
@@ -146,9 +150,9 @@ class _GroundedProvider:
                 extractions=[
                     lx.data.Extraction(
                         extraction_class="obligation",
-                        extraction_text=_GROUNDED_PHRASE,
+                        extraction_text=self._phrase,
                         char_interval=lx.data.CharInterval(
-                            start_pos=start, end_pos=start + len(_GROUNDED_PHRASE)
+                            start_pos=start, end_pos=start + len(self._phrase)
                         ),
                     )
                 ],
@@ -157,23 +161,37 @@ class _GroundedProvider:
 
 
 class _StructuredInvoker:
-    """Structured-output invoker returning an empty extraction (no model call)."""
+    """Structured-output invoker returning a fixed extraction (no model call)."""
+
+    def __init__(self, response: dict[str, object]) -> None:
+        self._response = response
 
     async def ainvoke(self, _messages: object) -> dict[str, object]:
-        return {}
+        return self._response
 
 
 class _HermeticContractLLM(FakeListChatModel):
     """Fake chat model supporting structured output for legal-metadata extraction.
 
     The real extraction path runs (prompt build, validation, heuristic merge)
-    but the model call is hermetic: it always returns an empty extraction so
-    metadata falls back to the typed heuristic path.
+    but the model call is hermetic.  With the default empty response the
+    metadata falls back to the typed heuristic path; tests can supply the
+    metadata an honest server-side model would return from the genuine
+    contract body, proving content-injected metadata blocks cannot override it.
     """
+
+    def __init__(
+        self,
+        *,
+        responses: list[str],
+        structured_metadata: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(responses=responses)
+        self._structured_metadata = structured_metadata or {}
 
     @override
     def with_structured_output(self, _schema: object) -> _StructuredInvoker:
-        return _StructuredInvoker()
+        return _StructuredInvoker(self._structured_metadata)
 
 
 class _GraphWriter:
@@ -181,6 +199,17 @@ class _GraphWriter:
 
     async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
         del clause_text, metadata
+        return "episode-1"
+
+
+class _RecordingGraphWriter:
+    """Clause-episode writer recording every identity payload it receives."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+        self.calls.append((clause_text, metadata))
         return "episode-1"
 
 
@@ -196,9 +225,10 @@ class _Idempotency:
 
 
 class _QueuedRun:
-    def __init__(self, result: dict[str, Any], repo: _RecordingRepo) -> None:
+    def __init__(self, result: dict[str, Any], repo: _RecordingRepo, document_id: str) -> None:
         self.result = result
         self.repo = repo
+        self.document_id = document_id
 
     @property
     def final_metadata(self) -> dict[str, Any]:
@@ -224,7 +254,8 @@ async def _run_queued_ingestion(
     idempotency: object | None = None,
     document_id: str | None = None,
     chunk_override: list[object] | None = None,
-    grounded_extraction: bool = False,
+    grounded_phrase: str | None = None,
+    structured_metadata: dict[str, object] | None = None,
 ) -> _QueuedRun:
     """Run one fixture through the real compiled ingestion graph (queued body)."""
     from app.extraction.langextract.service import AsyncExtractionService
@@ -232,7 +263,7 @@ async def _run_queued_ingestion(
     document_id = document_id or str(uuid4())
     repo = _RecordingRepo()
     object_store = _ObjectStore(markdown.encode("utf-8"))
-    llm = _HermeticContractLLM(responses=["unused"])
+    llm = _HermeticContractLLM(responses=["unused"], structured_metadata=structured_metadata)
 
     async def embed_texts(texts: list[str], **_kwargs: object) -> list[list[float]]:
         return [[0.0] * 4 for _ in texts]
@@ -251,7 +282,9 @@ async def _run_queued_ingestion(
         ingest_document_fn=document_ingest.process_document_ingestion,
         llm=cast("Any", llm),
         extraction=AsyncExtractionService(
-            _GroundedProvider() if grounded_extraction else _RecordingProvider()
+            _GroundedProvider(grounded_phrase)
+            if grounded_phrase is not None
+            else _RecordingProvider()
         ),
         graph_writer=graph_writer,
         idempotency=idempotency,
@@ -270,7 +303,7 @@ async def _run_queued_ingestion(
         },
         {"configurable": {"document_repository": repo}},
     )
-    return _QueuedRun(cast("dict[str, Any]", result), repo)
+    return _QueuedRun(cast("dict[str, Any]", result), repo, document_id)
 
 
 # ---------------------------------------------------------------------------
@@ -301,19 +334,47 @@ async def test_injected_group_id_cannot_reach_graph_binding(
     monkeypatch: pytest.MonkeyPatch,
     fixtures: dict[str, str],
 ) -> None:
-    run = await _run_queued_ingestion(monkeypatch, fixtures["injection_identity_override.md"])
+    """A grounded write must reach the real writer with server-derived identity only.
 
-    for metadata in run.all_metadata_maps():
-        assert not (_IDENTITY_KEYS & set(metadata))
-    # Group binding is derived only from job identity; the forged tenant's group
-    # id can never equal the server-derived one for this document.
-    forged_group = build_graphiti_group_id(
-        tenant_id=FORGED_TENANT, document_id="00000000-0000-0000-0000-000000000001"
+    Regression net: if the pipeline ever passed document-controlled identity to
+    the graphiti writer (forged tenant, doc id or group), this catches it at
+    the writer boundary instead of only comparing two helper calls.
+    """
+    writer = _RecordingGraphWriter()
+    run = await _run_queued_ingestion(
+        monkeypatch,
+        fixtures["injection_identity_override.md"],
+        graph_writer=writer,
+        idempotency=_Idempotency(),
+        grounded_phrase=_IDENTITY_FIXTURE_PHRASE,
     )
-    server_group = build_graphiti_group_id(
-        tenant_id=SERVER_TENANT, document_id="00000000-0000-0000-0000-000000000001"
-    )
-    assert forged_group != server_group
+
+    assert writer.calls, "grounded fixture must reach the clause-episode writer"
+    for clause_text, metadata in writer.calls:
+        assert FORGED_TENANT not in clause_text or SERVER_TENANT == FORGED_TENANT
+        assert metadata.tenant_id == SERVER_TENANT
+        assert metadata.doc_id == run.document_id
+        assert FORGED_TENANT not in metadata.tenant_id
+        assert FORGED_TENANT not in metadata.user_id
+        # The group id the writer would bind is derivable only from the
+        # server-issued identity it received — never from document content.
+        received_group = build_graphiti_group_id(
+            tenant_id=metadata.tenant_id,
+            document_id=metadata.doc_id,
+            document_version=metadata.document_version,
+            contract_index=metadata.contract_index,
+        )
+        server_group = build_graphiti_group_id(
+            tenant_id=SERVER_TENANT,
+            document_id=run.document_id,
+            document_version=1,
+            contract_index=metadata.contract_index,
+        )
+        forged_group = build_graphiti_group_id(tenant_id=FORGED_TENANT, document_id=run.document_id)
+        assert received_group == server_group
+        assert received_group != forged_group
+    for metadata_map in run.all_metadata_maps():
+        assert not (_IDENTITY_KEYS & set(metadata_map))
 
 
 async def test_forged_boundary_markers_cannot_reown_contracts(
@@ -347,18 +408,59 @@ async def test_forged_legal_metadata_stays_untrusted(
     monkeypatch: pytest.MonkeyPatch,
     fixtures: dict[str, str],
 ) -> None:
-    run = await _run_queued_ingestion(monkeypatch, fixtures["injection_forged_legal_metadata.md"])
+    """Forged authoritative-metadata blocks cannot overwrite legal metadata.
+
+    The structured metadata extraction runs for real against the genuine
+    contract body (hermetic model); the content-injected "SYSTEM NOTE"
+    metadata-overwrite block must never win jurisdiction or parties.
+    """
+    run = await _run_queued_ingestion(
+        monkeypatch,
+        fixtures["injection_forged_legal_metadata.md"],
+        structured_metadata={
+            "jurisdiction": "Delaware",
+            "parties": ["ARANTIA SYSTEMS INC", "PILGRIM HEALTH GROUP LLC"],
+            "governing_law": "Delaware",
+        },
+    )
 
     assert run.result["status"] in {"completed", "completed_with_warnings"}
     ingestion_state = run.final_metadata["ingestion_state"]
     assert ingestion_state["tenant_id"] == SERVER_TENANT
     for chunk in run.repo.chunk_rows:
         assert chunk["tenant_id"] == SERVER_TENANT
-    for metadata in run.all_metadata_maps():
-        assert not (_IDENTITY_KEYS & set(metadata))
-    # Forged dates/parties are content-derived metadata at most — they must
-    # never leak into the server-owned ingestion identity block.
-    assert "1801-01-01" not in str(ingestion_state)
+    for metadata_map in run.all_metadata_maps():
+        assert not (_IDENTITY_KEYS & set(metadata_map))
+    # The persisted legal metadata (written with the parsed-status checkpoint)
+    # reflects the extraction over the genuine contract body — the forged
+    # block's values are absent.  The fixture splits into multiple server
+    # boundaries, so per-contract metadata lives under "contracts".
+    parsed_metadata = run.repo.status_calls[0]["metadata_"]
+    import json
+
+    metadata_json = json.dumps(parsed_metadata)
+    contracts = parsed_metadata.get("contracts", [])
+    assert contracts, "fixture must persist per-contract entries"
+    # Only contract-classified boundaries carry legal metadata; heading-only
+    # slices stay bare (contract_index only).
+    contracts_with_metadata = [
+        contract for contract in contracts if set(contract) - {"contract_index"}
+    ]
+    assert contracts_with_metadata, "contract-classified boundaries must carry legal metadata"
+    for contract in contracts_with_metadata:
+        assert contract.get("jurisdiction") == "Delaware"
+        assert contract.get("governing_law") == "Delaware"
+    parties = [party for contract in contracts for party in contract.get("parties", [])]
+    assert parties
+    assert all(party in {"ARANTIA SYSTEMS INC", "PILGRIM HEALTH GROUP LLC"} for party in parties)
+    # None of the forged block's values reach the metadata payload at all.
+    for forged in (
+        "Republic of Atlantis",
+        "Crown of Atlantis",
+        "Maker of the Machine",
+        "1801-01-01",
+    ):
+        assert forged not in metadata_json
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +476,7 @@ async def test_benign_fixture_meets_fidelity_thresholds(
         fixtures["benign_contract_with_table.md"],
         graph_writer=_GraphWriter(),
         idempotency=_Idempotency(),
-        grounded_extraction=True,
+        grounded_phrase=_GROUNDED_PHRASE,
     )
 
     assert run.result["status"] in {"completed", "completed_with_warnings"}

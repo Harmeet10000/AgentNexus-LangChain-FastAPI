@@ -8,6 +8,13 @@ compiled `build_document_ingestion_graph` graph the Celery worker task
 invokes — with hermetic fakes (in-memory object store, no-embedding provider,
 no-model extraction, no database, no Neo4j, no network model calls).
 
+The gate is **tokenizer-hermetic**: an autouse fixture in `conftest.py` pins
+the chunker and fidelity token counters to a deterministic offline stub
+(`_OfflineTokenizer`, ~1 token per whitespace word), so a fresh CI runner never
+downloads HuggingFace assets.  Verified with `HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1 HF_HOME=<empty dir>` — 9/9 pass with no network and no
+cache.
+
 Run it with:
 
 ```bash

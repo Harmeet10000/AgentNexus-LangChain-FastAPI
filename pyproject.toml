@@ -472,6 +472,7 @@ section-order = [
 ]
 "evals/ingestion/conftest.py" = [
     "INP001",  # implicit-namespace-package: evals dirs need not be packages
+    "PLR6301", # no-self-use: the offline tokenizer stub implements an interface
 ]
 "src/alembic/env.py" = [
     "F401", # _MODEL_MODULES side-effect registry

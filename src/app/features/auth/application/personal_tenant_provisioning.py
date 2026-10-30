@@ -26,6 +26,7 @@ already has a resumable repair driver.
 
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -204,6 +205,7 @@ class PersonalTenantProvisioner:
                 )
         except SQLAlchemyError as exc:
             exc.add_note(f"user_id={user_id}, operation=provision_personal_tenant")
+            exc.add_note(traceback.format_exc())
             logger.bind(user_id=user_id, tenant_id=tenant_id).exception(
                 "personal_tenant_provisioning_sql_failed"
             )
@@ -256,6 +258,7 @@ class PersonalTenantProvisioner:
                 ).count_memberships_for_user(user_id)
         except SQLAlchemyError as exc:
             exc.add_note(f"user_id={user_id}, operation=membership_invariant_check")
+            exc.add_note(traceback.format_exc())
             logger.bind(user_id=user_id).exception("membership_invariant_check_failed")
             return Failure(
                 AuthInfrastructureError(

@@ -270,3 +270,79 @@ async def test_unexpected_provisioning_errors_are_not_swallowed() -> None:
         await provisioner.provision(
             "user-1", display_name="User One", legal_roles=(LegalRole.ANALYST,)
         )
+
+
+@pytest.mark.asyncio
+async def test_role_update_on_second_tenant_survives_higher_personal_mirror_revision() -> None:
+    """Regression: the mirror CAS must not compare revisions across tenants.
+
+    A personal mirror at revision 5 used to reject a valid team-tenant mirror
+    write at revision 1, so the caller saw a conflict after the authoritative
+    SQL update had already committed and reconciliation kept failing.
+    """
+    sql = FakeTenantSQLStore()
+    accounts = FlakyMirrorStore()
+    accounts._index_account(make_account())
+    # Personal tenant mirror already advanced to revision 5.
+    bound = await accounts.set_tenant_binding(
+        "user-1",
+        tenant_id=personal_tenant_id("user-1"),
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=5,
+    )
+    assert isinstance(bound, Success)
+
+    # A team membership exists in SQL (as a corpus-admin would have created).
+    from app.features.auth.application.personal_tenant_provisioning import (
+        PersonalTenantProvisioningRepository,
+    )
+
+    async with sql.factory() as session, session.begin():
+        await PersonalTenantProvisioningRepository(session).upsert_membership(
+            "team-a",
+            "user-1",
+            legal_roles=(LegalRole.ANALYST,),
+            role_revision=0,
+        )
+
+    service = TenantMembershipService(sql.factory, account_store=accounts)
+    result = await service.update_roles(
+        tenant_id="team-a",
+        user_id="user-1",
+        legal_roles=(LegalRole.REVIEWER,),
+        expected_revision=0,
+    )
+
+    assert isinstance(result, Success)
+    membership = sql.memberships["team-a", "user-1"]
+    assert membership.legal_roles == [LegalRole.REVIEWER.value]
+    # The mirror accepted the team write: no reconcile marker left behind.
+    assert membership.mirror_sync_pending is False
+    mirrored = (await accounts.find_by_id("user-1")).unwrap()
+    assert mirrored is not None
+    assert mirrored.tenant_id == "team-a"
+    assert mirrored.tenant_role_revision == 1
+
+
+@pytest.mark.asyncio
+async def test_plain_session_exit_discards_staged_state_without_consuming_commit_failure() -> None:
+    """Only ``begin()`` owns the commit boundary — a bare session exit commits nothing."""
+    sql = FakeTenantSQLStore()
+    sql.fail_next_commit = True
+    from app.features.auth.application.personal_tenant_provisioning import (
+        PersonalTenantProvisioningRepository,
+    )
+
+    session = sql.factory()
+    async with session:
+        await PersonalTenantProvisioningRepository(session).upsert_membership(
+            personal_tenant_id("user-1"),
+            "user-1",
+            legal_roles=(LegalRole.ANALYST,),
+            role_revision=0,
+        )
+
+    assert not sql.tenants
+    assert not sql.memberships
+    # The failure flag was not consumed by the session-level exit.
+    assert sql.fail_next_commit is True

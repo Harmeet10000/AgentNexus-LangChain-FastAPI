@@ -743,15 +743,28 @@ class BeanieAuthAccountStore:
         if revision is None:
             message = "tenant_role_revision is required"
             raise ValueError(message)
+        if not BsonObjectId.is_valid(account_id):
+            return Failure(
+                AuthValidationError(
+                    message="Invalid user identifier",
+                    details={"user_id": account_id},
+                    source="auth_account_store",
+                )
+            )
         # Revision-monotonic compare-and-set executed atomically by MongoDB.
-        # Documents predating the mirror field (missing/None revision) always
-        # accept their first authoritative write.  A stale writer loses.
+        # The revision counter is per tenant: the guard only applies when the
+        # current mirror already points at the tenant being mirrored, so a
+        # first (or last-active switch to) a different tenant can never be
+        # rejected by a higher revision another tenant reached.  Documents
+        # predating the mirror field (missing/None revision) always accept
+        # their first authoritative write.
         now = datetime.now(UTC)
         try:
             updated = await self._User.get_pymongo_collection().find_one_and_update(
                 {
                     "_id": BsonObjectId(account_id),
                     "$or": [
+                        {"tenant_id": {"$ne": tenant_id}},
                         {"tenant_role_revision": {"$exists": False}},
                         {"tenant_role_revision": None},
                         {"tenant_role_revision": {"$lte": revision}},
@@ -783,20 +796,23 @@ class BeanieAuthAccountStore:
         if updated is not None:
             return Success(None)
 
-        # The conditional update matched nothing: either the account is gone or
-        # a newer mirror revision already won.  Disambiguate with one read.
+        # The conditional update matched nothing: either the account is gone,
+        # or the same tenant's mirror already holds a newer revision.
+        # Disambiguate with one read; the stale rejection stays tenant-scoped.
         user_result = await self._get_user(account_id)
         if isinstance(user_result, Failure):
             return Failure(user_result.failure())
         current = user_result.unwrap()
         mirrored = getattr(current, "tenant_role_revision", None)
-        if mirrored is not None and mirrored > revision:
+        mirrored_tenant = getattr(current, "tenant_id", None)
+        if mirrored_tenant == tenant_id and mirrored is not None and mirrored > revision:
             return Failure(
                 AuthConflictError(
                     message="Stale tenant mirror revision rejected by compare-and-set",
                     details={
                         "user_id": account_id,
                         "operation": "set_tenant_binding",
+                        "tenant_id": tenant_id,
                         "expected_revision": revision,
                         "current_revision": mirrored,
                     },
@@ -1423,7 +1439,7 @@ class InMemoryAuthAccountStore:
         tenant_role_revision: int | None = None,
         role_revision: int | None = None,
     ) -> Result[None, AuthError]:
-        """Mirror write guarded by a revision-monotonic compare-and-set."""
+        """Mirror write guarded by a revision-monotonic, tenant-scoped CAS."""
         revision = tenant_role_revision if tenant_role_revision is not None else role_revision
         if revision is None:
             message = "tenant_role_revision is required"
@@ -1437,14 +1453,19 @@ class InMemoryAuthAccountStore:
                     source="auth_account_store",
                 )
             )
+        # The revision counter is per tenant: only a mirror already pointing at
+        # the same tenant can reject a write as stale.  A switch to another
+        # tenant (or the first binding) is always accepted, mirroring the
+        # production adapter's atomic guard.
         mirrored = account.tenant_role_revision
-        if mirrored > revision:
+        if account.tenant_id == tenant_id and mirrored > revision:
             return Failure(
                 AuthConflictError(
                     message="Stale tenant mirror revision rejected by compare-and-set",
                     details={
                         "user_id": account_id,
                         "operation": "set_tenant_binding",
+                        "tenant_id": tenant_id,
                         "expected_revision": revision,
                         "current_revision": mirrored,
                     },
