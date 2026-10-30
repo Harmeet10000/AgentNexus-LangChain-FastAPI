@@ -310,3 +310,53 @@ async def test_register_retry_for_passwordless_pending_account_is_conflict() -> 
     assert result.failure().message == "Email already registered"
     assert not sql.tenants
     assert not sql.memberships
+
+
+@pytest.mark.asyncio
+async def test_register_retry_verifies_password_exactly_once_per_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exactly one constant-time verify per request, against the right target."""
+    import app.features.auth.application.service as service_module
+
+    calls: list[str] = []
+    real_verify = service_module.verify_password
+
+    def recording_verify(hash_value: str, password: str) -> bool:
+        calls.append(hash_value)
+        return real_verify(hash_value, password)
+
+    monkeypatch.setattr(service_module, "verify_password", recording_verify)
+    service, sql, _accounts, _redis = build_service()
+
+    # Completed account: one verify against the dummy hash only.
+    await service.register(RegisterRequest(email="done@example.com", password="ValidPass1"))
+    calls.clear()
+    completed = await service.register(
+        RegisterRequest(email="done@example.com", password="AttackerPass1")
+    )
+    assert isinstance(completed, Failure)
+    assert len(calls) == 1
+    assert calls[0] == service_module._DUMMY_HASH
+
+    # Pending account with a wrong password: one verify against the real hash,
+    # never a second dummy verify on the failure path.
+    sql.fail_next_commit = True
+    await service.register(RegisterRequest(email="pending@example.com", password="ValidPass1"))
+    sql.fail_next_commit = False
+    calls.clear()
+    wrong = await service.register(
+        RegisterRequest(email="pending@example.com", password="AttackerPass1")
+    )
+    assert isinstance(wrong, Failure)
+    assert len(calls) == 1
+    assert calls[0].startswith("$argon2id$")
+
+    # Proven pending retry: still exactly one verify, then provisioning.
+    calls.clear()
+    proven = await service.register(
+        RegisterRequest(email="pending@example.com", password="ValidPass1")
+    )
+    assert isinstance(proven, Success)
+    assert len(calls) == 1
+    assert calls[0].startswith("$argon2id$")

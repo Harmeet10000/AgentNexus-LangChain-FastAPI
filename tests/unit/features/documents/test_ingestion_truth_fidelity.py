@@ -482,6 +482,42 @@ def test_table_preservation_counts_survivors() -> None:
     assert preserved == 1
 
 
+def test_table_preservation_survives_reserialization() -> None:
+    """Different column alignment/width still counts as preserved."""
+    table = "| Service level | Target |\n|---|---|\n| Repairs | 48 hours |"
+    reserialized = (
+        "Intro text.\n\n"
+        "|  Service level   |        Target |\n"
+        "|:-----------------|--------------:|\n"
+        "| Repairs          |      48 hours |\n\n"
+        "Trailing text."
+    )
+    total, preserved = measure_table_preservation(tables=[table], chunk_text=reserialized)
+    assert total == 1
+    assert preserved == 1
+
+
+def test_table_preservation_survives_rows_split_across_chunks() -> None:
+    """Rows distributed across adjacent chunks are preserved; not byte loss."""
+    table = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |"
+    chunk_one = "Header context | A | B |"
+    chunk_two = "Row body | 1 | 2 | then | 3 | 4 |"
+    total, preserved = measure_table_preservation(
+        tables=[table], chunk_text=f"{chunk_one}\n{chunk_two}"
+    )
+    assert total == 1
+    assert preserved == 1
+
+
+def test_table_preservation_dropped_row_is_loss() -> None:
+    """A genuinely dropped row still counts as table loss."""
+    table = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |"
+    chunk_with_missing_row = "| A | B |\n| 1 | 2 |"
+    total, preserved = measure_table_preservation(tables=[table], chunk_text=chunk_with_missing_row)
+    assert total == 1
+    assert preserved == 0
+
+
 def test_chunk_plausibility_zero_chunks_for_non_empty_document() -> None:
     state = measure_chunk_plausibility(
         source_markdown="Some real content.", chunk_count=0, document_kind="generic"
@@ -545,7 +581,9 @@ def test_degradation_warnings_fire_on_threshold_breaches() -> None:
             tables=["| A | B |"],
         ),
         boundaries=(
-            BoundaryFidelityInputs(markdown="# H\n\nAlpha body.\n\nBeta body.", chunks=()),
+            BoundaryFidelityInputs(
+                markdown="# H\n\nAlpha body.\n\nBeta body.", chunks=(), document_kind="generic"
+            ),
         ),
         chunk_count=0,
         document_kind="generic",
@@ -573,7 +611,11 @@ def test_degradation_warnings_silent_when_healthy() -> None:
     ]
     metrics = build_fidelity_metrics(
         parsed=ParsedDocument(title="Doc", markdown=markdown, page_count=1),
-        boundaries=(BoundaryFidelityInputs(markdown=markdown, chunks=tuple(chunks)),),
+        boundaries=(
+            BoundaryFidelityInputs(
+                markdown=markdown, chunks=tuple(chunks), document_kind="generic"
+            ),
+        ),
         chunk_count=1,
         document_kind="generic",
     )
@@ -601,6 +643,7 @@ def test_ocr_warning_suppressed_for_coverage_without_confidence() -> None:
                         update={"source_start_char": 0, "source_end_char": 11}
                     ),
                 ),
+                document_kind="generic",
             ),
         ),
         chunk_count=1,
@@ -633,6 +676,7 @@ def test_ocr_warning_suppressed_when_threshold_disabled() -> None:
                         update={"source_start_char": 0, "source_end_char": 11}
                     ),
                 ),
+                document_kind="generic",
             ),
         ),
         chunk_count=1,
@@ -660,6 +704,7 @@ def test_ocr_warning_fires_for_finite_confidence_below_enabled_threshold() -> No
                         update={"source_start_char": 0, "source_end_char": 11}
                     ),
                 ),
+                document_kind="generic",
             ),
         ),
         chunk_count=1,
@@ -719,6 +764,49 @@ def test_plausibility_upper_bound_accounts_for_split_sections(monkeypatch: Any) 
     )
     assert state.verdict is ChunkPlausibilityVerdict.PLAUSIBLE
     assert state.expected_chunk_count_upper == 4
+
+
+def test_mixed_policy_boundaries_combine_their_own_plausibility_bounds(
+    monkeypatch: Any,
+) -> None:
+    """A statute boundary chunked at 384 tokens inside a 512-token document.
+
+    The document-wide policy (512) bounds the statute boundary's split output
+    too narrowly and would flag fully-retained content as implausible.  Each
+    boundary's bounds must use the policy that actually produced its chunks.
+    """
+    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+
+    monkeypatch.setattr(fidelity_module, "get_tokenizer", _WordCountTokenizer)
+    contract_markdown = "## Terms\n\n" + " ".join(f"word{index}" for index in range(100))
+    statute_markdown = "One long statute body. " * 300  # 900 tokens, one item
+    boundaries = (
+        fidelity_module.BoundaryFidelityInputs(
+            markdown=contract_markdown, chunks=(), document_kind="generic"
+        ),
+        fidelity_module.BoundaryFidelityInputs(
+            markdown=statute_markdown, chunks=(), document_kind="statute"
+        ),
+    )
+    parsed = ParsedDocument(
+        title="Doc", markdown=f"{contract_markdown}\n\n{statute_markdown}", page_count=1
+    )
+    metrics = fidelity_module.build_fidelity_metrics(
+        parsed=parsed,
+        boundaries=boundaries,
+        # generic upper (2) + statute upper (1 + ceil(1200/384)-1 = 4) = 6.
+        chunk_count=6,
+        document_kind="legal_contract",
+    )
+    assert metrics.chunk_plausibility.verdict is ChunkPlausibilityVerdict.PLAUSIBLE
+    assert metrics.chunk_plausibility.expected_chunk_count_upper == 6
+    # The regression: the document-wide 512 policy rejects this same count.
+    document_wide = fidelity_module.measure_chunk_plausibility(
+        source_markdown=f"{contract_markdown}\n\n{statute_markdown}",
+        chunk_count=6,
+        document_kind="legal_contract",
+    )
+    assert document_wide.verdict is ChunkPlausibilityVerdict.IMPLAUSIBLE
 
 
 # ---------------------------------------------------------------------------

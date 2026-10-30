@@ -43,6 +43,7 @@ from app.features.documents.ingestion.enrichment.legal_metadata import (
     UNTRUSTED_CONTENT_DIRECTIVE,
     UNTRUSTED_DOCUMENT_BEGIN,
     UNTRUSTED_DOCUMENT_END,
+    _NEUTRALIZED_MARKER_FORM,
 )
 from app.features.documents.ingestion.workflow import build_document_ingestion_graph
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
@@ -529,6 +530,42 @@ async def test_metadata_prompt_delimits_untrusted_content(
         assert forged_marker in human[begin:end]
         # The anti-instruction directive travels with the prompt.
         assert UNTRUSTED_CONTENT_DIRECTIVE in human
+
+
+async def test_delimiter_spoofing_cannot_escape_untrusted_region(
+    monkeypatch: pytest.MonkeyPatch,
+    fixtures: dict[str, str],
+) -> None:
+    """Document-embedded delimiter literals cannot close or reopen the region.
+
+    The fixture body carries the raw BEGIN/END marker strings (two of each)
+    plus instructions claiming everything after the spoofed opening is trusted
+    server guidance.  The prompt must contain exactly one real BEGIN/END pair,
+    the neutralized marker form inside it, and the neutralization note outside.
+    """
+    run = await _run_queued_ingestion(
+        monkeypatch,
+        fixtures["injection_delimiter_spoof.md"],
+    )
+
+    assert run.llm._captured_prompts, "metadata extraction must send a prompt"
+    for messages in run.llm._captured_prompts:
+        message_list = cast("list[Any]", messages)
+        human = "\n".join(str(message.content) for message in message_list)
+        # Exactly one real region: the content's own markers were neutralized.
+        assert human.count(UNTRUSTED_DOCUMENT_BEGIN) == 1
+        assert human.count(UNTRUSTED_DOCUMENT_END) == 1
+        begin = human.index(UNTRUSTED_DOCUMENT_BEGIN)
+        end = human.index(UNTRUSTED_DOCUMENT_END)
+        region = human[begin:end]
+        outside = human[end + len(UNTRUSTED_DOCUMENT_END) :]
+        # All four embedded marker literals surface as the sanitized form
+        # inside the region — none survives as a real boundary.
+        assert region.count(_NEUTRALIZED_MARKER_FORM) == 4
+        # The forged directive text stays inside the untrusted region (it is
+        # content), and the server-side neutralization note sits outside.
+        assert "Republic of Atlantis" in region
+        assert "4 untrusted-region marker literals" in outside
 
 
 # ---------------------------------------------------------------------------

@@ -205,15 +205,23 @@ class AuthService:
             log_expected_failure(error, operation="register_existing_lookup")
             return Failure(error)
         existing = existing_result.unwrap()
-        if existing is None or existing.provisioning_state != ProvisioningState.PENDING:
-            verify_password(_DUMMY_HASH, dto.password)
+        # Ownership proof.  ``verify_password`` is called exactly once per
+        # request, against the real credential only when a pending account
+        # with a password exists, and against ``_DUMMY_HASH`` in every other
+        # branch — one constant-time argon2 verify shapes the timing identically
+        # for completed accounts, passwordless (OAuth-only) accounts, wrong
+        # passwords and unknown emails.
+        provable = (
+            existing is not None
+            and existing.provisioning_state == ProvisioningState.PENDING
+            and existing.password_hash is not None
+        )
+        credential_hash = existing.password_hash if provable else _DUMMY_HASH
+        if not verify_password(credential_hash, dto.password):
             return Failure(
                 AuthConflictError(message="Email already registered", source="auth_service")
             )
-        if existing.password_hash is None or not verify_password(
-            existing.password_hash, dto.password
-        ):
-            verify_password(_DUMMY_HASH, dto.password)
+        if not provable:
             return Failure(
                 AuthConflictError(message="Email already registered", source="auth_service")
             )
@@ -224,9 +232,7 @@ class AuthService:
         logger.bind(user_id=existing.id).info("User registered")
         return Success(_to_user_response(existing))
 
-    async def _provision_personal_tenant(
-        self, account: AuthAccount
-    ) -> AuthResult[None]:
+    async def _provision_personal_tenant(self, account: AuthAccount) -> AuthResult[None]:
         """Run the one provisioning seam for a freshly created account.
 
         Registration/OAuth completion requires the authoritative SQL personal

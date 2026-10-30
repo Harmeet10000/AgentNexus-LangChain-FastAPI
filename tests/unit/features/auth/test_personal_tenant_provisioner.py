@@ -353,7 +353,7 @@ async def test_display_name_is_bounded_to_the_tenant_column_limit() -> None:
     """A 256-character profile name must not fail the 255-char SQL column."""
     sql = FakeTenantSQLStore()
     accounts = FlakyMirrorStore()
-    accounts._index_account(make_account())  # noqa: SLF001
+    accounts._index_account(make_account())
     provisioner = PersonalTenantProvisioner(sql.factory, accounts)
 
     result = await provisioner.provision(

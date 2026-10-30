@@ -539,8 +539,12 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
     fidelity_metrics = build_fidelity_metrics(
         parsed=parsed,
         boundaries=[
-            BoundaryFidelityInputs(markdown=boundary.markdown, chunks=tuple(chunks))
-            for boundary, chunks in boundary_chunks
+            BoundaryFidelityInputs(
+                markdown=boundary_entry.markdown,
+                chunks=tuple(chunks),
+                document_kind=contract_parsed_items[index][2].document_kind,
+            )
+            for index, (boundary_entry, chunks) in enumerate(boundary_chunks)
         ],
         chunk_count=len(prepared_chunks),
         document_kind=classified.document_kind,

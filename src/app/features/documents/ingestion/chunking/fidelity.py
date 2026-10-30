@@ -42,6 +42,8 @@ from app.retrieval.chunk_policy import resolve_chunk_policy
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from transformers import PreTrainedTokenizerBase
+
     from app.features.documents.ingestion.chunking.classification import ParsedDocument
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -49,6 +51,16 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 def _normalize(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", text).strip()
+
+
+def _normalize_cell_space(text: str) -> str:
+    """Normalize text into a pipe-free, whitespace-collapsed cell space.
+
+    Both table rows and chunk text are projected into this space, so row
+    matching is robust to column-width re-serialization and to chunk text that
+    still carries pipe delimiters.
+    """
+    return _WHITESPACE_RE.sub(" ", text.replace("|", " ")).strip()
 
 
 class SourceCoverageMeasurement(BaseModel):
@@ -111,12 +123,49 @@ def measure_source_coverage(
     )
 
 
+def _pipe_table_rows(table: str) -> list[list[str]] | None:
+    """Parse a pipe-markdown table into semantic cell rows, or None.
+
+    Separator rows (``---``) carry no content and are dropped.  Returns None
+    for text that is not pipe-table shaped so callers can fall back to plain
+    containment.
+    """
+    lines = [line.strip() for line in table.strip().splitlines() if line.strip()]
+    if len(lines) < 1 or not all("|" in line for line in lines):
+        return None
+    rows: list[list[str]] = []
+    for line in lines:
+        cells = [_normalize(cell) for cell in line.strip("|").split("|")]
+        if cells and all(re.fullmatch(r"[-: ]*", cell) for cell in cells):
+            continue  # header/body separator row — formatting, not content
+        content = [cell for cell in cells if cell]
+        if content:
+            rows.append(content)
+    return rows or None
+
+
 def measure_table_preservation(*, tables: Sequence[str], chunk_text: str) -> tuple[int, int]:
-    """Count parsed tables whose normalized text survives into chunk content."""
-    normalized_chunks = _normalize(chunk_text)
-    preserved = sum(
-        1 for table in tables if table.strip() and _normalize(table) in normalized_chunks
-    )
+    """Count parsed tables whose content survives into chunk text.
+
+    Comparison is semantic, not byte-exact: a pipe table is preserved when
+    every content row's normalized cell sequence appears in the normalized
+    chunk text, so rows split across adjacent chunks (each row still intact
+    within its chunk) and re-serialized column alignment both count as
+    preserved.  A genuinely dropped row makes the table lost.
+    """
+    normalized_chunks = _normalize_cell_space(chunk_text)
+    preserved = 0
+    for table in tables:
+        if not table.strip():
+            continue
+        rows = _pipe_table_rows(table)
+        if rows is None:
+            # Not pipe-table shaped: fall back to normalized containment.
+            if _normalize_cell_space(table) in normalized_chunks:
+                preserved += 1
+            continue
+        if all(" ".join(cells) in normalized_chunks for cells in rows):
+            preserved += 1
     return len(tables), preserved
 
 
@@ -128,23 +177,49 @@ def measure_section_preservation(*, source_markdown: str, chunk_text: str) -> tu
     return len(sections), preserved
 
 
-def measure_chunk_plausibility(
+def _plausibility_bounds(
     *,
-    source_markdown: str,
+    markdown: str,
+    document_kind: str,
+    tokenizer: PreTrainedTokenizerBase,
+) -> tuple[int, int, int]:
+    """Plausible chunk-count bounds for one boundary under its own policy.
+
+    Returns ``(lower, upper, total_tokens)``.  The hybrid chunker never emits a
+    chunk larger than the policy's token bound, so the count is bounded below
+    by ``ceil(total_tokens / max_tokens)``.  Every structure item (headings and
+    text sections alike) can emit its own chunk, and any item exceeding the
+    token bound is split into ``ceil(item_tokens / max_tokens)`` chunks, so the
+    count is bounded above by ``len(items)`` plus those split extras.  An empty
+    boundary contributes ``(0, 0, 0)``.
+    """
+    items = _structure_markdown(markdown)
+    total_tokens = len(tokenizer.encode(markdown))
+    item_tokens = [len(tokenizer.encode(item.text)) for item in items]
+    max_tokens = resolve_chunk_policy(document_kind).max_tokens
+    lower = math.ceil(total_tokens / max_tokens) if total_tokens else 0
+    split_extras = sum(max(0, math.ceil(tokens / max_tokens) - 1) for tokens in item_tokens)
+    upper = len(items) + split_extras
+    return lower, upper, total_tokens
+
+
+def _combined_plausibility(
+    *,
+    markdown: str,
+    boundaries: Sequence[BoundaryFidelityInputs],
     chunk_count: int,
     document_kind: str,
 ) -> ChunkPlausibilityState:
-    """Detect zero-chunk output for a non-empty document and out-of-bounds counts.
+    """Judge the persisted chunk count against per-boundary policy bounds.
 
-    The hybrid chunker never emits a chunk larger than the policy's token
-    bound, so the plausible chunk count is bounded below by
-    ``ceil(total_tokens / max_tokens)``.  Every structure item (headings and
-    text sections alike) can emit its own chunk, and any item exceeding the
-    token bound is split into ``ceil(item_tokens / max_tokens)`` chunks, so the
-    count is bounded above by ``len(items)`` plus those split extras.  Outside
-    either bound — or zero chunks for a non-empty document — is implausible.
+    A mixed document chunks each contract boundary under that boundary's own
+    policy, so a document-wide bound derived from the combined classification
+    can reject fully-retained content (e.g. a statute boundary chunked at 384
+    tokens inside a document classified as a 512-token contract).  Bounds are
+    therefore computed per boundary and summed.  Whole-document truthfulness
+    checks (empty source, zero output) stay document-wide.
     """
-    if not source_markdown.strip():
+    if not markdown.strip():
         return ChunkPlausibilityState(
             verdict=(
                 ChunkPlausibilityVerdict.PLAUSIBLE
@@ -160,11 +235,8 @@ def measure_chunk_plausibility(
             reason="Non-empty document produced zero chunks (empty output).",
             chunk_count=0,
         )
-    items = _structure_markdown(source_markdown)
     try:
         tokenizer = get_tokenizer()
-        total_tokens = len(tokenizer.encode(source_markdown))
-        item_tokens = [len(tokenizer.encode(item.text)) for item in items]
     except Exception as exc:  # noqa: BLE001 — plausibility degrades to unavailable, never fails ingestion
         exc.add_note("operation=fidelity_chunk_plausibility_token_count")
         # Carry the failure identity (missing model vs corrupted download vs
@@ -178,10 +250,23 @@ def measure_chunk_plausibility(
             ),
             chunk_count=chunk_count,
         )
-    max_tokens = resolve_chunk_policy(document_kind).max_tokens
-    lower = max(1, math.ceil(total_tokens / max_tokens))
-    split_extras = sum(max(0, math.ceil(tokens / max_tokens) - 1) for tokens in item_tokens)
-    upper = max(lower, len(items) + split_extras, 1)
+    if not boundaries:
+        lower, upper, total_tokens = _plausibility_bounds(
+            markdown=markdown, document_kind=document_kind, tokenizer=tokenizer
+        )
+    else:
+        lower = upper = total_tokens = 0
+        for boundary in boundaries:
+            boundary_lower, boundary_upper, boundary_tokens = _plausibility_bounds(
+                markdown=boundary.markdown,
+                document_kind=boundary.document_kind,
+                tokenizer=tokenizer,
+            )
+            lower += boundary_lower
+            upper += boundary_upper
+            total_tokens += boundary_tokens
+    lower = max(1, lower)
+    upper = max(upper, lower, 1)
     if chunk_count < lower or chunk_count > upper:
         return ChunkPlausibilityState(
             verdict=ChunkPlausibilityVerdict.IMPLAUSIBLE,
@@ -203,13 +288,40 @@ def measure_chunk_plausibility(
     )
 
 
+def measure_chunk_plausibility(
+    *,
+    source_markdown: str,
+    chunk_count: int,
+    document_kind: str,
+) -> ChunkPlausibilityState:
+    """Single-policy plausibility check for one document or boundary.
+
+    Detection of zero-chunk output for a non-empty document and out-of-bounds
+    counts under the policy resolved for ``document_kind``.  The queued
+    pipeline uses :func:`_combined_plausibility` instead, because each contract
+    boundary is chunked under its own policy.
+    """
+    return _combined_plausibility(
+        markdown=source_markdown,
+        boundaries=(),
+        chunk_count=chunk_count,
+        document_kind=document_kind,
+    )
+
+
 class BoundaryFidelityInputs(BaseModel):
-    """One contract boundary's contribution to document fidelity measurement."""
+    """One contract boundary's contribution to document fidelity measurement.
+
+    ``document_kind`` is the boundary's own classification, not the document's:
+    a mixed document chunks each boundary under its own policy, so plausibility
+    bounds must be derived per boundary and combined, never document-wide.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     markdown: str
     chunks: tuple[PreparedChunk, ...]
+    document_kind: str
 
 
 class StructuralPreservation(BaseModel):
@@ -269,8 +381,9 @@ def build_fidelity_metrics(
     structural = _measure_structural_preservation(
         parsed=parsed, boundaries=boundaries, chunk_text=chunk_text
     )
-    plausibility = measure_chunk_plausibility(
-        source_markdown=markdown,
+    plausibility = _combined_plausibility(
+        markdown=markdown,
+        boundaries=boundaries,
         chunk_count=chunk_count,
         document_kind=document_kind,
     )
