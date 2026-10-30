@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from returns.result import Failure, Success
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.kernel.result import add_database_error_note
@@ -14,6 +14,12 @@ from app.observability.logging import trace_layer
 
 from .exceptions import InvoiceConflictError, InvoiceInfrastructureError, InvoiceNotFoundError
 from .models import Invoice
+
+# Created by revision 0007; single definitions here because they are consumed
+# twice each (generation + error-note table name) and a drift would mint
+# numbers from a non-existent sequence.
+BILLING_INVOICE_NUMBER_SEQ = "billing_invoice_number_seq"
+BILLING_RECEIPT_NUMBER_SEQ = "billing_receipt_number_seq"
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -192,9 +198,8 @@ class InvoiceRepository:
     async def generate_invoice_number(self, *, prefix: str, year: int) -> InvoiceResult[str]:
         """Sequential invoice number via a PostgreSQL sequence (Requirement 12.1)."""
         try:
-            result = await self.session.execute(
-                text("SELECT nextval('billing_invoice_number_seq')")
-            )
+            # Expression form of SELECT nextval('billing_invoice_number_seq').
+            result = await self.session.execute(select(func.nextval(BILLING_INVOICE_NUMBER_SEQ)))
             sequence = int(result.scalar_one())
             return Success(f"{prefix}-{year}-{sequence:04d}")
         except SQLAlchemyError as exc:
@@ -212,9 +217,8 @@ class InvoiceRepository:
     async def generate_receipt_number(self, *, prefix: str, year: int) -> InvoiceResult[str]:
         """Sequential receipt number via a PostgreSQL sequence (Requirement 36.3)."""
         try:
-            result = await self.session.execute(
-                text("SELECT nextval('billing_receipt_number_seq')")
-            )
+            # Expression form of SELECT nextval('billing_receipt_number_seq').
+            result = await self.session.execute(select(func.nextval(BILLING_RECEIPT_NUMBER_SEQ)))
             sequence = int(result.scalar_one())
             return Success(f"{prefix}-{year}-{sequence:04d}")
         except SQLAlchemyError as exc:

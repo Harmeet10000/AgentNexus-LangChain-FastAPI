@@ -23,7 +23,19 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
-from sqlalchemy import func, literal_column, select, text, tuple_, update
+from sqlalchemy import (
+    TIMESTAMP,
+    String,
+    and_,
+    bindparam,
+    cast,
+    func,
+    literal_column,
+    or_,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -1171,6 +1183,32 @@ class ChatTranscriptRepository:
         )
         try:
             async with self._session_factory() as session:
+                # Stamp-aware include predicate, expression form of the former
+                # text() block: include a terminal session when (a) no sweep
+                # stamp exists yet, (b) the stamp is CONFIRMED (pending =
+                # 'false') and OLDER than the current checkpoint generation, or
+                # (c) the stamp is PENDING but stale enough that another
+                # sweep's critical section is over (§8). The timestamptz casts
+                # and make_interval(mins => n) mirror the original verbatim.
+                stamp_text = ChatSession.extra_metadata.op("->>")(
+                    bindparam("stamp_key", value=_GC_STAMP_KEY, type_=String)
+                )
+                pending_text = ChatSession.extra_metadata.op("->>")(
+                    bindparam("pending_key", value=_GC_PENDING_KEY, type_=String)
+                )
+                stamp_ts = cast(stamp_text, TIMESTAMP(timezone=True))
+                include_predicate = or_(
+                    stamp_text.is_(None),
+                    and_(pending_text == "false", stamp_ts < ChatSession.last_checkpoint_ts),
+                    and_(
+                        pending_text == "true",
+                        stamp_ts
+                        < func.now()
+                        # make_interval's named argument has no func() kwarg
+                        # form; the mins value is a module-owned int constant.
+                        - func.make_interval(literal_column(f"mins => {_GC_PENDING_RETRY_MINS}")),
+                    ),
+                )
                 rows = (
                     (
                         await session.execute(
@@ -1179,24 +1217,7 @@ class ChatTranscriptRepository:
                                 ChatSession.status.in_(terminal),
                                 ChatSession.last_checkpoint_ts.is_not(None),
                                 ChatSession.last_checkpoint_ts <= older_than,
-                                # Stamp-aware include predicate —
-                                # parenthesized: TextClause renders verbatim,
-                                # an ungrouped OR would leak past the AND
-                                # chain and bypass every filter above (§8).
-                                text(
-                                    "(chat_sessions.extra_metadata ->> :stamp_key IS NULL "
-                                    "OR (chat_sessions.extra_metadata ->> :pending_key) = 'false' "
-                                    "AND (chat_sessions.extra_metadata ->> :stamp_key)"
-                                    "::timestamptz < chat_sessions.last_checkpoint_ts "
-                                    "OR (chat_sessions.extra_metadata ->> :pending_key) = 'true' "
-                                    "AND (chat_sessions.extra_metadata ->> :stamp_key)"
-                                    "::timestamptz < now() "
-                                    "- make_interval(mins => :retry_mins))"
-                                ).params(
-                                    stamp_key=_GC_STAMP_KEY,
-                                    pending_key=_GC_PENDING_KEY,
-                                    retry_mins=_GC_PENDING_RETRY_MINS,
-                                ),
+                                include_predicate,
                             )
                             .order_by(ChatSession.last_checkpoint_ts)
                             .limit(limit)

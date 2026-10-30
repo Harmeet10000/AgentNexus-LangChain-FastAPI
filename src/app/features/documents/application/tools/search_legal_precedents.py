@@ -24,9 +24,10 @@ from typing import TYPE_CHECKING, Annotated, Any
 from langchain.tools import ToolRuntime
 from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.tools.base import BaseTool
-from sqlalchemy import text
+from sqlalchemy import String, cast, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.features.documents.domain.chunk import UnifiedChunk
 from app.features.documents.domain.constants import (
     HYBRID_CANDIDATE_LIMIT,
     RRF_K,
@@ -37,6 +38,7 @@ from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
 from app.retrieval.graphiti.schemas import GraphitiAvailability
+from app.utils.sql_binds import uuid_any
 
 from .authorization import trusted_tool_context
 
@@ -45,6 +47,7 @@ _STATUTE_SEARCH_LIMIT: int = 5
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.sql.selectable import Select
 
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
 
@@ -253,6 +256,10 @@ async def _search_statutes_postgres(
     if not allowed_doc_ids:
         return []
 
+    # Documented text() fallback (see app/utils/sql_binds.py): both ranked
+    # branches lean on Postgres extension operators — pg_textsearch `<@>` with
+    # a literal index name and pg_trgm `%`/`similarity()` — with no readable
+    # expression form. The fused detail fetch below IS converted.
     bm25_sql = text(
         """
         SELECT
@@ -286,22 +293,25 @@ async def _search_statutes_postgres(
         LIMIT :candidate_limit
         """
     )
-    detail_sql = text(
-        """
-        SELECT
-            id::text,
-            instrument_name AS title,
-            section_ref,
-            LEFT(content, 500) AS excerpt,
-            document_id::text AS document_id,
-            instrument_name AS act_name,
-            instrument_year AS year
-        FROM chunks
-        WHERE id = ANY(CAST(:chunk_ids AS uuid[]))
-          AND tenant_id = :tenant_id
-          AND document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
-        """
-    )
+    # Expression form of the fused detail fetch — allowlist-scoped point
+    # lookup by chunk id, mirroring DocumentRepository.fetch_chunks_by_ids.
+    # Built after fusion because the chunk-id list comes from the fused ranks.
+
+    def build_detail_query(chunk_ids: list[str]) -> Select[tuple[Any, ...]]:
+        return select(
+            cast(UnifiedChunk.id, String),
+            UnifiedChunk.instrument_name,
+            UnifiedChunk.section_ref,
+            func.left(UnifiedChunk.content, 500),
+            cast(UnifiedChunk.document_id, String),
+            UnifiedChunk.instrument_name,
+            UnifiedChunk.instrument_year,
+        ).where(
+            UnifiedChunk.id == uuid_any("chunk_ids", chunk_ids),
+            UnifiedChunk.tenant_id == tenant_id,
+            UnifiedChunk.document_id == uuid_any("allowed_doc_ids", allowed_doc_ids or ()),
+        )
+
     async with db_engine.connect() as conn:
         bm25_rows = (
             await conn.execute(
@@ -345,12 +355,7 @@ async def _search_statutes_postgres(
         score_by_id = {item.chunk_id: item.score for item in fused}
         details = (
             await conn.execute(
-                detail_sql,
-                {
-                    "chunk_ids": [item.chunk_id for item in fused],
-                    "tenant_id": tenant_id,
-                    "allowed_doc_ids": list(allowed_doc_ids),
-                },
+                build_detail_query([item.chunk_id for item in fused]),
             )
         ).fetchall()
         by_id = {str(row[0]): row for row in details}

@@ -15,7 +15,7 @@ from neo4j.exceptions import DriverError, Neo4jError
 from pymongo.errors import PyMongoError
 from redis import RedisError
 from redis.asyncio import Redis
-from sqlalchemy import text
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -307,8 +307,8 @@ class HealthService:
         start = time.perf_counter()
         try:
             async with session_factory() as session:
-                await session.execute(text("SELECT 1"))
-                version_result = await session.execute(text("SELECT version()"))
+                await session.execute(select(1))
+                version_result = await session.execute(select(func.version()))
                 version = version_result.scalar() or "unknown"
         except SQLAlchemyError as exc:
             exc.add_note("table=health_probe, operation=check_postgres, query=SELECT 1")

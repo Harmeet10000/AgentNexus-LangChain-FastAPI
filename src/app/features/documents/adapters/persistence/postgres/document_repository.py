@@ -8,8 +8,22 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from returns.result import Failure, Success
-from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import (
+    Boolean,
+    Integer,
+    String,
+    and_,
+    bindparam,
+    case,
+    cast,
+    func,
+    literal_column,
+    or_,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.features.auth.domain.tenancy import personal_tenant_id
@@ -33,6 +47,7 @@ from app.features.documents.domain.errors import (
 from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
+from app.utils.sql_binds import uuid_any, uuid_param
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -42,7 +57,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine.result import Result
     from sqlalchemy.engine.row import RowMapping
     from sqlalchemy.ext.asyncio import AsyncSession
-    from sqlalchemy.sql.elements import TextClause
+    from sqlalchemy.sql.elements import ColumnElement, TextClause
     from sqlalchemy.sql.selectable import Select
 
     from app.features.documents.domain.errors import DocumentResult
@@ -139,27 +154,30 @@ class DocumentRepository:
         if not document_ids:
             return Success(())
         try:
-            statement = text(
-                """
-                SELECT c.document_id::text AS document_id,
-                       COALESCE(MAX(c.document_version), 1)::int AS document_version,
-                       COALESCE(MAX(c.pipeline_version), :pipeline_version) AS pipeline_version
-                FROM chunks AS c
-                WHERE c.tenant_id = :tenant_id
-                  AND c.document_id = ANY(CAST(:document_ids AS uuid[]))
-                GROUP BY c.document_id
-                ORDER BY c.document_id
-                """
+            # Expression form of: SELECT c.document_id::text,
+            # COALESCE(MAX(c.document_version), 1)::int,
+            # COALESCE(MAX(c.pipeline_version), :pipeline_version) FROM chunks
+            # WHERE tenant_id AND document_id = ANY(uuid[]) GROUP BY/ORDER BY document_id.
+            statement = (
+                select(
+                    cast(UnifiedChunk.document_id, String).label("document_id"),
+                    cast(
+                        func.coalesce(func.max(UnifiedChunk.document_version), 1),
+                        Integer,
+                    ).label("document_version"),
+                    func.coalesce(
+                        func.max(UnifiedChunk.pipeline_version), CANONICAL_PIPELINE_VERSION
+                    ).label("pipeline_version"),
+                )
+                .where(
+                    UnifiedChunk.tenant_id == tenant_id,
+                    UnifiedChunk.document_id == uuid_any("document_ids", document_ids),
+                )
+                .group_by(UnifiedChunk.document_id)
+                .order_by(UnifiedChunk.document_id)
             )
 
-            result = await self.session.execute(
-                statement,
-                params={
-                    "tenant_id": tenant_id,
-                    "document_ids": list(document_ids),
-                    "pipeline_version": CANONICAL_PIPELINE_VERSION,
-                },
-            )
+            result = await self.session.execute(statement)
             return Success(
                 tuple(
                     (
@@ -197,23 +215,27 @@ class DocumentRepository:
         if not document_ids:
             return Success(())
         try:
-            statement = text(
-                """
-                SELECT c.document_id::text AS document_id,
-                       c.document_version::int AS document_version,
-                       array_agg(DISTINCT c.contract_index) AS contract_indexes,
-                       bool_and(c.contract_index IS NULL) AS all_legacy_null
-                FROM chunks AS c
-                WHERE c.tenant_id = :tenant_id
-                  AND c.document_id = ANY(CAST(:document_ids AS uuid[]))
-                GROUP BY c.document_id, c.document_version
-                ORDER BY c.document_id, c.document_version
-                """
+            # Expression form of the chunk-scope aggregate: GROUP BY
+            # (document_id, document_version) with array_agg(DISTINCT
+            # contract_index) and bool_and(contract_index IS NULL), tenant- and
+            # allowlist-scoped via `document_id = ANY(CAST(:ids AS uuid[]))`.
+            statement = (
+                select(
+                    cast(UnifiedChunk.document_id, String).label("document_id"),
+                    cast(UnifiedChunk.document_version, Integer).label("document_version"),
+                    func.array_agg(func.distinct(UnifiedChunk.contract_index)).label(
+                        "contract_indexes"
+                    ),
+                    func.bool_and(UnifiedChunk.contract_index.is_(None)).label("all_legacy_null"),
+                )
+                .where(
+                    UnifiedChunk.tenant_id == tenant_id,
+                    UnifiedChunk.document_id == uuid_any("document_ids", document_ids),
+                )
+                .group_by(UnifiedChunk.document_id, UnifiedChunk.document_version)
+                .order_by(UnifiedChunk.document_id, UnifiedChunk.document_version)
             )
-            result = await self.session.execute(
-                statement,
-                {"tenant_id": tenant_id, "document_ids": list(document_ids)},
-            )
+            result = await self.session.execute(statement)
             scopes: list[tuple[str, int, tuple[int | None, ...], bool]] = []
             for row in result.mappings().all():
                 raw_indexes = row["contract_indexes"] or []
@@ -386,79 +408,136 @@ class DocumentRepository:
         ingestion_identity: dict[str, object] | None = None,
     ) -> DocumentResult[None]:
         try:
-            statement: TextClause = text(
-                text="""
-            UPDATE documents
-            SET
-                status = :status,
-                title = COALESCE(:title, title),
-                document_kind = COALESCE(:document_kind, document_kind),
-                jurisdiction = COALESCE(:jurisdiction, jurisdiction),
-                contract_type = COALESCE(:contract_type, contract_type),
-                parties = COALESCE(CAST(:parties AS jsonb), parties),
-                metadata_ = CASE
-                    WHEN CAST(:metadata_ AS jsonb) IS NULL THEN metadata_
-                    ELSE COALESCE(metadata_, '{}'::jsonb) || CAST(:metadata_ AS jsonb)
-                END,
-                structural_tree = COALESCE(CAST(:structural_tree AS jsonb), structural_tree),
-                extraction_incomplete = COALESCE(:extraction_incomplete, extraction_incomplete),
-                updated_at = :updated_at
-            WHERE id = CAST(:document_id AS uuid)
-              AND (
-                    CAST(:identity_version AS integer) IS NULL
-                    OR (
-                        metadata_->'ingestion_state'->>'tenant_id' = CAST(:identity_tenant AS text)
-                        AND (metadata_->'ingestion_state'->>'document_version')::int = CAST(:identity_version AS int)
-                        AND (metadata_->'ingestion_state'->>'attempt')::int = CAST(:identity_attempt AS int)
-                        AND metadata_->'ingestion_state'->>'task_id' = CAST(:identity_task_id AS text)
-                    )
-              )
-            """
+            identity_tenant = (
+                str(ingestion_identity.get("tenant_id", ""))
+                if ingestion_identity is not None
+                else None
             )
-            await self.session.execute(
-                statement,
-                params={
-                    "document_id": document_id,
-                    "status": status,
-                    "title": title,
-                    "document_kind": document_kind,
-                    "jurisdiction": jurisdiction,
-                    "contract_type": contract_type,
-                    "parties": json.dumps(obj=parties) if parties is not None else None,
-                    "metadata_": json.dumps(obj=metadata_) if metadata_ is not None else None,
-                    "structural_tree": (
-                        json.dumps(obj=structural_tree) if structural_tree is not None else None
-                    ),
-                    "extraction_incomplete": extraction_incomplete,
-                    "identity_tenant": (
-                        str(ingestion_identity.get("tenant_id", ""))
-                        if ingestion_identity is not None
-                        else None
-                    ),
-                    "identity_version": (
-                        int(raw_version)
-                        if ingestion_identity is not None
-                        and isinstance(
-                            raw_version := ingestion_identity.get("document_version"), (int, str)
-                        )
-                        and not isinstance(raw_version, bool)
-                        else None
-                    ),
-                    "identity_attempt": (
-                        int(raw_attempt)
-                        if ingestion_identity is not None
-                        and isinstance(raw_attempt := ingestion_identity.get("attempt"), (int, str))
-                        and not isinstance(raw_attempt, bool)
-                        else None
-                    ),
-                    "identity_task_id": (
-                        str(ingestion_identity.get("task_id") or "")
-                        if ingestion_identity is not None
-                        else None
-                    ),
-                    "updated_at": datetime.now(tz=UTC),
-                },
+            identity_version = (
+                int(raw_version)
+                if ingestion_identity is not None
+                and isinstance(
+                    raw_version := ingestion_identity.get("document_version"), (int, str)
+                )
+                and not isinstance(raw_version, bool)
+                else None
             )
+            identity_attempt = (
+                int(raw_attempt)
+                if ingestion_identity is not None
+                and isinstance(raw_attempt := ingestion_identity.get("attempt"), (int, str))
+                and not isinstance(raw_attempt, bool)
+                else None
+            )
+            identity_task_id = (
+                str(ingestion_identity.get("task_id") or "")
+                if ingestion_identity is not None
+                else None
+            )
+            updated_at = datetime.now(tz=UTC)
+            # Expression form of the guarded status UPDATE. `metadata_json` is a
+            # single named bind used twice, mirroring the original's single
+            # :metadata_ parameter inside both the CASE guard and the jsonb `||`
+            # merge. The identity guard keeps its NULL semantics through
+            # bindparam: a NULL :identity_version short-circuits the guard to
+            # TRUE exactly like `CAST(:identity_version AS integer) IS NULL`.
+            metadata_json = cast(
+                bindparam(
+                    "metadata_",
+                    value=json.dumps(metadata_) if metadata_ is not None else None,
+                    type_=String,
+                ),
+                JSONB,
+            )
+            identity_version_bind = bindparam(
+                "identity_version", value=identity_version, type_=Integer
+            )
+            statement = (
+                update(UnifiedDocument)
+                .where(
+                    UnifiedDocument.id == uuid_param("document_id", document_id),
+                    or_(
+                        identity_version_bind.is_(None),
+                        and_(
+                            UnifiedDocument.metadata_["ingestion_state"]["tenant_id"].astext
+                            == bindparam("identity_tenant", value=identity_tenant, type_=String),
+                            cast(
+                                UnifiedDocument.metadata_["ingestion_state"][
+                                    "document_version"
+                                ].astext,
+                                Integer,
+                            )
+                            == identity_version_bind,
+                            cast(
+                                UnifiedDocument.metadata_["ingestion_state"]["attempt"].astext,
+                                Integer,
+                            )
+                            == bindparam("identity_attempt", value=identity_attempt, type_=Integer),
+                            UnifiedDocument.metadata_["ingestion_state"]["task_id"].astext
+                            == bindparam("identity_task_id", value=identity_task_id, type_=String),
+                        ),
+                    ),
+                )
+                .values(
+                    status=status,
+                    title=func.coalesce(
+                        bindparam("title", value=title, type_=String), UnifiedDocument.title
+                    ),
+                    document_kind=func.coalesce(
+                        bindparam("document_kind", value=document_kind, type_=String),
+                        UnifiedDocument.document_kind,
+                    ),
+                    jurisdiction=func.coalesce(
+                        bindparam("jurisdiction", value=jurisdiction, type_=String),
+                        UnifiedDocument.jurisdiction,
+                    ),
+                    contract_type=func.coalesce(
+                        bindparam("contract_type", value=contract_type, type_=String),
+                        UnifiedDocument.contract_type,
+                    ),
+                    parties=func.coalesce(
+                        cast(
+                            bindparam(
+                                "parties",
+                                value=json.dumps(parties) if parties is not None else None,
+                                type_=String,
+                            ),
+                            JSONB,
+                        ),
+                        UnifiedDocument.parties,
+                    ),
+                    metadata_=case(
+                        (metadata_json.is_(None), UnifiedDocument.metadata_),
+                        else_=func.coalesce(
+                            UnifiedDocument.metadata_, literal_column("'{}'::jsonb")
+                        ).op("||")(metadata_json),
+                    ),
+                    structural_tree=func.coalesce(
+                        cast(
+                            bindparam(
+                                "structural_tree",
+                                value=(
+                                    json.dumps(structural_tree)
+                                    if structural_tree is not None
+                                    else None
+                                ),
+                                type_=String,
+                            ),
+                            JSONB,
+                        ),
+                        UnifiedDocument.structural_tree,
+                    ),
+                    extraction_incomplete=func.coalesce(
+                        bindparam(
+                            "extraction_incomplete", value=extraction_incomplete, type_=Boolean
+                        ),
+                        UnifiedDocument.extraction_incomplete,
+                    ),
+                    updated_at=updated_at,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await self.session.execute(statement)
             return Success(None)
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="documents")
@@ -491,15 +570,13 @@ class DocumentRepository:
         """
         try:
             result = await self.session.execute(
-                text(
-                    """
-                    SELECT tenant_id, status, metadata_
-                    FROM documents
-                    WHERE id = CAST(:document_id AS uuid)
-                    FOR UPDATE
-                    """
-                ),
-                {"document_id": document_id},
+                select(
+                    UnifiedDocument.tenant_id,
+                    UnifiedDocument.status,
+                    UnifiedDocument.metadata_,
+                )
+                .where(UnifiedDocument.id == uuid_param("document_id", document_id))
+                .with_for_update()
             )
             row = result.mappings().one_or_none()
             if row is None or str(row["tenant_id"]) != tenant_id:
@@ -573,23 +650,24 @@ class DocumentRepository:
         """Load tenant-scoped persisted trees for structural navigation."""
         tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
-            statement = text(
-                """
-                SELECT id::text AS document_id, structural_tree
-                FROM documents
-                WHERE tenant_id = :tenant_id
-                  AND structural_tree <> '{}'::jsonb
-                  AND (
-                    cardinality(CAST(:document_ids AS uuid[])) = 0
-                    OR id = ANY(CAST(:document_ids AS uuid[]))
-                  )
-                ORDER BY id
-                """
+            # Expression form of: SELECT id::text, structural_tree FROM documents
+            # WHERE tenant_id AND structural_tree <> '{}'::jsonb AND (empty
+            # allowlist OR id = ANY(uuid[])) ORDER BY id. The cardinality() = 0
+            # disjunct becomes a Python-side conditional: an empty list adds no
+            # id predicate, which is exactly `id = ANY('{}')` → FALSE dropped
+            # from a TRUE constant.
+            statement = select(
+                cast(UnifiedDocument.id, String).label("document_id"),
+                UnifiedDocument.structural_tree,
+            ).where(
+                UnifiedDocument.tenant_id == tenant_id,
+                UnifiedDocument.structural_tree != {},
             )
-            result = await self.session.execute(
-                statement,
-                params={"tenant_id": tenant_id, "document_ids": document_ids},
-            )
+            if document_ids:
+                statement = statement.where(
+                    UnifiedDocument.id == uuid_any("document_ids", document_ids)
+                )
+            result = await self.session.execute(statement.order_by(UnifiedDocument.id))
             return Success([dict(row) for row in result.mappings().all()])
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="documents")
@@ -693,6 +771,8 @@ class DocumentRepository:
     @trace_layer("repository")
     async def analyze_chunks(self) -> DocumentResult[None]:
         try:
+            # text() is the only representation of a maintenance command
+            # (ANALYZE); it is not a query and gains nothing from expressions.
             await self.session.execute(statement=text(text="ANALYZE chunks"))
             return Success(None)
         except SQLAlchemyError as exc:
@@ -716,34 +796,57 @@ class DocumentRepository:
     ) -> DocumentResult[dict[str, Any] | None]:
         tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
-            statement: TextClause = text(
-                text="""
-                SELECT
-                    d.id::text AS document_id,
-                    d.status,
-                    d.object_uri,
-                    d.title,
-                    d.document_kind,
-                    d.metadata_ AS document_metadata,
-                    COUNT(c.id)::int AS chunk_count,
-                    COUNT(*) FILTER (WHERE c.graphiti_verified)::int AS verified_chunk_count,
-                    MAX(c.document_version)::int AS document_version,
-                    MAX(c.contract_index)::int AS contract_index,
-                    MAX(c.pipeline_version) AS pipeline_version,
-                    MAX(c.graph_indexed_at) AS graph_indexed_at,
-                    d.extraction_incomplete,
-                    COALESCE(jsonb_agg(c.quality_warnings) FILTER (WHERE c.id IS NOT NULL), '[]'::jsonb) AS warnings
-                FROM documents AS d
-                LEFT JOIN chunks AS c
-                  ON c.document_id = d.id
-                WHERE d.tenant_id = :tenant_id AND d.id = CAST(:document_id AS uuid)
-                GROUP BY d.id, d.status, d.object_uri, d.title, d.document_kind,
-                    d.metadata_, d.extraction_incomplete
-                """
+            # Expression form of the status rollup: documents LEFT JOIN chunks
+            # with count/count-FILTER/max aggregates and a jsonb_agg FILTER
+            # coalesced to '[]'::jsonb, grouped by the document columns.
+            statement = (
+                select(
+                    cast(UnifiedDocument.id, String).label("document_id"),
+                    UnifiedDocument.status,
+                    UnifiedDocument.object_uri,
+                    UnifiedDocument.title,
+                    UnifiedDocument.document_kind,
+                    UnifiedDocument.metadata_.label("document_metadata"),
+                    cast(func.count(UnifiedChunk.id), Integer).label("chunk_count"),
+                    cast(
+                        func.count().filter(UnifiedChunk.graphiti_verified),
+                        Integer,
+                    ).label("verified_chunk_count"),
+                    cast(func.max(UnifiedChunk.document_version), Integer).label(
+                        "document_version"
+                    ),
+                    cast(func.max(UnifiedChunk.contract_index), Integer).label("contract_index"),
+                    func.max(UnifiedChunk.pipeline_version).label("pipeline_version"),
+                    func.max(UnifiedChunk.graph_indexed_at).label("graph_indexed_at"),
+                    UnifiedDocument.extraction_incomplete,
+                    func.coalesce(
+                        func.jsonb_agg(UnifiedChunk.quality_warnings).filter(
+                            UnifiedChunk.id.is_not(None)
+                        ),
+                        literal_column("'[]'::jsonb"),
+                    ).label("warnings"),
+                )
+                .join_from(
+                    UnifiedDocument,
+                    UnifiedChunk,
+                    UnifiedChunk.document_id == UnifiedDocument.id,
+                    isouter=True,
+                )
+                .where(
+                    UnifiedDocument.tenant_id == tenant_id,
+                    UnifiedDocument.id == uuid_param("document_id", document_id),
+                )
+                .group_by(
+                    UnifiedDocument.id,
+                    UnifiedDocument.status,
+                    UnifiedDocument.object_uri,
+                    UnifiedDocument.title,
+                    UnifiedDocument.document_kind,
+                    UnifiedDocument.metadata_,
+                    UnifiedDocument.extraction_incomplete,
+                )
             )
-            result = await self.session.execute(
-                statement, params={"tenant_id": tenant_id, "document_id": document_id}
-            )
+            result = await self.session.execute(statement)
             row: RowMapping | None = result.mappings().one_or_none()
             if row is None:
                 return Failure(
@@ -789,6 +892,11 @@ class DocumentRepository:
                 if phrase_pattern is not None
                 else candidate_limit
             )
+            # Documented text() fallback (see app/utils/sql_binds.py): this query
+            # ranks through pg_textsearch's `<@>` operator and a literal index
+            # name, both pinned by source gates (bm25 sign convention, index
+            # identity). Expression-fying it would trade a reviewed literal
+            # contract for op() soup with zero safety gain.
             statement: TextClause = text(
                 text="""
                 SELECT
@@ -851,6 +959,8 @@ class DocumentRepository:
     ) -> DocumentResult[list[dict[str, Any]]]:
         tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
+            # Documented text() fallback: the DiskANN cosine operator `<=>` and
+            # the `SET LOCAL diskann.*` session GUCs have no expression form.
             statement: TextClause = text(
                 text="""
                 SELECT
@@ -908,6 +1018,8 @@ class DocumentRepository:
     ) -> DocumentResult[list[dict[str, Any]]]:
         tenant_id = _resolve_tenant_id(tenant_id, user_id)
         try:
+            # Documented text() fallback: pg_trgm's `%` match operator and
+            # `similarity()` ordering have no readable expression form.
             statement: TextClause = text(
                 text="""
                 SELECT
@@ -969,39 +1081,29 @@ class DocumentRepository:
         if not (jurisdictions or document_kinds or matters):
             return Success(inner_value=[])
         try:
-            statement: TextClause = text(
-                text="""
-                SELECT d.id::text AS document_id
-                FROM documents AS d
-                WHERE d.tenant_id = :tenant_id
-                  AND (
-                    (
-                      CAST(:jurisdictions AS text[]) IS NOT NULL
-                      AND d.jurisdiction = ANY(CAST(:jurisdictions AS text[]))
-                    )
-                    OR (
-                      CAST(:document_kinds AS text[]) IS NOT NULL
-                      AND d.document_kind = ANY(CAST(:document_kinds AS text[]))
-                    )
-                    OR (
-                      CAST(:matters AS text[]) IS NOT NULL
-                      AND d.metadata_->>'matter' = ANY(CAST(:matters AS text[]))
-                    )
-                  )
-                ORDER BY d.id::text ASC
-                LIMIT :limit
-                """
+            # Expression form of: SELECT d.id::text FROM documents WHERE
+            # tenant_id AND (jurisdiction = ANY(text[]) OR document_kind =
+            # ANY(text[]) OR metadata_->>'matter' = ANY(text[])) ORDER BY
+            # d.id::text LIMIT :limit. Each array predicate was guarded by
+            # `CAST(:x AS text[]) IS NOT NULL`; the guard becomes a
+            # Python-side conditional on the (already known) non-None list.
+            scope_conditions: list[ColumnElement[bool]] = []
+            if jurisdictions:
+                scope_conditions.append(UnifiedDocument.jurisdiction.in_(jurisdictions))
+            if document_kinds:
+                scope_conditions.append(UnifiedDocument.document_kind.in_(document_kinds))
+            if matters:
+                scope_conditions.append(UnifiedDocument.metadata_["matter"].astext.in_(matters))
+            statement = (
+                select(cast(UnifiedDocument.id, String).label("document_id"))
+                .where(
+                    UnifiedDocument.tenant_id == tenant_id,
+                    or_(*scope_conditions),
+                )
+                .order_by(cast(UnifiedDocument.id, String).asc())
+                .limit(limit)
             )
-            result = await self.session.execute(
-                statement,
-                {
-                    "tenant_id": tenant_id,
-                    "jurisdictions": list(jurisdictions) or None,
-                    "document_kinds": list(document_kinds) or None,
-                    "matters": list(matters) or None,
-                    "limit": limit,
-                },
-            )
+            result = await self.session.execute(statement)
             return Success(inner_value=[str(row[0]) for row in result.all()])
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="documents")
@@ -1026,18 +1128,13 @@ class DocumentRepository:
         ever used to populate it.
         """
         try:
-            statement = text(
-                """
-                SELECT d.id::text AS document_id
-                FROM documents AS d
-                WHERE d.tenant_id = :tenant_id
-                ORDER BY d.id::text ASC
-                LIMIT :limit
-                """
+            statement = (
+                select(cast(UnifiedDocument.id, String).label("document_id"))
+                .where(UnifiedDocument.tenant_id == tenant_id)
+                .order_by(cast(UnifiedDocument.id, String).asc())
+                .limit(max(1, min(limit, 100_000)))
             )
-            result = await self.session.execute(
-                statement, {"tenant_id": tenant_id, "limit": max(1, min(limit, 100_000))}
-            )
+            result = await self.session.execute(statement)
             return Success(tuple(str(row[0]) for row in result.all()))
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="documents")
@@ -1062,54 +1159,52 @@ class DocumentRepository:
         if not chunk_ids:
             return Success({})
         try:
-            statement: TextClause = text(
-                text="""
-            SELECT
-                c.id::text AS chunk_id,
-                c.document_id::text AS document_id,
-                d.title AS title,
-                c.content AS content,
-                c.preamble AS preamble,
-                c.search_text AS search_text,
-                c.document_version,
-                c.contract_index,
-                c.pipeline_version,
-                c.chunk_index,
-                c.chunk_kind,
-                c.clause_type,
-                c.page_no,
-                c.metadata_ AS chunk_metadata,
-                d.metadata_ AS document_metadata,
-                d.status AS document_status,
-                d.extraction_incomplete,
-                c.quality_warnings,
-                c.graphiti_verified,
-                c.graph_indexed_at
-            FROM chunks AS c
-            JOIN documents AS d ON d.id = c.document_id
-            WHERE c.id = ANY(CAST(:chunk_ids AS uuid[]))
-              AND (CAST(:tenant_id AS text) IS NULL OR c.tenant_id = CAST(:tenant_id AS text))
-              AND (
-                CAST(:allowed_doc_ids AS uuid[]) IS NULL
-                OR c.document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
-              )
-              AND (
-                CAST(:phrase_pattern AS text) IS NULL
-                OR c.search_text ILIKE CAST(:phrase_pattern AS text) ESCAPE '\\'
-              )
-            """
+            # Expression form of the keyed chunk fetch: chunks JOIN documents
+            # with an allowlist-scoped uuid[] ANY filter, optional tenant pin,
+            # and an optional escaped-ILIKE phrase post-filter. The three
+            # `CAST(:x AS text) IS NULL OR ...` guards become Python-side
+            # conditionals on values the caller already resolved.
+            statement = (
+                select(
+                    cast(UnifiedChunk.id, String).label("chunk_id"),
+                    cast(UnifiedChunk.document_id, String).label("document_id"),
+                    UnifiedDocument.title,
+                    UnifiedChunk.content,
+                    UnifiedChunk.preamble,
+                    UnifiedChunk.search_text,
+                    UnifiedChunk.document_version,
+                    UnifiedChunk.contract_index,
+                    UnifiedChunk.pipeline_version,
+                    UnifiedChunk.chunk_index,
+                    UnifiedChunk.chunk_kind,
+                    UnifiedChunk.clause_type,
+                    UnifiedChunk.page_no,
+                    UnifiedChunk.metadata_.label("chunk_metadata"),
+                    UnifiedDocument.metadata_.label("document_metadata"),
+                    UnifiedDocument.status.label("document_status"),
+                    UnifiedDocument.extraction_incomplete,
+                    UnifiedChunk.quality_warnings,
+                    UnifiedChunk.graphiti_verified,
+                    UnifiedChunk.graph_indexed_at,
+                )
+                .join_from(
+                    UnifiedChunk,
+                    UnifiedDocument,
+                    UnifiedDocument.id == UnifiedChunk.document_id,
+                )
+                .where(UnifiedChunk.id == uuid_any("chunk_ids", chunk_ids))
             )
-            result = await self.session.execute(
-                statement,
-                params={
-                    "chunk_ids": list(chunk_ids),
-                    "phrase_pattern": (
-                        _phrase_like_pattern(exact_phrase) if exact_phrase else None
-                    ),
-                    "tenant_id": tenant_id,
-                    "allowed_doc_ids": list(allowed_doc_ids) if allowed_doc_ids else None,
-                },
-            )
+            if tenant_id is not None:
+                statement = statement.where(UnifiedChunk.tenant_id == tenant_id)
+            if allowed_doc_ids:
+                statement = statement.where(
+                    UnifiedChunk.document_id == uuid_any("allowed_doc_ids", allowed_doc_ids)
+                )
+            if exact_phrase:
+                statement = statement.where(
+                    UnifiedChunk.search_text.ilike(_phrase_like_pattern(exact_phrase), escape="\\")
+                )
+            result = await self.session.execute(statement)
             return Success(
                 {str(object=row["chunk_id"]): dict(row) for row in result.mappings().all()}
             )

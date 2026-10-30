@@ -6,7 +6,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
-from sqlalchemy import text
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.observability.logging import logger
@@ -27,7 +27,7 @@ async def check_postgres(app: FastAPI) -> DependencyHealth:
         async with asyncio.timeout(_HEALTH_TIMEOUT_S):
             engine = app.state.db_engine
             async with engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
+                await conn.execute(select(1))
         latency = (time.perf_counter() - start) * 1000
         return DependencyHealth.ok("postgres", latency)
     except (OSError, TimeoutError, SQLAlchemyError) as exc:
