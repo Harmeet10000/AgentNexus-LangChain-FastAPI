@@ -29,7 +29,14 @@ def build_worker_argv(role: WorkerRole | str, extra: Sequence[str] = ()) -> tupl
     """
 
     profile = profile_for_role(role)
-    forbidden = {"-Q", "--queues", "--pool", "--concurrency", "--max-tasks-per-child"}
+    forbidden = {
+        "-Q",
+        "--queues",
+        "--pool",
+        "--concurrency",
+        "--max-tasks-per-child",
+        "--max-memory-per-child",
+    }
     tokens = tuple(extra)
     for token in tokens:
         option = token.split("=", 1)[0]
@@ -47,6 +54,8 @@ def build_worker_argv(role: WorkerRole | str, extra: Sequence[str] = ()) -> tupl
         str(profile.concurrency),
         "--max-tasks-per-child",
         str(profile.max_tasks_per_child),
+        "--max-memory-per-child",
+        str(profile.max_memory_per_child),
         "-Q",
         profile.queue,
         *tokens,

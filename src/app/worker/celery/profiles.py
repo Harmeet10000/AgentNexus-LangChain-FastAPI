@@ -44,6 +44,7 @@ class WorkerProfile(BaseModel):
     concurrency: int
     pool: str
     max_tasks_per_child: int
+    max_memory_per_child: int
     task_modules: tuple[str, ...]
     task_names: frozenset[str]
 
@@ -67,6 +68,9 @@ class WorkerProfile(BaseModel):
         if self.max_tasks_per_child < 1:
             message = "max_tasks_per_child must be positive"
             raise ValueError(message)
+        if self.max_memory_per_child < 1:
+            message = "max_memory_per_child must be positive"
+            raise ValueError(message)
         if not self.task_modules:
             message = "worker profiles require at least one task module"
             raise ValueError(message)
@@ -81,6 +85,7 @@ def _profile(
     *,
     concurrency: int,
     max_tasks_per_child: int,
+    max_memory_per_child: int,
     queue_role: JobQueue,
     dead_letter_queue: str,
 ) -> WorkerProfile:
@@ -98,6 +103,7 @@ def _profile(
         concurrency=concurrency,
         pool="prefork",
         max_tasks_per_child=max_tasks_per_child,
+        max_memory_per_child=max_memory_per_child,
         task_modules=tuple(dict.fromkeys(d.declaring_module for d in entries.values())),
         task_names=frozenset(entries),
     )
@@ -111,6 +117,7 @@ def _build_profiles() -> dict[WorkerRole, WorkerProfile]:
             settings.CELERY_DEFAULT_QUEUE,
             concurrency=settings.CELERY_DEFAULT_CONCURRENCY,
             max_tasks_per_child=settings.CELERY_DEFAULT_MAX_TASKS_PER_CHILD,
+            max_memory_per_child=settings.CELERY_DEFAULT_MAX_MEMORY_PER_CHILD,
             queue_role=JobQueue.DEFAULT,
             dead_letter_queue=settings.CELERY_DEAD_LETTER_QUEUE,
         ),
@@ -119,6 +126,7 @@ def _build_profiles() -> dict[WorkerRole, WorkerProfile]:
             settings.CELERY_INGESTION_QUEUE,
             concurrency=settings.CELERY_INGESTION_CONCURRENCY,
             max_tasks_per_child=settings.CELERY_INGESTION_MAX_TASKS_PER_CHILD,
+            max_memory_per_child=settings.CELERY_INGESTION_MAX_MEMORY_PER_CHILD,
             queue_role=JobQueue.INGESTION,
             dead_letter_queue=settings.CELERY_DEAD_LETTER_QUEUE,
         ),
@@ -127,6 +135,7 @@ def _build_profiles() -> dict[WorkerRole, WorkerProfile]:
             settings.CELERY_CRAWLER_QUEUE,
             concurrency=settings.CELERY_CRAWLER_CONCURRENCY,
             max_tasks_per_child=settings.CELERY_CRAWLER_MAX_TASKS_PER_CHILD,
+            max_memory_per_child=settings.CELERY_CRAWLER_MAX_MEMORY_PER_CHILD,
             queue_role=JobQueue.CRAWLER,
             dead_letter_queue=settings.CELERY_DEAD_LETTER_QUEUE,
         ),

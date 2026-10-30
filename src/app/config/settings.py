@@ -219,6 +219,12 @@ class Settings(BaseSettings):
     CELERY_DEFAULT_MAX_TASKS_PER_CHILD: int = Field(default=500, ge=1)
     CELERY_INGESTION_MAX_TASKS_PER_CHILD: int = Field(default=100, ge=1)
     CELERY_CRAWLER_MAX_TASKS_PER_CHILD: int = Field(default=100, ge=1)
+    # Celery's --max-memory-per-child unit is KiB.  Torch/transformers/docling
+    # give each prefork child a ~0.5-0.9 GiB import baseline before task state,
+    # so the cap bounds growth per task rather than the import floor.
+    CELERY_DEFAULT_MAX_MEMORY_PER_CHILD: int = Field(default=1_000_000, ge=1)
+    CELERY_INGESTION_MAX_MEMORY_PER_CHILD: int = Field(default=1_000_000, ge=1)
+    CELERY_CRAWLER_MAX_MEMORY_PER_CHILD: int = Field(default=1_000_000, ge=1)
     CELERY_BEAT_SCHEDULE_FILE: str = Field(default="celerybeat-schedule")
     CELERY_RETRY_MAX_RETRIES: int = Field(default=5)
     CELERY_RETRY_BACKOFF_MAX: int = Field(default=600)

@@ -148,6 +148,9 @@ def test_every_worker_command_delegates_process_shape_to_role_profile() -> None:
         assert command[command.index("--max-tasks-per-child") + 1] == str(
             profile.max_tasks_per_child
         )
+        assert command[command.index("--max-memory-per-child") + 1] == str(
+            profile.max_memory_per_child
+        )
 
 
 def test_operator_commands_do_not_repeat_profile_owned_flags() -> None:
@@ -159,6 +162,7 @@ def test_operator_commands_do_not_repeat_profile_owned_flags() -> None:
         assert "--pool" not in tokens
         assert "--concurrency" not in tokens
         assert "--max-tasks-per-child" not in tokens
+        assert "--max-memory-per-child" not in tokens
 
 
 @pytest.mark.parametrize("path", [_MAKEFILE, _README, _DEV_COMPOSE, _PROD_COMPOSE])
