@@ -29,6 +29,19 @@ class LegalRole(StrEnum):
 _LEGACY_ROLE_VALUES = {"admin": LegalRole.CORPUS_ADMIN}
 
 
+class ProvisioningState(StrEnum):
+    """Account lifecycle for personal-tenant provisioning.
+
+    ``PENDING`` is written explicitly when the Mongo account is created; SQL is
+    the provisioning authority, and the state only flips to ``COMPLETED`` when a
+    revision-monotonic mirror sync confirms the SQL membership.  Legacy accounts
+    default to ``COMPLETED``: the tenancy migration is their repair mechanism.
+    """
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+
+
 def normalize_legal_role(value: LegalRole | str) -> LegalRole:
     """Parse current roles while accepting legacy Mongo ``admin`` values.
 
@@ -42,4 +55,9 @@ def normalize_legal_role(value: LegalRole | str) -> LegalRole:
     return legacy if legacy is not None else LegalRole(value)
 
 
-__all__ = ["LegalRole", "normalize_legal_role", "personal_tenant_id"]
+__all__ = [
+    "LegalRole",
+    "ProvisioningState",
+    "normalize_legal_role",
+    "personal_tenant_id",
+]

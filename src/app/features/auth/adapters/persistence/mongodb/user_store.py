@@ -29,7 +29,7 @@ from app.features.auth.domain.errors import (
     AuthNotFoundError,
     AuthValidationError,
 )
-from app.features.auth.domain.tenancy import LegalRole
+from app.features.auth.domain.tenancy import LegalRole, ProvisioningState
 from app.features.auth.domain.user import (
     ROLE_PERMISSIONS,
     OAuthAccount,
@@ -70,6 +70,9 @@ class AuthAccount(BaseModel):
     # tenant membership generation below.
     role_revision: int = 0
     tenant_role_revision: int = 0
+    # Personal-tenant provisioning lifecycle.  New accounts are written with an
+    # explicit ``pending``; only a revision-monotonic mirror sync completes it.
+    provisioning_state: ProvisioningState = ProvisioningState.COMPLETED
     session_revocation_pending: bool = False
     session_revocation_pending_at: datetime | None = None
     avatar_url: str | None = None
@@ -94,6 +97,9 @@ class NewAuthAccount(BaseModel):
     tenant_id: str | None = None
     legal_roles: tuple[LegalRole, ...] = (LegalRole.ANALYST,)
     tenant_role_revision: int = 0
+    # Explicit at every account-creation call site: registration and OAuth
+    # first-login pass ``pending``; defaults keep legacy helpers truthful.
+    provisioning_state: ProvisioningState = ProvisioningState.COMPLETED
     is_verified: bool = False
     is_active: bool = True
     verification_token_hash: str | None = None
@@ -242,7 +248,13 @@ class AuthAccountStore(Protocol):
         tenant_role_revision: int | None = None,
         role_revision: int | None = None,
     ) -> Result[None, AuthError]:
-        """Synchronize the SQL-authoritative tenant membership mirror."""
+        """Synchronize the SQL-authoritative tenant membership mirror.
+
+        Revision-monotonic compare-and-set: a mirror write whose tenant
+        revision is older than the currently mirrored one is rejected so a
+        stale writer can never overwrite newer authorization state.  A
+        successful write also completes the account's provisioning lifecycle.
+        """
         ...
 
 
@@ -285,6 +297,7 @@ class BeanieAuthAccountStore:
             # authoritative tenant revision; do not use it to advance the
             # platform/session revision on a tenant-binding write.
             tenant_role_revision=tenant_role_revision,
+            provisioning_state=user.provisioning_state,
             session_revocation_pending=user.session_revocation_pending,
             session_revocation_pending_at=user.session_revocation_pending_at,
             verification_token_hash=user.verification_token_hash,
@@ -389,6 +402,7 @@ class BeanieAuthAccountStore:
                 tenant_id=account.tenant_id,
                 legal_roles=account.legal_roles,
                 tenant_role_revision=account.tenant_role_revision,
+                provisioning_state=account.provisioning_state,
                 is_verified=account.is_verified,
                 is_active=account.is_active,
                 verification_token_hash=account.verification_token_hash,
@@ -729,20 +743,34 @@ class BeanieAuthAccountStore:
         if revision is None:
             message = "tenant_role_revision is required"
             raise ValueError(message)
-        user_result = await self._get_user(account_id)
-        if isinstance(user_result, Failure):
-            return Failure(user_result.failure())
-        user = user_result.unwrap()
+        # Revision-monotonic compare-and-set executed atomically by MongoDB.
+        # Documents predating the mirror field (missing/None revision) always
+        # accept their first authoritative write.  A stale writer loses.
+        now = datetime.now(UTC)
         try:
-            user.tenant_id = tenant_id
-            user.legal_roles = legal_roles
-            # SQL membership revision is authoritative for tenant roles.  It
-            # must not be folded into ``role_revision``, which fences platform
-            # authorization and session tokens.
-            user.tenant_role_revision = revision
-            user.updated_at = datetime.now(UTC)
-            await user.save()
-            return Success(None)
+            updated = await self._User.get_pymongo_collection().find_one_and_update(
+                {
+                    "_id": BsonObjectId(account_id),
+                    "$or": [
+                        {"tenant_role_revision": {"$exists": False}},
+                        {"tenant_role_revision": None},
+                        {"tenant_role_revision": {"$lte": revision}},
+                    ],
+                },
+                {
+                    "$set": {
+                        "tenant_id": tenant_id,
+                        "legal_roles": [role.value for role in legal_roles],
+                        # SQL membership revision is authoritative for tenant
+                        # roles.  It must not be folded into ``role_revision``,
+                        # which fences platform authorization and session tokens.
+                        "tenant_role_revision": revision,
+                        "provisioning_state": ProvisioningState.COMPLETED.value,
+                        "updated_at": now,
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+            )
         except PyMongoError as exc:
             exc.add_note("auth_account_store operation=set_tenant_binding")
             return Failure(
@@ -752,6 +780,30 @@ class BeanieAuthAccountStore:
                     source="auth_account_store",
                 )
             )
+        if updated is not None:
+            return Success(None)
+
+        # The conditional update matched nothing: either the account is gone or
+        # a newer mirror revision already won.  Disambiguate with one read.
+        user_result = await self._get_user(account_id)
+        if isinstance(user_result, Failure):
+            return Failure(user_result.failure())
+        current = user_result.unwrap()
+        mirrored = getattr(current, "tenant_role_revision", None)
+        if mirrored is not None and mirrored > revision:
+            return Failure(
+                AuthConflictError(
+                    message="Stale tenant mirror revision rejected by compare-and-set",
+                    details={
+                        "user_id": account_id,
+                        "operation": "set_tenant_binding",
+                        "expected_revision": revision,
+                        "current_revision": mirrored,
+                    },
+                    source="auth_account_store",
+                )
+            )
+        return Success(None)
 
     async def link_oauth_account(
         self,
@@ -1074,6 +1126,7 @@ class InMemoryAuthAccountStore:
             tenant_id=account.tenant_id or "",
             legal_roles=account.legal_roles,
             tenant_role_revision=account.tenant_role_revision,
+            provisioning_state=account.provisioning_state,
             permissions=frozenset(p.value for p in ROLE_PERMISSIONS[account.role]),
             oauth_accounts=((account.oauth_account,) if account.oauth_account is not None else ()),
             oauth_providers=(
@@ -1370,6 +1423,7 @@ class InMemoryAuthAccountStore:
         tenant_role_revision: int | None = None,
         role_revision: int | None = None,
     ) -> Result[None, AuthError]:
+        """Mirror write guarded by a revision-monotonic compare-and-set."""
         revision = tenant_role_revision if tenant_role_revision is not None else role_revision
         if revision is None:
             message = "tenant_role_revision is required"
@@ -1383,17 +1437,33 @@ class InMemoryAuthAccountStore:
                     source="auth_account_store",
                 )
             )
+        mirrored = account.tenant_role_revision
+        if mirrored > revision:
+            return Failure(
+                AuthConflictError(
+                    message="Stale tenant mirror revision rejected by compare-and-set",
+                    details={
+                        "user_id": account_id,
+                        "operation": "set_tenant_binding",
+                        "expected_revision": revision,
+                        "current_revision": mirrored,
+                    },
+                    source="auth_account_store",
+                )
+            )
         self._unindex_account(account)
         data = account.model_dump()
         data.pop("tenant_id", None)
         data.pop("legal_roles", None)
         data.pop("tenant_role_revision", None)
+        data.pop("provisioning_state", None)
         data.pop("updated_at", None)
         updated = AuthAccount(
             **data,
             tenant_id=tenant_id,
             legal_roles=legal_roles,
             tenant_role_revision=revision,
+            provisioning_state=ProvisioningState.COMPLETED,
             updated_at=datetime.now(UTC),
         )
         self._index_account(updated)

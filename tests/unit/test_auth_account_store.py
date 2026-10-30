@@ -203,3 +203,107 @@ async def test_tenant_binding_does_not_advance_platform_session_revision() -> No
     assert refreshed is not None
     assert refreshed.role_revision == 7
     assert refreshed.tenant_role_revision == 3
+
+
+async def test_inmemory_tenant_binding_rejects_stale_revision_cas() -> None:
+    store = InMemoryAuthAccountStore()
+    created = await store.create(
+        NewAuthAccount(email="cas@example.com", password_hash="hash", is_verified=True)
+    )
+    assert isinstance(created, Success)
+    account_id = created.unwrap().id
+
+    newer = await store.set_tenant_binding(
+        account_id,
+        tenant_id="personal:cas",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=4,
+    )
+    assert isinstance(newer, Success)
+
+    stale = await store.set_tenant_binding(
+        account_id,
+        tenant_id="personal:cas",
+        legal_roles=(LegalRole.REVIEWER,),
+        role_revision=2,
+    )
+    assert isinstance(stale, Failure)
+    assert isinstance(stale.failure(), AuthConflictError)
+
+    # Equal revision is an idempotent replay, not a stale write.
+    replay = await store.set_tenant_binding(
+        account_id,
+        tenant_id="personal:cas",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=4,
+    )
+    assert isinstance(replay, Success)
+    refreshed = (await store.find_by_id(account_id)).unwrap()
+    assert refreshed is not None
+    assert refreshed.legal_roles == (LegalRole.ANALYST,)
+    assert refreshed.provisioning_state.value == "completed"
+
+
+async def test_beanie_tenant_binding_uses_revision_monotonic_atomic_guard() -> None:
+    collection = _FakeCollection({"_id": "updated"})
+
+    class _BindingUser:
+        collection_ref = collection
+
+        @classmethod
+        def get_pymongo_collection(cls):
+            return cls.collection_ref
+
+    store = BeanieAuthAccountStore()
+    store._User = _BindingUser
+
+    result = await store.set_tenant_binding(
+        "507f1f77bcf86cd799439011",
+        tenant_id="personal:507f1f77bcf86cd799439011",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=3,
+    )
+
+    assert isinstance(result, Success)
+    filter_ = collection.filter
+    assert filter_ is not None
+    # A stale writer must lose atomically: the revision guard lives in the
+    # update filter, not in a read-then-write precondition.
+    revision_guard = filter_["$or"]
+    assert {"tenant_role_revision": {"$lte": 3}} in revision_guard
+    update = collection.update
+    assert update is not None
+    assert update["$set"]["provisioning_state"] == "completed"
+
+
+async def test_beanie_tenant_binding_reports_stale_rejection_when_guard_matches_nothing() -> None:
+    class _NoMatchCollection:
+        async def find_one_and_update(self, *args: object, **kwargs: object) -> object:
+            # The atomic guard matched nothing: a newer mirror revision won.
+            return None
+
+    class _BindingUser:
+        @staticmethod
+        def get_pymongo_collection() -> _NoMatchCollection:
+            return _NoMatchCollection()
+
+    class _Current:
+        id = "507f1f77bcf86cd799439011"
+        tenant_role_revision = 9
+
+    async def _current_user(_account_id: str):
+        return Success(_Current())
+
+    store = BeanieAuthAccountStore()
+    store._User = _BindingUser
+    store._get_user = _current_user  # type: ignore[method-assign]
+
+    result = await store.set_tenant_binding(
+        "507f1f77bcf86cd799439011",
+        tenant_id="personal:507f1f77bcf86cd799439011",
+        legal_roles=(LegalRole.ANALYST,),
+        role_revision=3,
+    )
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), AuthConflictError)

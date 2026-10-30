@@ -19,6 +19,9 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
 from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
     TenantMembershipService,
 )
+from app.features.auth.application.personal_tenant_provisioning import (
+    PersonalTenantProvisioner,
+)
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import (
     AuthAuthenticationError,
@@ -26,6 +29,7 @@ from app.features.auth.domain.errors import (
     AuthConflictError,
     AuthInfrastructureError,
     AuthNotFoundError,
+    AuthProvisioningPendingError,
     AuthResult,
     AuthValidationError,
 )
@@ -201,7 +205,14 @@ async def get_auth_service(
     connection: HTTPConnection,
 ) -> AuthService:
     session_factory = getattr(connection.app.state, "db_session_local", None)
-    return AuthService(account_store, token_repo, session_factory=session_factory)
+    provisioner = (
+        PersonalTenantProvisioner(session_factory, account_store)
+        if session_factory is not None
+        else None
+    )
+    return AuthService(
+        account_store, token_repo, session_factory=session_factory, provisioner=provisioner
+    )
 
 
 async def get_tenant_membership_service(
@@ -413,7 +424,14 @@ async def get_current_websocket_authorization_context(
     if isinstance(live, Failure):
         error = live.failure()
         if isinstance(error, AuthInfrastructureError):
-            raise InfrastructureException(detail=error.message, error_code=error.code)
+            # SQL being unreachable is a retryable outage (503), never a 403
+            # denial: the retryability bit must survive the mapping.
+            raise InfrastructureException(
+                detail=error.message,
+                error_code=error.code,
+                retryable=error.retryable,
+                data=error.details,
+            )
         message = "Tenant authorization is unavailable"
         raise ForbiddenException(message)
     legal_roles, self_review_allowed, role_revision = live.unwrap()
@@ -479,6 +497,12 @@ async def get_current_user(
                 raise UnauthorizedException(detail=error.message, error_code=error.code)
             case AuthAuthorizationError():
                 raise ForbiddenException(detail=error.message, error_code=error.code)
+            case AuthProvisioningPendingError():
+                # Durable provisioning pending: retryable conflict, never a
+                # denial and never invalid credentials.
+                raise ConflictException(
+                    detail=error.message, error_code=error.code, data=error.details
+                )
             case AuthInfrastructureError():
                 raise InfrastructureException(
                     detail=error.message,
@@ -531,7 +555,14 @@ async def get_current_authorization_context(
     if isinstance(live, Failure):
         error = live.failure()
         if isinstance(error, AuthInfrastructureError):
-            raise InfrastructureException(detail=error.message, error_code=error.code)
+            # Infrastructure failure must stay retryable (503), never degrade
+            # into a 403 denial or a non-retryable 500.
+            raise InfrastructureException(
+                detail=error.message,
+                error_code=error.code,
+                retryable=error.retryable,
+                data=error.details,
+            )
         message = "Tenant authorization is unavailable"
         raise ForbiddenException(message)
     legal_roles, self_review_allowed, role_revision = live.unwrap()

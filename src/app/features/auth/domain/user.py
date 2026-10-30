@@ -6,7 +6,7 @@ from beanie import Document, Indexed
 from pydantic import BaseModel, Field
 from pymongo import ASCENDING, IndexModel
 
-from .tenancy import LegalRole
+from .tenancy import LegalRole, ProvisioningState
 
 
 class UserRole(StrEnum):
@@ -83,6 +83,12 @@ class User(Document):
     # keeps rolling deploys compatible with Mongo documents written before the
     # mirror field existed; the adapter fills it from the SQL read on sync.
     tenant_role_revision: int | None = Field(default=None, ge=0)
+    # Personal-tenant provisioning lifecycle.  New accounts are created with an
+    # explicit ``pending`` value; only a successful revision-monotonic mirror
+    # sync of the SQL-authoritative membership flips it to ``completed``.
+    # Legacy documents default to ``completed`` — the tenancy migration is
+    # their repair mechanism, not registration.
+    provisioning_state: ProvisioningState = Field(default=ProvisioningState.COMPLETED)
     session_revocation_pending: bool = Field(default=False)
     # Set once when a role-change invalidation begins. It is intentionally
     # separate from updated_at, which profile/account edits may advance while
