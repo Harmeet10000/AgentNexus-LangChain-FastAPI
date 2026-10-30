@@ -102,16 +102,25 @@ def aggregate_relationship_states(
     ran_clause_writes = any(
         state.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED for state in states
     )
+    aggregate_status = (
+        GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
+        if ran_clause_writes
+        else GraphRelationshipsStatus.NOT_ATTEMPTED
+    )
+    # The surfaced reason must come from a state that shares the aggregate's
+    # status — a failure's reason must never describe a skipped aggregate.
     return GraphRelationshipsState(
-        status=(
-            GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
-            if ran_clause_writes
-            else GraphRelationshipsStatus.NOT_ATTEMPTED
-        ),
+        status=aggregate_status,
         reason=next(
-            (state.reason for state in states if state.reason is not None),
+            (
+                state.reason
+                for state in states
+                if state.status is aggregate_status and state.reason is not None
+            ),
             RELATIONSHIP_SKIP_REASON if ran_clause_writes else None,
         ),
+        relationships_attempted=sum(state.relationships_attempted for state in states),
+        relationships_succeeded=sum(state.relationships_succeeded for state in states),
     )
 
 

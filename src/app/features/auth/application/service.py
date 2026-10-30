@@ -226,7 +226,11 @@ class AuthService:
                 AuthConflictError(message="Email already registered", source="auth_service")
             )
 
-        provision_result = await self._provision_personal_tenant(existing)
+        # The session-invariant seam already encodes the right retry shape:
+        # membership exists → done; durably pending → one idempotent repair;
+        # anything else → typed conflict.  Registration must not grow a
+        # second, divergent provisioning path.
+        provision_result = await self._ensure_sql_membership_for_session(existing)
         if isinstance(provision_result, Failure):
             return Failure(provision_result.failure())
         logger.bind(user_id=existing.id).info("User registered")
