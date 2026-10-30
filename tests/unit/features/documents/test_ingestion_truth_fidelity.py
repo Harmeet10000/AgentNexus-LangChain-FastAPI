@@ -529,6 +529,11 @@ def test_chunk_plausibility_degrades_to_unavailable_without_tokenizer(
     )
     assert state.verdict is ChunkPlausibilityVerdict.UNAVAILABLE
     assert state.token_count_basis is TokenCountBasis.UNAVAILABLE
+    # The failure identity survives into the persisted reason so operators can
+    # tell a missing model from a corrupted one.
+    assert state.reason is not None
+    assert "RuntimeError" in state.reason
+    assert "offline" in state.reason
 
 
 def test_degradation_warnings_fire_on_threshold_breaches() -> None:
@@ -665,21 +670,41 @@ def test_ocr_warning_fires_for_finite_confidence_below_enabled_threshold() -> No
     assert "FIDELITY_OCR_CONFIDENCE_LOW" in codes
 
 
-def test_plausibility_upper_bound_counts_every_chunk_emitting_item() -> None:
+class _WordCountTokenizer:
+    """Deterministic ~1-token-per-whitespace-word counter (no model download).
+
+    Mirrors the offline stub the evals ingestion gate uses, so this test is
+    environment-independent and its bounds are exact.
+    """
+
+    def encode(self, text: str) -> list[int]:
+        return list(range(1, len(str(text).split()) + 1))
+
+
+def test_plausibility_upper_bound_counts_every_chunk_emitting_item(
+    monkeypatch: Any,
+) -> None:
     """Heading items can each emit a chunk; the old text-only bound false-flagged.
 
     Six headings + six short sections with eight chunks is structurally normal,
     but the previous upper bound (text sections only) called it implausible.
+    Uses the deterministic word-count stub: items are 12, none exceeds the
+    token bound, so the upper bound is exactly 12.
     """
+    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+
+    monkeypatch.setattr(fidelity_module, "get_tokenizer", _WordCountTokenizer)
     markdown = "\n\n".join(
         f"## Heading {index}\n\nBody paragraph {index} with text." for index in range(6)
     )
-    state = measure_chunk_plausibility(
+    state = fidelity_module.measure_chunk_plausibility(
         source_markdown=markdown, chunk_count=8, document_kind="generic"
     )
     assert state.verdict is ChunkPlausibilityVerdict.PLAUSIBLE
     assert state.expected_chunk_count_upper is not None
-    assert state.expected_chunk_count_upper >= 12
+    assert state.expected_chunk_count_upper == 12
+    assert state.expected_chunk_count_lower is not None
+    assert state.expected_chunk_count_lower <= 8
 
 
 def test_plausibility_upper_bound_accounts_for_split_sections(monkeypatch: Any) -> None:

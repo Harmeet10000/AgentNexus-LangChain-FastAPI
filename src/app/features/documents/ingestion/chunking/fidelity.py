@@ -167,9 +167,15 @@ def measure_chunk_plausibility(
         item_tokens = [len(tokenizer.encode(item.text)) for item in items]
     except Exception as exc:  # noqa: BLE001 — plausibility degrades to unavailable, never fails ingestion
         exc.add_note("operation=fidelity_chunk_plausibility_token_count")
+        # Carry the failure identity (missing model vs corrupted download vs
+        # offline runner) into the persisted reason so operators can tell the
+        # unavailability causes apart.
         return ChunkPlausibilityState(
             verdict=ChunkPlausibilityVerdict.UNAVAILABLE,
-            reason="Tokenizer unavailable; chunk-count bounds could not be computed.",
+            reason=(
+                f"Tokenizer unavailable ({type(exc).__name__}: {str(exc)[:200]}); "
+                "chunk-count bounds could not be computed."
+            ),
             chunk_count=chunk_count,
         )
     max_tokens = resolve_chunk_policy(document_kind).max_tokens

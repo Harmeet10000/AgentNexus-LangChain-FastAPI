@@ -20,10 +20,12 @@ class LegalRole(StrEnum):
     ANALYST = "analyst"
     REVIEWER = "reviewer"
     CORPUS_ADMIN = "corpus_admin"
-    # Source compatibility for clients that imported LegalRole.ADMIN.  The
-    # value deliberately names the tenant-scoped role so it cannot be
-    # confused with ``UserRole.ADMIN`` (platform administration).
-    ADMIN = "corpus_admin"
+
+
+# Note: the former ``ADMIN = "corpus_admin"`` enum alias is deliberately gone.
+# It made Pydantic emit "corpus_admin" twice in the OpenAPI schema, and no
+# caller ever imported it — the legacy wire value "admin" is handled by
+# ``normalize_legal_role`` below.  Platform administration is ``UserRole.ADMIN``.
 
 
 _LEGACY_ROLE_VALUES = {"admin": LegalRole.CORPUS_ADMIN}

@@ -11329,7 +11329,6 @@
         "enum": [
           "analyst",
           "reviewer",
-          "corpus_admin",
           "corpus_admin"
         ],
         "title": "LegalRole",

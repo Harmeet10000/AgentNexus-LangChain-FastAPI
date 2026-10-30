@@ -30,7 +30,7 @@ from app.features.auth.domain.errors import (
     AuthInfrastructureError,
     AuthProvisioningPendingError,
 )
-from app.features.auth.domain.tenancy import personal_tenant_id
+from app.features.auth.domain.tenancy import ProvisioningState, personal_tenant_id
 from app.security.passwords import hash_password
 
 from .provisioning_fakes import FakeTenantSQLStore
@@ -250,3 +250,63 @@ async def test_register_retry_completes_provisioning_for_pending_account() -> No
     )
     assert isinstance(third, Failure)
     assert third.failure().code.value == "USER_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_register_retry_without_password_proof_is_indistinguishable_conflict() -> None:
+    """Knowing only a pending account's email must not leak its profile."""
+    service, sql, accounts, _redis = build_service()
+    sql.fail_next_commit = True
+    first = await service.register(
+        RegisterRequest(email="victim@example.com", password="ValidPass1")
+    )
+    assert isinstance(first, Failure)
+    sql.fail_next_commit = False
+
+    attacker = await service.register(
+        RegisterRequest(email="victim@example.com", password="AttackerPass1")
+    )
+
+    assert isinstance(attacker, Failure)
+    assert attacker.failure().code.value == "USER_CONFLICT"
+    assert attacker.failure().message == "Email already registered"
+    # Nothing was provisioned and the account stays durably pending.
+    assert not sql.tenants
+    assert not sql.memberships
+    victim = (await accounts.find_by_email("victim@example.com")).unwrap()
+    assert victim is not None
+    assert victim.provisioning_state.value == "pending"
+
+    # A completed account's conflict is byte-identical — no pending reveal.
+    await service.register(RegisterRequest(email="done@example.com", password="ValidPass1"))
+    completed = await service.register(
+        RegisterRequest(email="done@example.com", password="AttackerPass1")
+    )
+    assert isinstance(completed, Failure)
+    assert completed.failure().code == attacker.failure().code
+    assert completed.failure().message == attacker.failure().message
+
+
+@pytest.mark.asyncio
+async def test_register_retry_for_passwordless_pending_account_is_conflict() -> None:
+    """An OAuth account stuck pending has no credential to prove — never claimable."""
+    service, sql, accounts, _redis = build_service()
+    created = await accounts.create(
+        NewAuthAccount(
+            email="oauth-pending@example.com",
+            password_hash=None,
+            is_verified=True,
+            provisioning_state=ProvisioningState.PENDING,
+        )
+    )
+    assert isinstance(created, Success)
+
+    result = await service.register(
+        RegisterRequest(email="oauth-pending@example.com", password="ValidPass1")
+    )
+
+    assert isinstance(result, Failure)
+    assert result.failure().code.value == "USER_CONFLICT"
+    assert result.failure().message == "Email already registered"
+    assert not sql.tenants
+    assert not sql.memberships

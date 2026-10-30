@@ -26,6 +26,7 @@ from returns.result import Failure, Success
 from sqlalchemy import (
     TIMESTAMP,
     String,
+    Text,
     and_,
     bindparam,
     cast,
@@ -1190,10 +1191,16 @@ class ChatTranscriptRepository:
                 # (c) the stamp is PENDING but stale enough that another
                 # sweep's critical section is over (§8). The timestamptz casts
                 # and make_interval(mins => n) mirror the original verbatim.
-                stamp_text = ChatSession.extra_metadata.op("->>")(
+                # `return_type=Text` is load-bearing: a bare op("->>") inherits
+                # the JSON left operand's type, so the 'false'/'true'
+                # comparisons would bind through the JSON serializer
+                # ('"false"') and asyncpg would render a $n::JSON cast —
+                # `text = json`, an operator error or a never-matching
+                # comparison. Text typing keeps the literals plain text binds.
+                stamp_text = ChatSession.extra_metadata.op("->>", return_type=Text)(
                     bindparam("stamp_key", value=_GC_STAMP_KEY, type_=String)
                 )
-                pending_text = ChatSession.extra_metadata.op("->>")(
+                pending_text = ChatSession.extra_metadata.op("->>", return_type=Text)(
                     bindparam("pending_key", value=_GC_PENDING_KEY, type_=String)
                 )
                 stamp_ts = cast(stamp_text, TIMESTAMP(timezone=True))

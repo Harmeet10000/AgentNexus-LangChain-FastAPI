@@ -346,3 +346,20 @@ async def test_plain_session_exit_discards_staged_state_without_consuming_commit
     assert not sql.memberships
     # The failure flag was not consumed by the session-level exit.
     assert sql.fail_next_commit is True
+
+
+@pytest.mark.asyncio
+async def test_display_name_is_bounded_to_the_tenant_column_limit() -> None:
+    """A 256-character profile name must not fail the 255-char SQL column."""
+    sql = FakeTenantSQLStore()
+    accounts = FlakyMirrorStore()
+    accounts._index_account(make_account())  # noqa: SLF001
+    provisioner = PersonalTenantProvisioner(sql.factory, accounts)
+
+    result = await provisioner.provision(
+        "user-1", display_name="N" * 256, legal_roles=(LegalRole.ANALYST,)
+    )
+
+    assert isinstance(result, Success)
+    tenant = sql.tenants[personal_tenant_id("user-1")]
+    assert len(tenant.display_name) == 255

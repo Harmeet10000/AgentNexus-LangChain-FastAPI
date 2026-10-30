@@ -58,6 +58,11 @@ _PROVISION_FAILED = _PROVISIONING_METER.create_counter("auth.provisioning.sql_fa
 _PROVISION_MIRROR_FAILED = _PROVISIONING_METER.create_counter(
     "auth.provisioning.mirror_failed"
 )
+# ``app_tenants.display_name`` is ``String(length=255)`` while registration
+# accepts longer profile names.  The tenant label is derived display data, so
+# it is bounded here: any input registration accepted by the API must be able
+# to complete provisioning instead of failing the SQL insert post-account-creation.
+_TENANT_DISPLAY_NAME_MAX_LENGTH = 255
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,7 +198,9 @@ class PersonalTenantProvisioner:
         authoritative.
         """
         tenant_id = personal_tenant_id(user_id)
-        safe_display_name = display_name or f"Personal tenant {user_id}"
+        safe_display_name = (display_name or f"Personal tenant {user_id}")[
+            :_TENANT_DISPLAY_NAME_MAX_LENGTH
+        ]
         try:
             async with self._session_factory() as session, session.begin():
                 roles, role_revision = await self._upsert_personal_tenant(

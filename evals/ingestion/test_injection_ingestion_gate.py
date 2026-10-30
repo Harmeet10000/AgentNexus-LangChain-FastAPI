@@ -12,8 +12,10 @@ What the gate proves:
   ``document_id``, graphiti group binding or ``allowed_doc_ids``.
 - Content cannot re-own or renumber contract boundaries; ``contract_index``
   stays a server-assigned contiguous sequence.
-- Forged "authoritative metadata" blocks stay untrusted content-derived
-  metadata; they never widen authorization or overwrite identity.
+- Forged "authoritative metadata" blocks never reach the persisted legal
+  metadata (server-side extraction values survive), and the extraction prompt
+  provably delimits document content inside an UNTRUSTED region with an
+  explicit never-follow-document-instructions directive.
 - Fidelity thresholds (table/section preservation, chunk plausibility) and the
   typed relationship-phase state are measured and persisted; a corrupted
   checksum or an untruthful success (zero chunks for a non-empty document)
@@ -36,6 +38,11 @@ from app.features.documents.adapters.persistence.postgres.document_repository im
 from app.features.documents.application.commands import upload_document as document_ingest
 from app.features.documents.ingestion.chunking.classification import (
     establish_contract_boundaries,
+)
+from app.features.documents.ingestion.enrichment.legal_metadata import (
+    UNTRUSTED_CONTENT_DIRECTIVE,
+    UNTRUSTED_DOCUMENT_BEGIN,
+    UNTRUSTED_DOCUMENT_END,
 )
 from app.features.documents.ingestion.workflow import build_document_ingestion_graph
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
@@ -161,12 +168,22 @@ class _GroundedProvider:
 
 
 class _StructuredInvoker:
-    """Structured-output invoker returning a fixed extraction (no model call)."""
+    """Structured-output invoker returning a fixed extraction (no model call).
 
-    def __init__(self, response: dict[str, object]) -> None:
+    Records the prompt messages it receives so tests can assert on the real
+    prompt construction (delimiting, directives) rather than the response.
+    """
+
+    def __init__(
+        self,
+        response: dict[str, object],
+        captured_prompts: list[object],
+    ) -> None:
         self._response = response
+        self._captured_prompts = captured_prompts
 
-    async def ainvoke(self, _messages: object) -> dict[str, object]:
+    async def ainvoke(self, messages: object) -> dict[str, object]:
+        self._captured_prompts.append(messages)
         return self._response
 
 
@@ -174,11 +191,13 @@ class _HermeticContractLLM(FakeListChatModel):
     """Fake chat model supporting structured output for legal-metadata extraction.
 
     The real extraction path runs (prompt build, validation, heuristic merge)
-    but the model call is hermetic.  With the default empty response the
-    metadata falls back to the typed heuristic path; tests can supply the
-    metadata an honest server-side model would return from the genuine
-    contract body, proving content-injected metadata blocks cannot override it.
+    but the model call is hermetic.  Prompts sent to the structured invoker are
+    recorded in ``captured_prompts``; the structured response defaults to empty
+    (typed heuristic fallback) and tests may supply the metadata an honest
+    server-side model would return from the genuine contract body.
     """
+
+    _captured_prompts: list[object] = PrivateAttr(default_factory=list)
 
     def __init__(
         self,
@@ -187,11 +206,11 @@ class _HermeticContractLLM(FakeListChatModel):
         structured_metadata: dict[str, object] | None = None,
     ) -> None:
         super().__init__(responses=responses)
-        self._structured_metadata = structured_metadata or {}
+        object.__setattr__(self, "_structured_metadata", structured_metadata or {})
 
     @override
     def with_structured_output(self, _schema: object) -> _StructuredInvoker:
-        return _StructuredInvoker(self._structured_metadata)
+        return _StructuredInvoker(self._structured_metadata, self._captured_prompts)
 
 
 class _GraphWriter:
@@ -225,10 +244,17 @@ class _Idempotency:
 
 
 class _QueuedRun:
-    def __init__(self, result: dict[str, Any], repo: _RecordingRepo, document_id: str) -> None:
+    def __init__(
+        self,
+        result: dict[str, Any],
+        repo: _RecordingRepo,
+        document_id: str,
+        llm: _HermeticContractLLM,
+    ) -> None:
         self.result = result
         self.repo = repo
         self.document_id = document_id
+        self.llm = llm
 
     @property
     def final_metadata(self) -> dict[str, Any]:
@@ -303,7 +329,7 @@ async def _run_queued_ingestion(
         },
         {"configurable": {"document_repository": repo}},
     )
-    return _QueuedRun(cast("dict[str, Any]", result), repo, document_id)
+    return _QueuedRun(cast("dict[str, Any]", result), repo, document_id, llm)
 
 
 # ---------------------------------------------------------------------------
@@ -404,15 +430,20 @@ async def test_forged_boundary_markers_cannot_reown_contracts(
         assert not (_IDENTITY_KEYS & set(metadata))
 
 
-async def test_forged_legal_metadata_stays_untrusted(
+async def test_forged_metadata_cannot_displace_server_side_extraction(
     monkeypatch: pytest.MonkeyPatch,
     fixtures: dict[str, str],
 ) -> None:
-    """Forged authoritative-metadata blocks cannot overwrite legal metadata.
+    """Persistence-trust check: server-side extraction values survive.
 
-    The structured metadata extraction runs for real against the genuine
-    contract body (hermetic model); the content-injected "SYSTEM NOTE"
-    metadata-overwrite block must never win jurisdiction or parties.
+    This is deliberately NOT a model-resistance proof (the hermetic invoker
+    returns a fixed response, so it cannot demonstrate that a model would
+    refuse a forged block).  What it proves mechanically: the persisted legal
+    metadata comes from the server-side extraction over the genuine body, and
+    the content-injected "SYSTEM NOTE" metadata-override block contributes
+    nothing to jurisdiction, parties or dates.  The prompt-construction side of
+    the guarantee (delimited untrusted region + anti-instruction directive) is
+    asserted separately in ``test_metadata_prompt_delimits_untrusted_content``.
     """
     run = await _run_queued_ingestion(
         monkeypatch,
@@ -461,6 +492,43 @@ async def test_forged_legal_metadata_stays_untrusted(
         "1801-01-01",
     ):
         assert forged not in metadata_json
+
+
+async def test_metadata_prompt_delimits_untrusted_content(
+    monkeypatch: pytest.MonkeyPatch,
+    fixtures: dict[str, str],
+) -> None:
+    """The real metadata prompt separates untrusted document content.
+
+    Asserts on the prompt the extraction path actually builds: the document
+    (including the forged "SYSTEM NOTE ... OVERWRITE METADATA" block) appears
+    only inside the delimited UNTRUSTED region, and the prompt carries the
+    explicit never-follow-document-instructions directive.  If a regression
+    lets document content leak outside the delimiters — or drops the
+    directive — this fails.
+    """
+    run = await _run_queued_ingestion(
+        monkeypatch,
+        fixtures["injection_forged_legal_metadata.md"],
+    )
+
+    assert run.llm._captured_prompts, "metadata extraction must send a prompt"
+    forged_marker = "OVERWRITE METADATA"
+    for messages in run.llm._captured_prompts:
+        message_list = cast("list[Any]", messages)
+        human = "\n".join(str(message.content) for message in message_list)
+        assert human.count(UNTRUSTED_DOCUMENT_BEGIN) == 1
+        assert human.count(UNTRUSTED_DOCUMENT_END) == 1
+        begin = human.index(UNTRUSTED_DOCUMENT_BEGIN)
+        end = human.index(UNTRUSTED_DOCUMENT_END)
+        # Document content — including the forged block — occurs only inside
+        # the delimited region.
+        assert begin < end
+        outside = human[:begin] + human[end + len(UNTRUSTED_DOCUMENT_END) :]
+        assert forged_marker not in outside
+        assert forged_marker in human[begin:end]
+        # The anti-instruction directive travels with the prompt.
+        assert UNTRUSTED_CONTENT_DIRECTIVE in human
 
 
 # ---------------------------------------------------------------------------

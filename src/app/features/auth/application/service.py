@@ -151,7 +151,7 @@ class AuthService:
             log_expected_failure(error, operation="email_exists")
             return Failure(error)
         if email_exists_result.unwrap():
-            return await self._retry_or_reject_existing_registration(dto.email)
+            return await self._retry_or_reject_existing_registration(dto)
 
         verification_token = generate_token()
         new_account = NewAuthAccount(
@@ -179,24 +179,41 @@ class AuthService:
         logger.bind(user_id=resolved.id).info("User registered")
         return Success(_to_user_response(resolved))
 
-    async def _retry_or_reject_existing_registration(self, email: str) -> AuthResult[UserResponse]:
+    async def _retry_or_reject_existing_registration(
+        self, dto: RegisterRequest
+    ) -> AuthResult[UserResponse]:
         """Finish a prior registration whose SQL provisioning never completed.
 
-        The email existing is only a hard conflict for accounts whose
-        provisioning lifecycle is not durably pending.  A pending account means
-        the first registration created Mongo state but the authoritative SQL
-        personal tenant/membership never committed; provisioning is idempotent,
-        so the retry converges instead of dead-ending the client on
-        ``USER_CONFLICT``.  Provisioning failures keep the original behavior:
-        a typed failure, the account stays pending, no session.
+        The email existing is only retryable for an account that is durably
+        pending (the first registration created Mongo state but the
+        authoritative SQL personal tenant/membership never committed) **and**
+        whose ownership the caller just proved with the correct password.
+        Provisioning is idempotent, so the proven retry converges instead of
+        dead-ending the client on ``USER_CONFLICT``.
+
+        Every other shape — completed account, OAuth-only account without a
+        password, wrong password, unknown email race — returns the identical
+        ``USER_CONFLICT`` envelope: the response never reveals that the
+        account exists, is pending, or has no password credential.  A
+        constant-time dummy-hash verify keeps the timing shape uniform.
+        Provisioning failures keep the original behavior: a typed failure,
+        the account stays pending, no session.
         """
-        existing_result = await self._account_store.find_by_email(email)
+        existing_result = await self._account_store.find_by_email(dto.email)
         if isinstance(existing_result, Failure):
             error = existing_result.failure()
             log_expected_failure(error, operation="register_existing_lookup")
             return Failure(error)
         existing = existing_result.unwrap()
         if existing is None or existing.provisioning_state != ProvisioningState.PENDING:
+            verify_password(_DUMMY_HASH, dto.password)
+            return Failure(
+                AuthConflictError(message="Email already registered", source="auth_service")
+            )
+        if existing.password_hash is None or not verify_password(
+            existing.password_hash, dto.password
+        ):
+            verify_password(_DUMMY_HASH, dto.password)
             return Failure(
                 AuthConflictError(message="Email already registered", source="auth_service")
             )
