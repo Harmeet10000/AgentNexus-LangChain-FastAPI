@@ -12,7 +12,7 @@ from uuid import uuid4
 from graphiti_core.errors import GraphitiError
 from neo4j.exceptions import Neo4jError
 from returns.result import Failure, Success
-from sqlalchemy import text
+from sqlalchemy import func, select
 
 from app.ai.embeddings import EmbeddingTaskType, embed_texts
 from app.config import get_settings
@@ -58,6 +58,13 @@ from app.features.documents.domain.errors import (
     DocumentStorageError,
     DocumentValidationError,
 )
+from app.features.documents.domain.fidelity import (
+    GraphRelationshipsState,
+    GraphRelationshipsStatus,
+    GraphWritePhaseResult,
+    IngestionFidelityMetrics,
+    aggregate_relationship_states,
+)
 from app.features.documents.ingestion.adapters.graphiti.verifier import write_and_verify_chunk
 from app.features.documents.ingestion.chunking.classification import (
     ClassifiedDocument,
@@ -67,6 +74,11 @@ from app.features.documents.ingestion.chunking.classification import (
     classify_document,
     establish_contract_boundaries,
     segment_chunks,
+)
+from app.features.documents.ingestion.chunking.fidelity import (
+    BoundaryFidelityInputs,
+    build_fidelity_metrics,
+    fidelity_degradation_warnings,
 )
 from app.features.documents.ingestion.enrichment.legal_metadata import (
     contract_event_dates,
@@ -284,6 +296,8 @@ class DocumentCommandService:
             record: dict[str, Any] | None = status_result.unwrap()
             if record is not None:
                 warnings: list[QualityWarningDTO] = _flatten_warnings(record.get("warnings", []))
+                raw_metadata = record.get("document_metadata")
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                 return Success(
                     DocumentStatusResponse(
                         doc_id=str(object=record["document_id"]),
@@ -295,6 +309,8 @@ class DocumentCommandService:
                         verified_chunk_count=int(record["verified_chunk_count"]),
                         warning_count=len(warnings),
                         warnings=warnings,
+                        graph_relationships=_relationship_state_from_metadata(metadata),
+                        fidelity=_fidelity_metrics_from_metadata(metadata),
                     )
                 )
         if isinstance(status_result, Failure):
@@ -403,7 +419,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             ],
         )
     )
-    extraction_outcome = await _extract_document_knowledge(
+    extraction_outcome, relationship_state = await _extract_document_knowledge(
         runtime=runtime,
         job=job,
         boundaries=boundaries,
@@ -459,6 +475,9 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
                 extraction_outcome,
                 document_version=job.document_version,
             ),
+            # The relationship-phase truth is persisted as soon as it is known,
+            # so a crash during chunking still leaves the record truthful.
+            "graph_relationships": relationship_state.model_dump_for_metadata(),
         },
         structural_tree=parsed.structural_tree,
         extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
@@ -475,6 +494,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
                     "document_id": job.document_id,
                     "extraction_budget": extraction_outcome.budget.model_dump(mode="json"),
                     "knowledge_extraction_failure": str(extraction_outcome.code),
+                    "graph_relationships": relationship_state.model_dump_for_metadata(),
                 },
                 source="graphiti",
             )
@@ -484,6 +504,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
         return Failure(checkpoint_result.failure())
     # Chunking happens only after extraction/status checkpoint.  This preserves
     # the old transactional ordering while keeping each contract isolated.
+    boundary_chunks: list[tuple[ContractBoundary, list[PreparedChunk]]] = []
     for index, (boundary, contract_parsed, contract_classified) in enumerate(contract_parsed_items):
         contract_chunks, warnings = await segment_chunks(
             parsed=contract_parsed,
@@ -496,7 +517,9 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
                 classified=contract_classified,
                 metadata=legal_preparation.metadata,
             )
-        prepared_chunks.extend(_annotate_contract_chunks(contract_chunks, boundary))
+        annotated = _annotate_contract_chunks(contract_chunks, boundary)
+        prepared_chunks.extend(annotated)
+        boundary_chunks.append((boundary, annotated))
         segmentation_warnings.extend(warnings)
 
     # Chunk identity remains unique within the document while contract_index
@@ -510,12 +533,29 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
         )
         for index, chunk in enumerate(prepared_chunks)
     ]
+    # Fidelity is measured where the information exists: after chunk annotation
+    # (source spans) and before embedding (so degradation warnings land on the
+    # persisted chunk warnings).  Threshold breaches degrade the terminal state.
+    fidelity_metrics = build_fidelity_metrics(
+        parsed=parsed,
+        boundaries=[
+            BoundaryFidelityInputs(markdown=boundary.markdown, chunks=tuple(chunks))
+            for boundary, chunks in boundary_chunks
+        ],
+        chunk_count=len(prepared_chunks),
+        document_kind=classified.document_kind,
+    )
+    fidelity_warnings = fidelity_degradation_warnings(fidelity_metrics)
     chunk_rows = await _embed_chunks(
         user_id=job.user_id,
         document_id=job.document_id,
         chunks=prepared_chunks,
         extra_warnings=(
-            boundary_result.warnings + segmentation_warnings + classified.warnings + legal.warnings
+            boundary_result.warnings
+            + segmentation_warnings
+            + classified.warnings
+            + legal.warnings
+            + fidelity_warnings
         ),
         extraction_outcome=extraction_outcome,
         document_version=job.document_version,
@@ -568,6 +608,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             "completed"
             if verified_count == len(chunk_rows)
             and not isinstance(extraction_outcome, ExtractionFailed)
+            and not fidelity_warnings
             else "completed_with_warnings"
         )
     else:
@@ -576,6 +617,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             if not segmentation_warnings
             and not classified.warnings
             and not isinstance(extraction_outcome, ExtractionFailed)
+            and not fidelity_warnings
             else "completed_with_warnings"
         )
         verified_count = 0
@@ -589,7 +631,12 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
                 "document_version": job.document_version,
                 "attempt": job.attempt,
                 "task_id": job.task_id or "",
-            }
+            },
+            # Re-assert the relationship truth (the earlier write already
+            # carried it; the shallow jsonb merge replaces the same key) and
+            # persist the measured fidelity metrics with their thresholds.
+            "graph_relationships": relationship_state.model_dump_for_metadata(),
+            "fidelity": fidelity_metrics.model_dump(mode="json"),
         },
     )
     if isinstance(status_result, Failure):
@@ -616,8 +663,42 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             "chunk_count": len(chunk_rows),
             "verified_chunk_count": verified_count,
             "document_kind": classified.document_kind,
+            "graph_relationships_status": str(object=relationship_state.status.value),
+            "fidelity_warning_count": len(fidelity_warnings),
         }
     )
+
+
+def _relationship_state_from_metadata(
+    metadata: dict[str, Any],
+) -> GraphRelationshipsState | None:
+    """Decode the persisted relationship-phase truth, or None when absent/invalid."""
+    raw = metadata.get("graph_relationships")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return GraphRelationshipsState.model_validate(raw)
+    except ValueError:
+        logger.bind(operation="decode_graph_relationships_metadata").warning(
+            "document_metadata_graph_relationships_invalid"
+        )
+        return None
+
+
+def _fidelity_metrics_from_metadata(
+    metadata: dict[str, Any],
+) -> IngestionFidelityMetrics | None:
+    """Decode persisted fidelity metrics, or None when absent/invalid."""
+    raw = metadata.get("fidelity")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return IngestionFidelityMetrics.model_validate(raw)
+    except ValueError:
+        logger.bind(operation="decode_fidelity_metadata").warning(
+            "document_metadata_fidelity_invalid"
+        )
+        return None
 
 
 async def _checkpoint_ingestion_transaction(runtime: IngestionRuntime) -> DocumentResult[None]:
@@ -799,8 +880,7 @@ async def run_document_ingestion_task(
     lock_key = _document_ingestion_lock_key(tenant_id, document_id, document_version)
     async with engine.connect() as lock_connection:
         acquired = await lock_connection.scalar(
-            text("SELECT pg_try_advisory_lock(:lock_key)"),
-            {"lock_key": lock_key},
+            select(func.pg_try_advisory_lock(lock_key)),
         )
         await lock_connection.commit()
         if not acquired:
@@ -873,8 +953,7 @@ async def _release_document_ingestion_lock(
     """Release a session lock or discard its connection without masking failures."""
     try:
         released = await connection.scalar(
-            text("SELECT pg_advisory_unlock(:lock_key)"),
-            {"lock_key": lock_key},
+            select(func.pg_advisory_unlock(lock_key)),
         )
         await connection.commit()
         if not released:
@@ -993,7 +1072,7 @@ def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> 
     )
 
 
-async def _extract_document_knowledge(
+async def _extract_document_knowledge(  # noqa: PLR0914 — one extraction pass keeps all phase locals together
     *,
     runtime: IngestionRuntime,
     job: IngestionJob,
@@ -1001,11 +1080,24 @@ async def _extract_document_knowledge(
     boundary_ambiguous: bool = False,
     jurisdiction: str | None,
     document_type: str,
-) -> ExtractionSucceeded | ExtractionFailed:
+) -> tuple[ExtractionSucceeded | ExtractionFailed, GraphRelationshipsState]:
+    """Run pass-1 knowledge extraction plus the graph-write phase.
+
+    Returns the extraction outcome together with the typed aggregate
+    relationship-phase state, so callers can persist "not attempted" /
+    "skipped (not implemented)" / "succeeded" / "failed" as distinct truths
+    instead of an ``all([])`` success.
+    """
     if boundary_ambiguous:
-        return ExtractionFailed(
-            code=ExtractionFailureCode.BOUNDARY_AMBIGUOUS,
-            message="Contract boundaries are ambiguous; legal extraction was skipped",
+        return (
+            ExtractionFailed(
+                code=ExtractionFailureCode.BOUNDARY_AMBIGUOUS,
+                message="Contract boundaries are ambiguous; legal extraction was skipped",
+            ),
+            GraphRelationshipsState(
+                status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                reason="boundary_ambiguous_extraction_skipped",
+            ),
         )
     settings = get_settings()
     budget = ExtractionBudget(
@@ -1076,10 +1168,16 @@ async def _extract_document_knowledge(
                         if isinstance(raw_classes, list)
                         else ()
                     )
-                    return ExtractionSucceeded(
-                        documents=(),
-                        budget=budget,
-                        extraction_classes=classes,
+                    return (
+                        ExtractionSucceeded(
+                            documents=(),
+                            budget=budget,
+                            extraction_classes=classes,
+                        ),
+                        GraphRelationshipsState(
+                            status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                            reason="knowledge_extraction_checkpoint_reused",
+                        ),
                     )
     # A retry starts a fresh wall-clock window, but its ledger is cumulative.
     # Keeping this transition here (once per ingestion attempt, before the
@@ -1088,12 +1186,19 @@ async def _extract_document_knowledge(
     # every retry immediately.
     budget = budget.model_copy(update={"started_at": datetime.now(tz=UTC)})
     if runtime.extraction is None:
-        return ExtractionFailed(
-            code=ExtractionFailureCode.UNCONFIGURED,
-            message="LangExtract provider is not configured",
-            budget=budget,
+        return (
+            ExtractionFailed(
+                code=ExtractionFailureCode.UNCONFIGURED,
+                message="LangExtract provider is not configured",
+                budget=budget,
+            ),
+            GraphRelationshipsState(
+                status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                reason="extraction_unconfigured",
+            ),
         )
     documents: list[object] = []
+    relationship_states: list[GraphRelationshipsState] = []
     for boundary in boundaries:
         outcome = await runtime.extraction.extract(
             ExtractionRequest(
@@ -1110,10 +1215,16 @@ async def _extract_document_knowledge(
             )
         )
         if isinstance(outcome, ExtractionFailed):
-            return outcome
+            return (
+                outcome,
+                GraphRelationshipsState(
+                    status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                    reason=f"knowledge_extraction_failed:{outcome.code.value}",
+                ),
+            )
         budget = outcome.budget
         documents.extend(outcome.documents)
-        graph_write_succeeded = await _write_extracted_clause_episodes(
+        phase_result = await _write_extracted_clause_episodes(
             outcome=outcome,
             graph_writer=runtime.graph_writer,
             idempotency=runtime.idempotency,
@@ -1125,13 +1236,20 @@ async def _extract_document_knowledge(
             jurisdiction=jurisdiction,
             document_type=document_type,
         )
-        if not graph_write_succeeded:
-            return ExtractionFailed(
-                code=ExtractionFailureCode.GRAPH_WRITE_ERROR,
-                message="One or more extracted clauses could not be persisted to Graphiti",
-                budget=budget,
+        relationship_states.append(phase_result.relationships)
+        if not phase_result.success:
+            return (
+                ExtractionFailed(
+                    code=ExtractionFailureCode.GRAPH_WRITE_ERROR,
+                    message="One or more extracted clauses could not be persisted to Graphiti",
+                    budget=budget,
+                ),
+                aggregate_relationship_states(relationship_states),
             )
-    return ExtractionSucceeded(documents=tuple(documents), budget=budget)
+    return (
+        ExtractionSucceeded(documents=tuple(documents), budget=budget),
+        aggregate_relationship_states(relationship_states),
+    )
 
 
 async def _write_extracted_clause_episodes(
@@ -1146,8 +1264,15 @@ async def _write_extracted_clause_episodes(
     user_id: str,
     jurisdiction: str | None,
     document_type: str,
-) -> bool:
-    """Map grounded clause extractions into the existing canonical writer."""
+) -> GraphWritePhaseResult:
+    """Map grounded clause extractions into the existing canonical writer.
+
+    Success is computed over clause writes only.  The relationship pass does not
+    exist yet (ingestion passes an empty relationship list), so when clause
+    writes ran, the phase reports the typed
+    ``skipped_not_implemented``/``not_attempted`` relationship state — never a
+    vacuous ``all([])`` success over an empty result list.
+    """
     segments: list[ClauseSegment] = []
     valid_types = {member.value: member for member in ClauseType}
     for document in outcome.documents:
@@ -1178,15 +1303,35 @@ async def _write_extracted_clause_episodes(
                 )
             )
     if not segments:
-        return True
+        return GraphWritePhaseResult(
+            success=True,
+            relationships=GraphRelationshipsState(
+                status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                reason="no_clause_segments_extracted",
+            ),
+        )
     if graph_writer is None and idempotency is None:
-        return True
+        return GraphWritePhaseResult(
+            success=True,
+            clause_writes_attempted=0,
+            clause_writes_succeeded=0,
+            relationships=GraphRelationshipsState(
+                status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                reason="graph_writer_unconfigured",
+            ),
+        )
     if graph_writer is None or idempotency is None:
         logger.bind(
             graph_writer_configured=graph_writer is not None,
             idempotency_configured=idempotency is not None,
         ).error("graph_clause_writer_dependencies_incomplete")
-        return False
+        return GraphWritePhaseResult(
+            success=False,
+            relationships=GraphRelationshipsState(
+                status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                reason="graph_writer_dependencies_incomplete",
+            ),
+        )
     clause_results, relationship_results = await write_clause_episodes_to_graphiti(
         segments,
         [],
@@ -1203,7 +1348,25 @@ async def _write_extracted_clause_episodes(
         graphiti_service=cast("ClauseWriterService", graph_writer),
         idempotency=cast("IdempotencyGuard", idempotency),
     )
-    return all(result.success for result in [*clause_results, *relationship_results])
+    # The relationship list is empty because grounded relationship extraction is
+    # not implemented.  Report that as its own typed state with a distinct
+    # structured event so dashboards count the skip instead of reading success.
+    logger.bind(
+        document_id=document_id,
+        relationships_attempted=len(relationship_results),
+        reason="relationship_extraction_not_implemented",
+    ).warning("graph_relationships_skipped")
+    return GraphWritePhaseResult(
+        success=all(result.success for result in clause_results),
+        clause_writes_attempted=len(clause_results),
+        clause_writes_succeeded=sum(1 for result in clause_results if result.success),
+        relationships=GraphRelationshipsState(
+            status=GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED,
+            reason="relationship_extraction_not_implemented",
+            relationships_attempted=len(relationship_results),
+            relationships_succeeded=sum(1 for result in relationship_results if result.success),
+        ),
+    )
 
 
 async def _verify_legal_chunks(

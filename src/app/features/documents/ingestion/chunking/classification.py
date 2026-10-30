@@ -67,6 +67,14 @@ class ParsedDocument(BaseModel):
     page_count: int
     tables: list[str] = Field(default_factory=list)
     structural_tree: dict[str, object] = Field(default_factory=dict)
+    # OCR fidelity signals from the docling conversion result.  ``None`` means
+    # the parser could not measure the signal (non-PDF formats, test doubles,
+    # or a converter that reported no confidence) — never a fabricated value.
+    ocr_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Fraction of pages that contributed at least one text item.  A scanned
+    # page with no text layer contributes nothing, so this doubles as a
+    # text-layer coverage measure.
+    ocr_source_coverage_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ContractBoundary(BaseModel):

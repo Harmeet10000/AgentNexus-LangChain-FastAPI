@@ -101,6 +101,9 @@ jobs:
       - name: Check corpus binaries against redistribution policy
         run: uv run python scripts/check_corpus_binaries.py evals/corpus
 
+      - name: Enforce queued-ingestion fidelity and injection gate
+        run: uv run pytest evals/ingestion -q
+
       - name: Type check with ty
         run: uv run ty check src/
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from io import BytesIO
 from typing import TYPE_CHECKING
 
@@ -78,6 +79,7 @@ async def parse_document(
         if output_size > max_output_bytes:
             message = f"extracted output is {output_size} bytes; limit is {max_output_bytes}"
             raise DocumentExtractionBudgetError(message)
+        ocr_confidence, ocr_coverage = _ocr_fidelity_signals(result, document)
         return ParsedDocument(
             title=_extract_title(markdown, filename),
             markdown=markdown,
@@ -89,6 +91,8 @@ async def parse_document(
             # and prose containing it would defeat the guard.)
             tables=table_markdown(document),
             structural_tree=_serialize_structural_tree(document),
+            ocr_confidence=ocr_confidence,
+            ocr_source_coverage_ratio=ocr_coverage,
         )
 
     try:
@@ -97,6 +101,44 @@ async def parse_document(
     except TimeoutError as exc:
         message = f"document extraction exceeded {extraction_timeout_seconds:g}s wall-clock budget"
         raise DocumentExtractionBudgetError(message) from exc
+
+
+def _ocr_fidelity_signals(
+    result: ConversionResult, document: DoclingDocument
+) -> tuple[float | None, float | None]:
+    """Extract OCR confidence and text-layer coverage from a conversion result.
+
+    Both signals are ``None`` (explicitly unavailable) unless the converter
+    actually measured them.  Docling only populates page confidence scores on
+    pipelines that run OCR/layout models (PDF); text-format conversions report
+    NaN scores, which must surface as unavailable rather than a fabricated 0.0
+    or 1.0.  Text-layer coverage is measured independently from the document
+    structure: the fraction of pages that contributed at least one text item.
+    """
+    confidence: float | None = None
+    try:
+        report = result.confidence
+        raw_scores = [page.ocr_score for page in report.pages.values()]
+        finite_scores = [
+            float(score)
+            for score in raw_scores
+            if score is not None and math.isfinite(float(score))
+        ]
+        if finite_scores:
+            confidence = min(1.0, max(0.0, sum(finite_scores) / len(finite_scores)))
+    except AttributeError:
+        confidence = None
+    pages_with_text: set[object] = set()
+    for item in getattr(document, "texts", None) or []:
+        pages_with_text.update(prov.page_no for prov in (getattr(item, "prov", None) or []))
+    page_count = len(getattr(document, "pages", []) or [])
+    coverage: float | None = None
+    if page_count > 0:
+        relevant_pages = {
+            page for page in pages_with_text if isinstance(page, int) and 1 <= page <= page_count
+        }
+        coverage = len(relevant_pages) / page_count
+    return confidence, coverage
 
 
 def _serialize_structural_tree(document: DoclingDocument) -> dict[str, object]:
