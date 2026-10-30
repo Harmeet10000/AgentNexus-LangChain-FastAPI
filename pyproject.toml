@@ -456,6 +456,24 @@ section-order = [
     "BLE001",  # blind-except: asserting on error paths
     "PLR0914", # too-many-locals: long scenario tests
 ]
+"evals/ingestion/test_*.py" = [
+    "ANN",     # No type annotations required in tests
+    "D",       # No docstrings required in tests
+    "S101",    # Allow assert statements
+    "PLR2004", # Allow magic values
+    "ARG001",  # Allow unused arguments
+    "ARG002",  # Allow unused method arguments in fakes
+    "E501",    # Allow long lines
+    "PLC0415", # import-outside-top-level: lazy imports are a common test pattern
+    "PLR6301", # no-self-use: fakes implement protocol methods
+    "SLF001",  # Private member access allowed in tests
+    "PLC2701", # import-private-name: testing internals is the point
+    "INP001",  # implicit-namespace-package: evals dirs need not be packages
+]
+"evals/ingestion/conftest.py" = [
+    "INP001",  # implicit-namespace-package: evals dirs need not be packages
+    "PLR6301", # no-self-use: the offline tokenizer stub implements an interface
+]
 "src/alembic/env.py" = [
     "F401", # _MODEL_MODULES side-effect registry
     "PLC0415", # importlib loop at module level
@@ -634,7 +652,7 @@ line-ending = "auto"
 # Inferred from requires-python, but be explicit
 [tool.ty.environment]
 python-version = "3.12"
-root = ["src", "tests"]  # Matches your src layout; tests are type-checked too
+root = ["src", "tests", "evals", "."]  # Matches your src layout; tests are type-checked too
 
 
 
@@ -765,7 +783,7 @@ output-format = "full"
 # runtime-critical rules (unresolved-import/reference, invalid-return-type,
 # await correctness) at full strength.
 [[tool.ty.overrides]]
-include = ["tests/**"]
+include = ["tests/**", "evals/ingestion/**"]
 
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"          # FakeRedis/_FakeApp/dict passed where protocols are declared

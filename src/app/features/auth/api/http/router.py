@@ -7,6 +7,9 @@ from returns.result import Failure
 from app.config import get_settings
 from app.connections.redis import get_redis
 from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.application.personal_tenant_provisioning import (
+    PersonalTenantProvisioner,
+)
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import AuthAuthenticationError, AuthValidationError
 from app.kernel.result import render_result
@@ -336,7 +339,13 @@ async def oauth_callback(
 
     account_store = await get_account_store()
     token_repo = RefreshTokenRepository(await get_redis(request))
-    service = AuthService(account_store, token_repo)
+    session_factory = getattr(request.app.state, "db_session_local", None)
+    provisioner = (
+        PersonalTenantProvisioner(session_factory, account_store)
+        if session_factory is not None
+        else None
+    )
+    service = AuthService(account_store, token_repo, provisioner=provisioner)
 
     ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")

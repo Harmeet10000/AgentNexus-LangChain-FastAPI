@@ -7,6 +7,16 @@ Examples::
     uv run python scripts/migrate_personal_tenants.py --check
     uv run python scripts/migrate_personal_tenants.py --reconcile --limit 250
 
+Mode semantics (deliberately distinct):
+
+- **Full command (no flags)** — the *provisioning* repair: creates missing SQL
+  tenants/memberships for legacy Mongo accounts.  New accounts never need this;
+  registration provisions them synchronously.
+- ``--reconcile`` — **mirror repair only**.  It retries SQL-committed Mongo
+  mirror writes that were recorded as pending and never creates a missing
+  tenant or membership.  An account with no SQL membership is not touched and
+  is not reported as provisioned; run the full command to provision it.
+
 The command performs no destructive operation.  A non-personal existing
 ``tenant_id`` is reported as a conflict and skipped for manual resolution.
 """
@@ -22,12 +32,14 @@ from app.config import get_settings
 from app.connections.mongodb import close_mongo_client, create_mongo_client
 from app.connections.postgres import close_db_engine, init_db
 from app.features.auth.adapters.persistence.mongodb.user_store import BeanieAuthAccountStore
-from app.features.auth.domain.user import User
+from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
+    TenantMembershipService,
+)
 from app.features.auth.application.tenancy_migration import (
     PersonalTenantMigration,
     check_tenant_readiness,
 )
-from app.features.auth.adapters.persistence.postgres.tenancy_repository import TenantMembershipService
+from app.features.auth.domain.user import User
 
 
 async def _run(*, dry_run: bool, check: bool, reconcile: bool, limit: int) -> dict[str, object]:
@@ -44,7 +56,9 @@ async def _run(*, dry_run: bool, check: bool, reconcile: bool, limit: int) -> di
         if reconcile:
             service = TenantMembershipService(session_factory, BeanieAuthAccountStore())
             reconciliation = await service.reconcile_pending_mirrors(limit=limit)
-            return dict(reconciliation)
+            # Machine-readable proof that reconcile is mirror repair only: it
+            # never provisions missing SQL state.
+            return {"mode": "mirror_repair_only", **dict(reconciliation)}
         report = await PersonalTenantMigration(session_factory, dry_run=dry_run).run()
         return report.as_dict()
     finally:
@@ -68,7 +82,11 @@ def main() -> None:
     mode.add_argument(
         "--reconcile",
         action="store_true",
-        help="retry SQL-committed Mongo mirror writes recorded as pending",
+        help=(
+            "mirror repair only: retry SQL-committed Mongo mirror writes recorded "
+            "as pending; does NOT create missing SQL tenants/memberships (run "
+            "without --reconcile for that)"
+        ),
     )
     parser.add_argument(
         "--limit",

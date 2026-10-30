@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from returns.result import Success
+from sqlalchemy.dialects import postgresql
 
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     _phrase_like_pattern,
@@ -36,18 +37,15 @@ def test_phrase_pattern_wraps_in_contains() -> None:
 
 
 class _CapturingSession:
-    """Fake session: records the statement and params, returns canned rows."""
+    """Fake session: records executed statements and params, returns canned rows."""
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
-        self.statements: list[str] = []
+        self.statements: list[Any] = []
         self.params: list[dict[str, Any]] = []
 
     async def execute(self, statement: Any, params: dict[str, Any] | None = None) -> Any:
-        from sqlalchemy.sql.elements import TextClause
-
-        assert isinstance(statement, TextClause)
-        self.statements.append(str(statement))
+        self.statements.append(statement)
         self.params.append(dict(params or {}))
 
         class _Result:
@@ -96,7 +94,7 @@ async def test_keyword_leg_filters_phrase_with_escaped_pattern() -> None:
 
     assert isinstance(result, Success)
     assert len(session.statements) == 1
-    sql = session.statements[0]
+    sql = str(session.statements[0])
     assert "LIKE CAST(:phrase_pattern AS text) ESCAPE" in sql
     params = session.params[0]
     assert params["phrase_pattern"] == "%100\\% guarantee%"
@@ -142,5 +140,10 @@ async def test_chunk_hydration_reuses_the_escaped_database_phrase_predicate() ->
     )
 
     assert isinstance(result, Success)
-    assert "c.search_text ILIKE CAST(:phrase_pattern AS text) ESCAPE" in session.statements[0]
-    assert session.params[0]["phrase_pattern"] == "%100\\% clause\\_2%"
+    statement = session.statements[0]
+    rendered = str(statement.compile(dialect=postgresql.dialect()))
+    # The escaped pattern rides a bind (never interpolated) and the ESCAPE
+    # clause survives the expression form — the escaped-predicate contract.
+    assert "ILIKE" in rendered
+    assert "ESCAPE" in rendered
+    assert "%100\\% clause\\_2%" in statement.compile().params.values()

@@ -21,12 +21,14 @@ from typing import TYPE_CHECKING, Annotated, Any
 from langchain.tools import ToolRuntime
 from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.tools.base import BaseTool
-from sqlalchemy import text
+from sqlalchemy import String, cast, select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.features.documents.domain.chunk import UnifiedChunk
 from app.kernel.result import add_database_error_note
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
+from app.utils.sql_binds import uuid_any
 
 from .authorization import trusted_tool_context
 
@@ -175,65 +177,31 @@ async def _fetch_statute_section(
     legacy_scope = tenant_id is not None and not allowed_doc_ids and user_id is not None
     if not legacy_scope and not allowed_doc_ids:
         return None
+    # Expression form of the statute point lookup: the unified chunk corpus via
+    # its statute identity attributes, newest applicable year first
+    # (DESC NULLS LAST), exact-equality on instrument_name/section_ref.
+    columns = (
+        cast(UnifiedChunk.id, String),
+        UnifiedChunk.instrument_name,
+        UnifiedChunk.section_ref,
+        UnifiedChunk.content,
+        cast(UnifiedChunk.document_id, String),
+        UnifiedChunk.instrument_year,
+    )
+    base = select(*columns).where(
+        UnifiedChunk.instrument_name == act_name.strip(),
+        UnifiedChunk.section_ref == section_ref.strip(),
+    )
     if legacy_scope:
-        query = text(
-            """
-        SELECT
-            id::text,
-            instrument_name AS act_name,
-            section_ref,
-            content AS body,
-            document_id::text AS document_id,
-            instrument_year AS year
-        FROM chunks
-        WHERE
-            user_id = :user_id
-            AND instrument_name = :act_name
-            AND section_ref = :section_ref
-        ORDER BY instrument_year DESC NULLS LAST
-        LIMIT 1
-        """
-        )
+        query = base.where(UnifiedChunk.user_id == user_id)
     else:
-        query = text(
-            """
-        SELECT
-            id::text,
-            instrument_name AS act_name,
-            section_ref,
-            content AS body,
-            document_id::text AS document_id,
-            instrument_year AS year
-        FROM chunks
-        WHERE
-            tenant_id = :tenant_id
-            AND document_id = ANY(CAST(:allowed_doc_ids AS uuid[]))
-            AND instrument_name = :act_name
-            AND section_ref = :section_ref
-        ORDER BY instrument_year DESC NULLS LAST
-        LIMIT 1
-        """
+        query = base.where(
+            UnifiedChunk.tenant_id == tenant_id,
+            UnifiedChunk.document_id == uuid_any("allowed_doc_ids", allowed_doc_ids or ()),
         )
+    query = query.order_by(UnifiedChunk.instrument_year.desc().nulls_last()).limit(1)
     async with db_engine.connect() as conn:
-        row = (
-            await conn.execute(
-                query,
-                (
-                    {
-                        "user_id": user_id,
-                        "act_name": act_name.strip(),
-                        "section_ref": section_ref.strip(),
-                    }
-                    if legacy_scope
-                    else {
-                        "tenant_id": tenant_id,
-                        "allowed_doc_ids": list(allowed_doc_ids or ()),
-                        "act_name": act_name.strip(),
-                        "section_ref": section_ref.strip(),
-                    }
-                ),
-            )
-        ).fetchone()
+        row = (await conn.execute(query)).fetchone()
         if row is None:
             return None
         return {

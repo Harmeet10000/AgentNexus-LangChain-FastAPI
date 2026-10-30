@@ -23,6 +23,7 @@ from app.features.documents.domain.errors import (
     DocumentGraphWriteError,
     DocumentIngestionCheckpointError,
 )
+from app.features.documents.domain.fidelity import GraphRelationshipsStatus
 from app.features.documents.ingestion.chunking.classification import (
     ClassifiedDocument,
     ParsedDocument,
@@ -166,10 +167,7 @@ async def test_extraction_failure_is_visible_as_warning_but_ingestion_completes(
     assert metadata["knowledge_extraction_failure"] == "provider_error"
     assert metadata["knowledge_extraction_message"] == "LangExtract provider failed"
     assert repo.chunk_rows[0]["custom_metadata"]["knowledge_extraction"] == "incomplete"
-    assert (
-        repo.chunk_rows[0]["custom_metadata"]["knowledge_extraction_failure"]
-        == "provider_error"
-    )
+    assert repo.chunk_rows[0]["custom_metadata"]["knowledge_extraction_failure"] == "provider_error"
     assert repo.transaction_checkpoints == 2
 
 
@@ -290,9 +288,16 @@ async def test_clause_extractions_use_canonical_writer_idempotently() -> None:
         "document_type": "contract",
     }
 
-    assert await _write_extracted_clause_episodes(**cast("Any", kwargs)) is True
-    assert await _write_extracted_clause_episodes(**cast("Any", kwargs)) is True
+    first = await _write_extracted_clause_episodes(**cast("Any", kwargs))
+    second = await _write_extracted_clause_episodes(**cast("Any", kwargs))
 
+    assert first.success is True
+    assert second.success is True
+    # The relationship pass is not implemented yet; the phase must say so
+    # explicitly instead of folding an empty result list into success.
+    assert first.relationships.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
+    assert first.relationships.reason == "relationship_extraction_not_implemented"
+    assert first.relationships.relationships_attempted == 0
     assert writer.calls == 1
 
 
@@ -330,7 +335,7 @@ async def test_clause_write_failure_is_reported_to_ingestion() -> None:
         document_type="contract",
     )
 
-    assert result is False
+    assert result.success is False
 
 
 async def test_durable_idempotency_failure_is_reported_after_graph_write() -> None:
@@ -368,7 +373,7 @@ async def test_durable_idempotency_failure_is_reported_after_graph_write() -> No
         document_type="contract",
     )
 
-    assert result is False
+    assert result.success is False
 
 
 async def test_durable_idempotency_read_failure_is_reported_before_graph_write() -> None:
@@ -410,7 +415,7 @@ async def test_durable_idempotency_read_failure_is_reported_before_graph_write()
         document_type="contract",
     )
 
-    assert result is False
+    assert result.success is False
     assert writer.calls == 0
 
 
@@ -424,27 +429,26 @@ async def test_partially_configured_graph_writer_dependencies_fail_closed() -> N
         documents=(lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
     )
 
-    assert (
-        await _write_extracted_clause_episodes(
-            outcome=outcome,
-            graph_writer=object(),
-            idempotency=None,
-            document_id="doc-1",
-            user_id="tenant-1",
-            jurisdiction="India",
-            document_type="contract",
-        )
-        is False
+    partial_writer = await _write_extracted_clause_episodes(
+        outcome=outcome,
+        graph_writer=object(),
+        idempotency=None,
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
     )
-    assert (
-        await _write_extracted_clause_episodes(
-            outcome=outcome,
-            graph_writer=None,
-            idempotency=object(),
-            document_id="doc-1",
-            user_id="tenant-1",
-            jurisdiction="India",
-            document_type="contract",
-        )
-        is False
+    assert partial_writer.success is False
+    assert partial_writer.relationships.status is GraphRelationshipsStatus.NOT_ATTEMPTED
+
+    partial_idempotency = await _write_extracted_clause_episodes(
+        outcome=outcome,
+        graph_writer=None,
+        idempotency=object(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
     )
+    assert partial_idempotency.success is False
+    assert partial_idempotency.relationships.status is GraphRelationshipsStatus.NOT_ATTEMPTED

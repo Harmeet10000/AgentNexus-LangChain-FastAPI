@@ -93,6 +93,10 @@ class DocumentIngestTerminalPayload(CeleryTaskPayload):
     task_id: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+    # Server-derived graph-write truth (a GraphRelationshipsStatus value).
+    # Optional so legacy producers keep the original shape; the document
+    # record remains the authoritative, richer status surface.
+    graph_relationships_status: str | None = None
 
 
 class CrawlerJobPayload(CeleryTaskPayload):

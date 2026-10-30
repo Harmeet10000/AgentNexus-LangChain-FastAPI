@@ -456,6 +456,55 @@
         }
       }
     },
+    "/api/v1/auth/oauth/{provider}/link/authorize": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Link Authorize",
+        "description": "Start linking a provider to the already authenticated account.",
+        "operationId": "oauth_link_authorize_api_v1_auth_oauth__provider__link_authorize_get",
+        "deprecated": true,
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_OAuthAuthorizeResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/oauth/{provider}/callback": {
       "get": {
         "tags": [
@@ -529,6 +578,160 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/link/{action_token}": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Link Preview",
+        "operationId": "oauth_link_preview_api_v1_auth_oauth_link__action_token__get",
+        "deprecated": true,
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "action_token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_OAuthLinkConfirmationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/link/{action_token}/confirm": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Link Confirm",
+        "operationId": "oauth_link_confirm_api_v1_auth_oauth_link__action_token__confirm_post",
+        "deprecated": true,
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "action_token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthLinkConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_NoneType_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/{provider}/link": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Unlink",
+        "operationId": "oauth_unlink_api_v1_auth_oauth__provider__link_delete",
+        "deprecated": true,
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_NoneType_"
+                }
               }
             }
           },
@@ -677,6 +880,137 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/APIResponse_list_str__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tenants/{tenant_id}/members/{user_id}/legal-roles": {
+      "patch": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Update Tenant Member Roles",
+        "operationId": "update_tenant_member_roles_api_v1_tenants__tenant_id__members__user_id__legal_roles_patch",
+        "deprecated": true,
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTenantMembershipRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_object_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tenants/{tenant_id}/settings/self-review": {
+      "patch": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Update Tenant Self Review",
+        "operationId": "update_tenant_self_review_api_v1_tenants__tenant_id__settings_self_review_patch",
+        "deprecated": true,
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSelfReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_object_"
                 }
               }
             }
@@ -1223,8 +1557,8 @@
         "tags": [
           "ingestion"
         ],
-        "summary": "Upload a legal document for ingestion. Returns doc_id for use with the Agent Saul WS.",
-        "description": "Upload flow:\n  1. Read raw bytes from uploaded file.\n  2. Run IngestionGraph (parse \u2192 schema \u2192 segment \u2192 contextualize \u2192 store).\n  4. Return doc_id for use in WS /agent-saul/ws/{thread_id}.",
+        "summary": "Deprecated: upload a legal document",
+        "description": "Deprecated compatibility endpoint. Use POST /documents/upload instead. The response includes Deprecation, Sunset, and successor-version Link headers.",
         "operationId": "upload_document_api_v1_ingestion_documents_upload_post",
         "deprecated": true,
         "security": [
@@ -2619,6 +2953,54 @@
         }
       }
     },
+    "/api/v2/auth/oauth/{provider}/link/authorize": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Link Authorize",
+        "description": "Start linking a provider to the already authenticated account.",
+        "operationId": "oauth_link_authorize_api_v2_auth_oauth__provider__link_authorize_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_OAuthAuthorizeResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/auth/oauth/{provider}/callback": {
       "get": {
         "tags": [
@@ -2691,6 +3073,157 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/oauth/link/{action_token}": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Link Preview",
+        "operationId": "oauth_link_preview_api_v2_auth_oauth_link__action_token__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "action_token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_OAuthLinkConfirmationResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/oauth/link/{action_token}/confirm": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Link Confirm",
+        "operationId": "oauth_link_confirm_api_v2_auth_oauth_link__action_token__confirm_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "action_token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthLinkConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_NoneType_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/oauth/{provider}/link": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Oauth Unlink",
+        "operationId": "oauth_unlink_api_v2_auth_oauth__provider__link_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_NoneType_"
+                }
               }
             }
           },
@@ -2835,6 +3368,135 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/APIResponse_list_str__"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant_id}/members/{user_id}/legal-roles": {
+      "patch": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Update Tenant Member Roles",
+        "operationId": "update_tenant_member_roles_api_v2_tenants__tenant_id__members__user_id__legal_roles_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTenantMembershipRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_object_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant_id}/settings/self-review": {
+      "patch": {
+        "tags": [
+          "tenants"
+        ],
+        "summary": "Update Tenant Self Review",
+        "operationId": "update_tenant_self_review_api_v2_tenants__tenant_id__settings_self_review_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSelfReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_object_"
                 }
               }
             }
@@ -3369,9 +4031,10 @@
         "tags": [
           "ingestion"
         ],
-        "summary": "Upload a legal document for ingestion. Returns doc_id for use with the Agent Saul WS.",
-        "description": "Upload flow:\n  1. Read raw bytes from uploaded file.\n  2. Run IngestionGraph (parse \u2192 schema \u2192 segment \u2192 contextualize \u2192 store).\n  4. Return doc_id for use in WS /agent-saul/ws/{thread_id}.",
+        "summary": "Deprecated: upload a legal document",
+        "description": "Deprecated compatibility endpoint. Use POST /documents/upload instead. The response includes Deprecation, Sunset, and successor-version Link headers.",
         "operationId": "upload_document_api_v2_ingestion_documents_upload_post",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []
@@ -6967,6 +7630,54 @@
         ],
         "title": "APIResponse[OAuthAuthorizeResponse]"
       },
+      "APIResponse_OAuthLinkConfirmationResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "title": "Statuscode",
+            "default": 200
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestMeta"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OAuthLinkConfirmationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "title": "APIResponse[OAuthLinkConfirmationResponse]"
+      },
       "APIResponse_PaginatedData_UserAdminResponse__": {
         "properties": {
           "success": {
@@ -8049,6 +8760,53 @@
         ],
         "title": "APIResponse[list[str]]"
       },
+      "APIResponse_object_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "title": "Statuscode",
+            "default": 200
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestMeta"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "title": "APIResponse[object]"
+      },
       "APIResponse_tuple_str__str__": {
         "properties": {
           "success": {
@@ -8297,6 +9055,74 @@
           "new_password"
         ],
         "title": "ChangePasswordRequest"
+      },
+      "ChunkPlausibilityState": {
+        "properties": {
+          "verdict": {
+            "$ref": "#/components/schemas/ChunkPlausibilityVerdict"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Chunk Count"
+          },
+          "expected_chunk_count_lower": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Chunk Count Lower"
+          },
+          "expected_chunk_count_upper": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Chunk Count Upper"
+          },
+          "token_count_basis": {
+            "$ref": "#/components/schemas/TokenCountBasis",
+            "default": "unavailable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "verdict",
+          "chunk_count"
+        ],
+        "title": "ChunkPlausibilityState",
+        "description": "Chunk-count plausibility: zero-chunk and out-of-bounds detection."
+      },
+      "ChunkPlausibilityVerdict": {
+        "type": "string",
+        "enum": [
+          "plausible",
+          "implausible",
+          "unavailable"
+        ],
+        "title": "ChunkPlausibilityVerdict"
       },
       "ComponentCheck": {
         "properties": {
@@ -9005,8 +9831,33 @@
       "CreateSessionRequest": {
         "properties": {
           "doc_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Doc Id"
+          },
+          "allowed_doc_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Doc Ids"
+          },
+          "primary_doc_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Doc Id"
           },
           "user_query": {
             "type": "string",
@@ -9025,7 +9876,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "doc_id",
           "user_query"
         ],
         "title": "CreateSessionRequest",
@@ -9403,6 +10253,33 @@
             "type": "string",
             "title": "Document Id"
           },
+          "document_version": {
+            "type": "integer",
+            "title": "Document Version",
+            "default": 1
+          },
+          "contract_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Index"
+          },
+          "pipeline_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipeline Version"
+          },
           "title": {
             "type": "string",
             "title": "Title"
@@ -9446,6 +10323,22 @@
             "type": "boolean",
             "title": "Graphiti Verified",
             "default": false
+          },
+          "graph_indexed": {
+            "type": "boolean",
+            "title": "Graph Indexed",
+            "default": false
+          },
+          "graph_indexed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Indexed At"
           },
           "score": {
             "type": "number",
@@ -9505,12 +10398,66 @@
             "type": "integer",
             "title": "Warning Count"
           },
+          "document_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Version"
+          },
+          "pipeline_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipeline Version"
+          },
+          "graph_indexed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Indexed At"
+          },
           "warnings": {
             "items": {
               "$ref": "#/components/schemas/QualityWarningDTO"
             },
             "type": "array",
             "title": "Warnings"
+          },
+          "graph_relationships": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GraphRelationshipsState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fidelity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngestionFidelityMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -9605,6 +10552,91 @@
         "title": "ErrorDetail",
         "description": "Normalized error payload for non-success responses."
       },
+      "EvidenceCoverage": {
+        "properties": {
+          "documents_requested": {
+            "type": "integer",
+            "title": "Documents Requested",
+            "default": 0
+          },
+          "documents_ready": {
+            "type": "integer",
+            "title": "Documents Ready",
+            "default": 0
+          },
+          "documents_with_warnings": {
+            "type": "integer",
+            "title": "Documents With Warnings",
+            "default": 0
+          },
+          "documents_failed": {
+            "type": "integer",
+            "title": "Documents Failed",
+            "default": 0
+          },
+          "documents_not_ready": {
+            "type": "integer",
+            "title": "Documents Not Ready",
+            "default": 0
+          },
+          "graph_indexed_documents": {
+            "type": "integer",
+            "title": "Graph Indexed Documents",
+            "default": 0
+          },
+          "graph_unavailable_documents": {
+            "type": "integer",
+            "title": "Graph Unavailable Documents",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "EvidenceCoverage",
+        "description": "Coverage metadata that prevents an empty result being mistaken for proof."
+      },
+      "FidelityThresholds": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "const": "fidelity_thresholds_v1",
+            "title": "Version",
+            "default": "fidelity_thresholds_v1"
+          },
+          "source_coverage_min": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Source Coverage Min",
+            "default": 0.0
+          },
+          "table_loss_max": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Table Loss Max",
+            "default": 0.0
+          },
+          "section_loss_max": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Section Loss Max",
+            "default": 0.5
+          },
+          "ocr_confidence_min": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ocr Confidence Min",
+            "default": 0.0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FidelityThresholds",
+        "description": "Versioned degradation thresholds applied to fidelity metrics.\n\nDefaults follow the plan's verification-before-enforcement discipline:\nstructural loss (dropped tables) and chunk-count implausibility are enforced\nimmediately because their correct value is unambiguous, while source\ncoverage and OCR confidence stay report-only (0.0 = disabled) until the\nqueued-ingestion baseline establishes real variance on production-shaped\ndocuments.  The threshold set actually used is persisted alongside the\nmetrics so any gate result can be replayed."
+      },
       "ForgotPasswordRequest": {
         "properties": {
           "email": {
@@ -9619,6 +10651,54 @@
           "email"
         ],
         "title": "ForgotPasswordRequest"
+      },
+      "GraphRelationshipsState": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/GraphRelationshipsStatus"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "relationships_attempted": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Relationships Attempted",
+            "default": 0
+          },
+          "relationships_succeeded": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Relationships Succeeded",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "GraphRelationshipsState",
+        "description": "Persisted truth about the relationship-extraction/write phase.\n\n``SKIPPED_NOT_IMPLEMENTED`` is the state the live pipeline reports while the\ngrounded second extraction pass does not exist (the writer accepts\nrelationships, but ingestion passes an empty list).  It is deliberately a\ndifferent state from ``NOT_ATTEMPTED`` (no clause segments were extracted at\nall) and from ``SUCCEEDED`` (extraction ran and produced edges)."
+      },
+      "GraphRelationshipsStatus": {
+        "type": "string",
+        "enum": [
+          "not_attempted",
+          "skipped_not_implemented",
+          "succeeded",
+          "failed"
+        ],
+        "title": "GraphRelationshipsStatus",
+        "description": "Distinct lifecycle states for the graph relationship-write phase."
       },
       "HTTPValidationError": {
         "properties": {
@@ -9778,6 +10858,160 @@
           "impersonatingUserId"
         ],
         "title": "ImpersonateResponse"
+      },
+      "IngestionFidelityMetrics": {
+        "properties": {
+          "fidelity_schema_version": {
+            "type": "string",
+            "const": "fidelity_v1",
+            "title": "Fidelity Schema Version",
+            "default": "fidelity_v1"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/FidelityThresholds"
+          },
+          "source_coverage_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Coverage Ratio"
+          },
+          "source_order_preserved": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Order Preserved"
+          },
+          "chunks_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Chunks Total",
+            "default": 0
+          },
+          "chunks_with_source_span": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Chunks With Source Span",
+            "default": 0
+          },
+          "chunks_out_of_order": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Chunks Out Of Order",
+            "default": 0
+          },
+          "ocr_confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Confidence"
+          },
+          "ocr_source_coverage_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Source Coverage Ratio"
+          },
+          "ocr_status": {
+            "type": "string",
+            "enum": [
+              "measured",
+              "unavailable"
+            ],
+            "title": "Ocr Status",
+            "default": "unavailable"
+          },
+          "tables_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tables Total",
+            "default": 0
+          },
+          "tables_preserved": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Tables Preserved",
+            "default": 0
+          },
+          "table_loss_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Loss Ratio"
+          },
+          "sections_total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sections Total",
+            "default": 0
+          },
+          "sections_preserved": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sections Preserved",
+            "default": 0
+          },
+          "section_loss_ratio": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Loss Ratio"
+          },
+          "chunk_plausibility": {
+            "$ref": "#/components/schemas/ChunkPlausibilityState"
+          },
+          "unavailable_metrics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unavailable Metrics"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "IngestionFidelityMetrics",
+        "description": "Measured source fidelity for one ingested document.\n\n``None`` always means \"could not be computed\" and is mirrored in\n``unavailable_metrics`` \u2014 never a fabricated value.  Fields are document\nlevel; per-boundary measurements are aggregated before this model is built."
       },
       "InvoiceLineItemDTO": {
         "properties": {
@@ -10024,6 +11258,61 @@
           "claim": {
             "type": "string",
             "title": "Claim"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "document_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Version"
+          },
+          "contract_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Index"
+          },
+          "pipeline_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipeline Version"
+          },
+          "page_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page No"
           }
         },
         "additionalProperties": false,
@@ -10034,6 +11323,16 @@
           "claim"
         ],
         "title": "LegalCitationResponse"
+      },
+      "LegalRole": {
+        "type": "string",
+        "enum": [
+          "analyst",
+          "reviewer",
+          "corpus_admin"
+        ],
+        "title": "LegalRole",
+        "description": "Tenant-scoped legal workflow role."
       },
       "LoginRequest": {
         "properties": {
@@ -10100,6 +11399,65 @@
           "provider"
         ],
         "title": "OAuthAuthorizeResponse"
+      },
+      "OAuthLinkConfirmRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm"
+        ],
+        "title": "OAuthLinkConfirmRequest"
+      },
+      "OAuthLinkConfirmationResponse": {
+        "properties": {
+          "actionToken": {
+            "type": "string",
+            "title": "Actiontoken"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "providerEmail": {
+            "type": "string",
+            "title": "Provideremail"
+          },
+          "providerUserId": {
+            "type": "string",
+            "title": "Provideruserid"
+          },
+          "fullName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fullname"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expiresat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actionToken",
+          "provider",
+          "providerEmail",
+          "providerUserId",
+          "expiresAt"
+        ],
+        "title": "OAuthLinkConfirmationResponse"
       },
       "PaginatedData_UserAdminResponse_": {
         "properties": {
@@ -10744,6 +12102,17 @@
             "type": "string",
             "title": "Document Id"
           },
+          "contract_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Index"
+          },
           "title": {
             "type": "string",
             "title": "Title"
@@ -11069,6 +12438,18 @@
               }
             ],
             "title": "Contract Type"
+          },
+          "contract_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Index"
           },
           "parties": {
             "items": {
@@ -11621,6 +13002,15 @@
         ],
         "title": "SubscriptionStatus"
       },
+      "TokenCountBasis": {
+        "type": "string",
+        "enum": [
+          "tokenizer",
+          "unavailable"
+        ],
+        "title": "TokenCountBasis",
+        "description": "How the chunk-plausibility token total was obtained, or that it wasn't."
+      },
       "TokenResponse": {
         "properties": {
           "accessToken": {
@@ -11685,6 +13075,18 @@
             ],
             "title": "Contract Type"
           },
+          "contract_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Index"
+          },
           "clause_type": {
             "anyOf": [
               {
@@ -11730,6 +13132,18 @@
               "uncertain"
             ],
             "title": "Confidence"
+          },
+          "evidence_policy": {
+            "type": "string",
+            "enum": [
+              "mechanically_verified",
+              "graph_indexed_only"
+            ],
+            "title": "Evidence Policy",
+            "default": "mechanically_verified"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/EvidenceCoverage"
           },
           "warnings": {
             "items": {
@@ -11905,6 +13319,49 @@
         "additionalProperties": false,
         "type": "object",
         "title": "UpdateProfileRequest"
+      },
+      "UpdateSelfReviewRequest": {
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "allowed"
+        ],
+        "title": "UpdateSelfReviewRequest"
+      },
+      "UpdateTenantMembershipRequest": {
+        "properties": {
+          "legal_roles": {
+            "items": {
+              "$ref": "#/components/schemas/LegalRole"
+            },
+            "type": "array",
+            "title": "Legal Roles",
+            "default": [
+              "analyst"
+            ]
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateTenantMembershipRequest"
       },
       "UpdateUserRoleRequest": {
         "properties": {
@@ -12138,7 +13595,7 @@
         "title": "VoidInvoiceDTO",
         "description": "Void an issued invoice, optionally reissuing it."
       },
-      "app__features__documents__dto__DocumentUploadResponse": {
+      "app__features__documents__api__http__dto__DocumentUploadResponse": {
         "properties": {
           "doc_id": {
             "type": "string",
@@ -12218,7 +13675,7 @@
         ],
         "title": "DocumentUploadResponse"
       },
-      "app__features__ingestion__dto__DocumentUploadResponse": {
+      "app__features__documents__ingestion__legacy_dto__DocumentUploadResponse": {
         "properties": {
           "doc_id": {
             "type": "string",
@@ -12290,7 +13747,7 @@
           "data": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/app__features__ingestion__dto__DocumentUploadResponse"
+                "$ref": "#/components/schemas/app__features__documents__ingestion__legacy_dto__DocumentUploadResponse"
               },
               {
                 "type": "null"
@@ -12338,7 +13795,7 @@
           "data": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/app__features__documents__dto__DocumentUploadResponse"
+                "$ref": "#/components/schemas/app__features__documents__api__http__dto__DocumentUploadResponse"
               },
               {
                 "type": "null"

@@ -35,6 +35,9 @@ if TYPE_CHECKING:
         AuthAccountStore,
     )
     from app.features.auth.api.http.dto import LoginRequest, RegisterRequest
+    from app.features.auth.application.personal_tenant_provisioning import (
+        PersonalTenantProvisioner,
+    )
     from app.features.auth.domain.errors import AuthResult
 
 from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
@@ -54,8 +57,10 @@ from app.features.auth.domain.errors import (
     AuthConflictError,
     AuthInfrastructureError,
     AuthNotFoundError,
+    AuthProvisioningPendingError,
     AuthValidationError,
 )
+from app.features.auth.domain.tenancy import LegalRole, ProvisioningState
 from app.security.passwords import (
     generate_token,
     hash_password,
@@ -127,10 +132,16 @@ class AuthService:
         account_store: AuthAccountStore,
         token_repo: RefreshTokenRepository,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
+        *,
+        provisioner: PersonalTenantProvisioner | None = None,
     ) -> None:
         self._account_store = account_store
         self._token_repo = token_repo
         self._session_factory = session_factory
+        # Deep provisioning collaborator owning SQL transactions, idempotency,
+        # lifecycle state and mirror sync.  Production wiring always supplies
+        # it; without it the session-issuance invariant fails closed.
+        self._provisioner = provisioner
 
     @trace_layer("service")
     async def register(self, dto: RegisterRequest) -> AuthResult[UserResponse]:
@@ -140,9 +151,7 @@ class AuthService:
             log_expected_failure(error, operation="email_exists")
             return Failure(error)
         if email_exists_result.unwrap():
-            return Failure(
-                AuthConflictError(message="Email already registered", source="auth_service")
-            )
+            return await self._retry_or_reject_existing_registration(dto)
 
         verification_token = generate_token()
         new_account = NewAuthAccount(
@@ -150,6 +159,9 @@ class AuthService:
             password_hash=hash_password(dto.password),
             full_name=dto.full_name,
             verification_token_hash=hash_token(verification_token),
+            # Registration is not complete until the authoritative SQL personal
+            # tenant and membership exist; the account starts explicitly pending.
+            provisioning_state=ProvisioningState.PENDING,
         )
         create_result = await self._account_store.create(new_account)
         if isinstance(create_result, Failure):
@@ -158,8 +170,100 @@ class AuthService:
             return Failure(error)
         resolved = create_result.unwrap()
 
+        provision_result = await self._provision_personal_tenant(resolved)
+        if isinstance(provision_result, Failure):
+            # The Mongo account exists but stays pending with no usable state
+            # claimed; SQL provisioning retries converge idempotently.
+            return Failure(provision_result.failure())
+
         logger.bind(user_id=resolved.id).info("User registered")
         return Success(_to_user_response(resolved))
+
+    async def _retry_or_reject_existing_registration(
+        self, dto: RegisterRequest
+    ) -> AuthResult[UserResponse]:
+        """Finish a prior registration whose SQL provisioning never completed.
+
+        The email existing is only retryable for an account that is durably
+        pending (the first registration created Mongo state but the
+        authoritative SQL personal tenant/membership never committed) **and**
+        whose ownership the caller just proved with the correct password.
+        Provisioning is idempotent, so the proven retry converges instead of
+        dead-ending the client on ``USER_CONFLICT``.
+
+        Every other shape — completed account, OAuth-only account without a
+        password, wrong password, unknown email race — returns the identical
+        ``USER_CONFLICT`` envelope: the response never reveals that the
+        account exists, is pending, or has no password credential.  A
+        constant-time dummy-hash verify keeps the timing shape uniform.
+        Provisioning failures keep the original behavior: a typed failure,
+        the account stays pending, no session.
+        """
+        existing_result = await self._account_store.find_by_email(dto.email)
+        if isinstance(existing_result, Failure):
+            error = existing_result.failure()
+            log_expected_failure(error, operation="register_existing_lookup")
+            return Failure(error)
+        existing = existing_result.unwrap()
+        # Ownership proof.  ``verify_password`` is called exactly once per
+        # request, against the real credential only when a pending account
+        # with a password exists, and against ``_DUMMY_HASH`` in every other
+        # branch — one constant-time argon2 verify shapes the timing identically
+        # for completed accounts, passwordless (OAuth-only) accounts, wrong
+        # passwords and unknown emails.
+        provable = (
+            existing is not None
+            and existing.provisioning_state == ProvisioningState.PENDING
+            and existing.password_hash is not None
+        )
+        credential_hash = existing.password_hash if provable else _DUMMY_HASH
+        if not verify_password(credential_hash, dto.password):
+            return Failure(
+                AuthConflictError(message="Email already registered", source="auth_service")
+            )
+        if not provable:
+            return Failure(
+                AuthConflictError(message="Email already registered", source="auth_service")
+            )
+
+        # The session-invariant seam already encodes the right retry shape:
+        # membership exists → done; durably pending → one idempotent repair;
+        # anything else → typed conflict.  Registration must not grow a
+        # second, divergent provisioning path.
+        provision_result = await self._ensure_sql_membership_for_session(existing)
+        if isinstance(provision_result, Failure):
+            return Failure(provision_result.failure())
+        logger.bind(user_id=existing.id).info("User registered")
+        return Success(_to_user_response(existing))
+
+    async def _provision_personal_tenant(self, account: AuthAccount) -> AuthResult[None]:
+        """Run the one provisioning seam for a freshly created account.
+
+        Registration/OAuth completion requires the authoritative SQL personal
+        tenant and membership, so a provisioning failure fails the whole
+        account-creation result.  The Mongo account remains in ``pending`` and
+        a later login (or migration) repairs it idempotently.
+        """
+        if self._provisioner is None:
+            logger.bind(user_id=account.id).error(
+                "auth_provisioner_unavailable_postgres_not_configured"
+            )
+            return Failure(
+                AuthInfrastructureError(
+                    message="PostgreSQL is unavailable; account provisioning cannot complete",
+                    details={"operation": "provision_personal_tenant"},
+                    source="auth_service",
+                )
+            )
+        result = await self._provisioner.provision(
+            account.id,
+            display_name=account.full_name or account.email,
+            legal_roles=account.legal_roles or (LegalRole.ANALYST,),
+        )
+        if isinstance(result, Failure):
+            log_expected_failure(result.failure(), operation="provision_personal_tenant")
+            return Failure(result.failure())
+        return Success(None)
 
     @trace_layer("service")
     async def login(
@@ -209,7 +313,7 @@ class AuthService:
                 return Failure(error)
 
         return await self._create_session(
-            user_id=account.id,
+            account=account,
             role=account.role,
             permissions=account.permissions,
             role_revision=account.role_revision,
@@ -248,7 +352,7 @@ class AuthService:
         return Success(None)
 
     @trace_layer("service")
-    async def refresh(  # noqa: PLR0912, PLR0914
+    async def refresh(  # noqa: PLR0912, PLR0914, PLR0915
         self, refresh_token: str
     ) -> AuthResult[TokenResponse]:
         claims = decode_token(refresh_token)
@@ -299,6 +403,11 @@ class AuthService:
                     source="auth_service",
                 )
             )
+
+        # Invariant before minting: the authoritative SQL membership must exist.
+        refresh_gate = await self._ensure_sql_membership_for_session(account)
+        if isinstance(refresh_gate, Failure):
+            return Failure(refresh_gate.failure())
 
         family_id = claims.family_id or f"legacy-{sha256(session_id.encode()).hexdigest()[:32]}"
         token_secret = claims.refresh_secret or claims.jti
@@ -1098,7 +1207,7 @@ class AuthService:
                 "OAuth login"
             )
             return await self._create_session(
-                user_id=identity_owner.id,
+                account=identity_owner,
                 role=identity_owner.role.value,
                 permissions=identity_owner.permissions,
                 role_revision=identity_owner.role_revision,
@@ -1157,6 +1266,9 @@ class AuthService:
             full_name=userinfo.full_name,
             is_verified=True,
             verification_token_hash=None,
+            # First-login account creation is a registration path: SQL personal
+            # tenant and membership must exist before any session is issued.
+            provisioning_state=ProvisioningState.PENDING,
             oauth_account=OAuthAccountInput(
                 provider=provider,
                 provider_user_id=userinfo.provider_user_id,
@@ -1170,9 +1282,13 @@ class AuthService:
             return Failure(error)
         account = create_result.unwrap()
 
+        provision_result = await self._provision_personal_tenant(account)
+        if isinstance(provision_result, Failure):
+            return Failure(provision_result.failure())
+
         logger.bind(user_id=account.id, provider=provider, created=True).info("OAuth login")
         return await self._create_session(
-            user_id=account.id,
+            account=account,
             role=account.role.value,
             permissions=account.permissions,
             role_revision=account.role_revision,
@@ -1378,10 +1494,54 @@ class AuthService:
 
         return Success(closed_connection_ids)
 
+    async def _ensure_sql_membership_for_session(self, account: AuthAccount) -> AuthResult[None]:
+        """Invariant gate: a session is only issued when SQL membership exists.
+
+        Login and refresh perform this authoritative check before minting; it
+        is deliberately not a provisioning mechanism.  Semantics:
+
+        - SQL unavailable while checking → retryable ``AuthInfrastructureError``
+          (503), never 401/403.
+        - No membership + durably pending account → one idempotent durable
+          repair attempt, converging a crash between account creation and the
+          SQL commit.  A failing repair keeps the account session-less.
+        - No membership on any other account → typed
+          ``ACCOUNT_PROVISIONING_PENDING`` (409, retryable) — never invalid
+          credentials for a correct password.
+        """
+        if self._provisioner is None:
+            logger.bind(user_id=account.id).error(
+                "session_authorization_invariant_unavailable_postgres_not_configured"
+            )
+            return Failure(
+                AuthInfrastructureError(
+                    message="SQL membership authority is unavailable; sessions cannot be issued",
+                    details={"operation": "session_authorization_invariant"},
+                    source="auth_service",
+                )
+            )
+        check = await self._provisioner.has_membership(account.id)
+        if isinstance(check, Success) and check.unwrap():
+            return Success(None)
+        if isinstance(check, Failure):
+            return Failure(check.failure())
+        if account.provisioning_state == ProvisioningState.PENDING:
+            repair = await self._provision_personal_tenant(account)
+            if isinstance(repair, Failure):
+                return Failure(repair.failure())
+            return Success(None)
+        return Failure(
+            AuthProvisioningPendingError(
+                message="Account provisioning is pending; retry shortly",
+                details={"user_id": account.id, "retryable": True},
+                source="auth_service",
+            )
+        )
+
     async def _create_session(
         self,
         *,
-        user_id: str,
+        account: AuthAccount,
         role: str,
         permissions: frozenset[str],
         role_revision: int,
@@ -1389,6 +1549,10 @@ class AuthService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> AuthResult[TokenResponse]:
+        invariant = await self._ensure_sql_membership_for_session(account)
+        if isinstance(invariant, Failure):
+            return Failure(invariant.failure())
+        user_id = account.id
         settings = get_settings()
         session_id = str(uuid4())
         device_id = str(uuid4())

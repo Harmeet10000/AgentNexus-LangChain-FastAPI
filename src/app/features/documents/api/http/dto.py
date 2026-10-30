@@ -21,6 +21,10 @@ from app.features.documents.domain.constants import (
     DEFAULT_RAG_TOKEN_BUDGET,
     MAX_PAGE_SIZE,
 )
+from app.features.documents.domain.fidelity import (
+    GraphRelationshipsState,
+    IngestionFidelityMetrics,
+)
 from app.utils.storage import (
     StorageService,
 )
@@ -67,6 +71,10 @@ class DocumentStatusResponse(BaseModel):
     pipeline_version: str | None = None
     graph_indexed_at: datetime | None = None
     warnings: list[QualityWarningDTO] = Field(default_factory=list)
+    # Typed ingestion truth.  ``None`` means the record predates the metric or
+    # its persisted payload was invalid — an honest absence, not a default.
+    graph_relationships: GraphRelationshipsState | None = None
+    fidelity: IngestionFidelityMetrics | None = None
 
 
 class SearchMetadataFilter(BaseModel):
