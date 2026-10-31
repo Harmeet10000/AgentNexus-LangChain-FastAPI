@@ -94,7 +94,17 @@ async def setup_graphiti(
                 config=GeminiEmbedderConfig(
                     api_key=settings.GEMINI_API_KEY.get_secret_value(),
                     embedding_model=settings.GEMINI_EMBEDDING_MODEL,
-                )
+                    # graphiti defaults to its own EMBEDDING_DIM (1024 via constant/env),
+                    # which is not this deployment's width. Pin the deployment width so
+                    # every vector this process stores is the width the app configured.
+                    embedding_dim=settings.EMBEDDING_DIMENSION,
+                ),
+                # graphiti-core only forces batch_size=1 for gemini-embedding-001.
+                # gemini-embedding-2-preview collapses a multi-item `contents` list
+                # into a single embedding, so a batch returns one vector for N nodes
+                # and graphiti's strict zip in _semantic_candidate_search raises.
+                # One request per item keeps vector count == node count.
+                batch_size=1,
             ),
             cross_encoder=GeminiRerankerClient(
                 config=LLMConfig(
