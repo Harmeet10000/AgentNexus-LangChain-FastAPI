@@ -27,7 +27,7 @@ from app.shared.jobs.names import DOCUMENTS_INGEST
 from app.shared.jobs.registry import CeleryTaskRegistry, TaskPayloadValidationError
 # The terminal ingestion notification is validated through the same
 # producer-side catalog, without importing its worker implementation.
-assert len(CeleryTaskRegistry.registered_names()) == 17
+assert len(CeleryTaskRegistry.registered_names()) == 18
 try:
     CeleryTaskRegistry.validate(DOCUMENTS_INGEST, {})
 except TaskPayloadValidationError:

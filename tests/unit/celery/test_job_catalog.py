@@ -54,7 +54,7 @@ import sys
 from app.shared.jobs.catalog import JOB_CATALOG
 # The terminal ingestion notification is a catalog-owned worker task too;
 # keeping it here proves producer imports see the complete wire contract.
-assert len(JOB_CATALOG) == 17
+assert len(JOB_CATALOG) == 18
 assert not any(name == "app.worker" or name.startswith("app.worker.") for name in sys.modules)
 """
     result = subprocess.run(  # noqa: S603 — literal trusted smoke-test script

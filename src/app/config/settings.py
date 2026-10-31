@@ -3,7 +3,7 @@
 import warnings
 from decimal import Decimal
 from functools import cache
-from typing import Literal, override
+from typing import Final, Literal, override
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +24,13 @@ PRODUCTION_SECRET_FIELDS: dict[str, list[str]] = {
     "POSTGRES_PASSWORD": ["pass"],
     "LANGEXTRACT_API_KEY": ["empty-langextract-api-key"],
 }
+
+
+#: The width ``search_chunks.embedding`` is created with — pinned here (the
+#: single home of the value) because the vector column is concrete for the life
+#: of the database, and the embedding-producer setting must never drift from
+#: it. The ORM models re-export this name; validators fail fast on drift.
+SEARCH_EMBEDDING_DIM: Final[int] = 768
 
 
 class Settings(BaseSettings):
@@ -74,6 +81,29 @@ class Settings(BaseSettings):
                     f"EMBEDDING_DIMENSION={dim} but {model} expects {expected}",
                     stacklevel=2,
                 )
+
+        # The site-search column (search_chunks.embedding) is pinned at
+        # SEARCH_EMBEDDING_DIM (below), unlike the documents column which
+        # derives from this setting. A mismatch cannot be retried or converted
+        # at runtime — every search write and vector comparison would be
+        # wrong-width — so it is rejected at load, not at first ingest.
+        # mode="before" sees raw env strings: coerce before comparing, or a
+        # perfectly valid EMBEDDING_DIMENSION=768 from the environment kills
+        # startup because "768" != 768.
+        dim_int: int | None = None
+        if dim is not None:
+            try:
+                dim_int = int(str(dim))
+            except ValueError:
+                dim_int = None
+        if dim_int is not None and dim_int != SEARCH_EMBEDDING_DIM:
+            drifted = (
+                f"EMBEDDING_DIMENSION={dim_int} but search_chunks.embedding stores "
+                f"{SEARCH_EMBEDDING_DIM}; the setting cannot drift from the "
+                "pinned search column (re-embedding would be required and no "
+                "conversion exists)."
+            )
+            raise ValueError(drifted)
         return values
 
     # --- Application Settings ---
@@ -398,6 +428,29 @@ class Settings(BaseSettings):
     CRAWL_RATE_LIMIT_PER_HOUR: int = Field(default=100)
     SEARCH_RATE_LIMIT_PER_MINUTE: int = Field(default=30)
     SEARCH_RATE_LIMIT_PER_HOUR: int = Field(default=500)
+
+    # --- Site Search (hybrid retrieval feature) ---
+    # Defaults ported from the legacy search feature constants; the feature
+    # reads these, never module constants, for tunables.
+    SEARCH_DEFAULT_PAGE_SIZE: int = Field(default=20, ge=1)
+    SEARCH_MAX_PAGE_SIZE: int = Field(default=100, ge=1)
+    SEARCH_CACHE_TTL_SECONDS: int = Field(default=900, ge=1)
+    SEARCH_RAG_DEFAULT_TOKEN_BUDGET: int = Field(default=2000, ge=1)
+    SEARCH_HYBRID_CANDIDATE_LIMIT: int = Field(default=50, ge=1)
+    SEARCH_RRF_K: int = Field(default=60, ge=1)
+    SEARCH_INGEST_CHUNK_SIZE: int = Field(default=512, ge=1)
+    SEARCH_INGEST_CHUNK_OVERLAP: int = Field(default=64, ge=0)
+    SEARCH_INGEST_EMBEDDING_BATCH_SIZE: int = Field(default=200, ge=1)
+    SEARCH_ANALYZE_THRESHOLD_CHUNKS: int = Field(default=10_000, ge=0)
+    SEARCH_DISKANN_QUERY_SEARCH_LIST_SIZE: int = Field(default=100, ge=1)
+    SEARCH_DISKANN_QUERY_RESCORE: int = Field(default=50, ge=1)
+    SEARCH_CHUNKS_BM25_INDEX_NAME: str = Field(default="search_chunks_bm25_idx")
+    SEARCH_TRIGRAM_SIMILARITY_THRESHOLD: float = Field(default=0.1, ge=0.0, le=1.0)
+    # How long the task->tenant ownership record written at ingest survives.
+    # It is the authorization source for GET /search/ingest/{task_id} while a
+    # task is queued (the Celery result payload only carries the tenant after
+    # a worker runs), so it must outlive any realistic polling window.
+    SEARCH_TASK_OWNER_TTL_SECONDS: int = Field(default=86_400, ge=1)
 
     # --- Redis Cache for Crawler ---
     REDIS_CRAWL_CACHE_TTL: int = Field(default=3600)  # 1 hour
