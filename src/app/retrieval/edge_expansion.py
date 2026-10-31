@@ -94,6 +94,11 @@ class EdgeContextBlock(BaseModel):
     char_end: int | None
     text: str
     token_count: int = Field(ge=0)
+    # Edge provenance carried through so citation resolution can require the
+    # supporting passage to be the same version/contract as the edge — two
+    # stored versions of one document may both cover a char range.
+    contract_index: int | None = None
+    document_version: int | None = None
 
 
 class EdgeExpansion(BaseModel):
@@ -177,6 +182,8 @@ def expand_along_edges(
                     char_end=edge.char_end,
                     text=text,
                     token_count=token_count,
+                    contract_index=edge.contract_index,
+                    document_version=edge.document_version,
                 )
             )
             used_edge_ids.add(edge.edge_id)

@@ -1373,6 +1373,8 @@ def _resolved_edge_blocks(
                 rows_by_document.get(expansion.document_id, ()),
                 char_start=block.char_start,
                 char_end=block.char_end,
+                document_version=block.document_version,
+                contract_index=block.contract_index,
             )
             if supporting is not None:
                 resolved.append((block, supporting))
@@ -1430,8 +1432,15 @@ def _row_containing_span(
     *,
     char_start: int,
     char_end: int,
+    document_version: int | None = None,
+    contract_index: int | None = None,
 ) -> dict[str, object] | None:
-    """Find the hydrated row whose persisted source span covers the edge span."""
+    """Find the hydrated row whose persisted source span covers the edge span.
+
+    When the edge carries version/contract provenance, the supporting passage
+    must match it: two stored versions of one document can both cover a char
+    range, and citing the wrong one dresses an unsupported answer as grounded.
+    """
     for row in rows:
         metadata = row.get("metadata_") or {}
         if not isinstance(metadata, dict):
@@ -1440,8 +1449,17 @@ def _row_containing_span(
         end = metadata.get("source_end_char")
         if not isinstance(start, int) or not isinstance(end, int):
             continue
-        if start <= char_start and char_end <= end:
-            return row
+        if not (start <= char_start and char_end <= end):
+            continue
+        if document_version is not None:
+            row_version = metadata.get("document_version")
+            if isinstance(row_version, int) and row_version != document_version:
+                continue
+        if contract_index is not None:
+            row_contract = metadata.get("contract_index")
+            if isinstance(row_contract, int) and row_contract != contract_index:
+                continue
+        return row
     return None
 
 

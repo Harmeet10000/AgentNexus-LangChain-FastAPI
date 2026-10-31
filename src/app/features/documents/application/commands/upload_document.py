@@ -172,6 +172,9 @@ class _Phase1Complete(NamedTuple):
     budget: ExtractionBudget
     documents: list[object]
     inventories: list[_CheckpointContractClauses] | None = None
+    # Extracted class names ride the checkpoint so a resumed attempt's final
+    # metadata keeps them instead of saving an empty list.
+    extraction_classes: tuple[str, ...] = ()
 
 
 def _clause_inventory_for_checkpoint(
@@ -212,6 +215,7 @@ def _clauses_complete_checkpoint_metadata(
     return {
         "knowledge_extraction": _CLAUSES_COMPLETE,
         "knowledge_extraction_clauses": _clause_inventory_for_checkpoint(phase1),
+        "knowledge_extraction_classes": list(phase1.extraction_classes),
         "extraction_budget": phase1.budget.model_dump(mode="json"),
         "knowledge_extraction_document_version": document_version,
     }
@@ -686,6 +690,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             extracted=phase1_outcome.extracted,
             budget=phase1_outcome.budget,
             pass1_documents=phase1_outcome.documents,
+            extraction_classes=phase1_outcome.extraction_classes,
             jurisdiction=extraction_jurisdiction,
             document_type=classified.document_kind,
         )
@@ -1354,7 +1359,7 @@ def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> 
     )
 
 
-async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extraction pass keeps all phase locals together
+async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — one extraction pass keeps all phase locals together
     *,
     runtime: IngestionRuntime,
     job: IngestionJob,
@@ -1503,6 +1508,12 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
                         # slicing the re-derived boundary markdown at the
                         # persisted spans.  The retry still gets a fresh
                         # wall-clock window over the cumulative ledger.
+                        raw_classes = raw_metadata.get("knowledge_extraction_classes", ())
+                        classes = (
+                            [value for value in raw_classes if isinstance(value, str)]
+                            if isinstance(raw_classes, list)
+                            else []
+                        )
                         budget = budget.model_copy(update={"started_at": datetime.now(tz=UTC)})
                         return (
                             _Phase1Complete(
@@ -1513,6 +1524,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
                                 budget=budget,
                                 documents=[],
                                 inventories=inventories,
+                                extraction_classes=tuple(classes),
                             ),
                             GraphRelationshipsState(
                                 status=GraphRelationshipsStatus.NOT_ATTEMPTED,
@@ -1538,6 +1550,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             ),
         )
     documents: list[object] = []
+    classes: list[str] = []
     # Phase 1 (mandatory): pass-1 clause extraction for EVERY boundary runs
     # before any optional relationship work spends the shared budget — a
     # relationship call for boundary 0 must never starve boundary 2's clause
@@ -1572,6 +1585,15 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             )
         budget = outcome.budget
         documents.extend(outcome.documents)
+        for extracted_class in outcome.extraction_classes or sorted(
+            {
+                extraction.extraction_class
+                for document in outcome.documents
+                for extraction in document.extractions
+            }
+        ):
+            if extracted_class not in classes:
+                classes.append(extracted_class)
         segments = _extract_clause_segments(
             outcome,
             document_id=job.document_id,
@@ -1626,6 +1648,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             extracted=extracted,
             budget=budget,
             documents=documents,
+            extraction_classes=tuple(classes),
         ),
         aggregate_relationship_states([]),
     )
@@ -1638,8 +1661,9 @@ async def _run_relationship_phase(
     extracted: list[tuple[ContractBoundary, list[ClauseSegment], str | None]],
     budget: ExtractionBudget,
     pass1_documents: Sequence[object],
-    jurisdiction: str | None,
-    document_type: str,
+    extraction_classes: Sequence[str] = (),
+    jurisdiction: str | None = None,
+    document_type: str = "generic",
 ) -> tuple[ExtractionSucceeded | ExtractionFailed, GraphRelationshipsState]:
     """Run the optional per-boundary relationship pass plus the combined write.
 
@@ -1737,7 +1761,11 @@ async def _run_relationship_phase(
                 aggregate_relationship_states(relationship_states),
             )
     return (
-        ExtractionSucceeded(documents=tuple(pass1_documents), budget=budget),
+        ExtractionSucceeded(
+            documents=tuple(pass1_documents),
+            budget=budget,
+            extraction_classes=tuple(extraction_classes),
+        ),
         aggregate_relationship_states(relationship_states),
     )
 
