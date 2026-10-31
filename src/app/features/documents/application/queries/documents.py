@@ -922,6 +922,7 @@ class DocumentQueryService:
         # authorized graph scope, a healthy graphiti, and at least one typed
         # edge touching the reranked chunks all exist.
         edge_expansions: list[EdgeExpansion] = []
+        resolved_edges: list[tuple[EdgeContextBlock, dict[str, object]]] = []
 
         for iteration in range(2):
             rewritten_query = (

@@ -579,3 +579,36 @@ async def test_edge_citation_resolves_to_another_hydrated_passage(
     late = [c for c in response.citations if "Grounded by" in c.claim]
     assert len(late) == 1
     assert late[0].chunk_id == "chunk-late"
+
+
+async def test_insufficient_context_returns_fallback_without_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both attempts finding nothing must return the fallback answer.
+
+    ``resolved_edges`` is consumed after the retrieval loop on every path;
+    an unbound name here would turn a graceful fallback into an
+    UnboundLocalError.
+    """
+    llm = _FakeStructuredLLM()
+    graphiti = _install_episode_source(monkeypatch, [])
+    repo = _StubRepository()
+
+    async def empty_bm25(**_kwargs: object) -> Success[list[dict[str, Any]]]:
+        return Success([])
+
+    repo.bm25_search = empty_bm25  # ty: ignore[invalid-assignment]
+    service = _service(graphiti, llm, repo=repo)
+
+    result = await service.ask(
+        user_id="user-1",
+        tenant_id=_TENANT_A,
+        allowed_doc_ids=[_DOC_ID],
+        payload=_payload(),
+        require_graphiti_verified=False,
+    )
+
+    assert isinstance(result, Success)
+    response = result.unwrap()
+    assert response.citations == []
+    assert not llm.generator_prompts
