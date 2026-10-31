@@ -71,6 +71,7 @@ async def process_search_ingestion_document(
     document_id: str,
     tenant_id: str,
     content: str,
+    event_id: str | None = None,
 ) -> dict[str, object]:
     """Chunk, batch-embed, and upsert search chunks for one document.
 
@@ -104,7 +105,12 @@ async def process_search_ingestion_document(
         )
         if isinstance(status_result, Failure):
             raise _to_raising_exception(status_result.failure())
-        return {"status": "completed", "document_id": document_id, "chunk_count": 0}
+        return {
+            "status": "completed",
+            "document_id": document_id,
+            "event_id": event_id,
+            "chunk_count": 0,
+        }
 
     chunk_count = 0
     for batch in _batched(chunks, settings.SEARCH_INGEST_EMBEDDING_BATCH_SIZE):
@@ -147,13 +153,17 @@ async def process_search_ingestion_document(
     if isinstance(status_result, Failure):
         raise _to_raising_exception(status_result.failure())
 
-    logger.bind(document_id=document_id, tenant_id=tenant_id, chunk_count=chunk_count).info(
-        "search_ingest_processed"
-    )
+    logger.bind(
+        document_id=document_id,
+        tenant_id=tenant_id,
+        event_id=event_id,
+        chunk_count=chunk_count,
+    ).info("search_ingest_processed")
     return {
         "status": "completed",
         "document_id": document_id,
         "tenant_id": tenant_id,
+        "event_id": event_id,
         "chunk_count": chunk_count,
         "embedding_dim": SEARCH_EMBEDDING_DIM,
     }
@@ -164,6 +174,7 @@ async def run_search_ingestion_task(
     document_id: str,
     tenant_id: str,
     content: str,
+    event_id: str | None = None,
 ) -> dict[str, object]:
     """Create a task-local async DB session and execute search ingestion."""
     from app.connections import init_db  # noqa: PLC0415 — keeps the web import graph worker-free
@@ -177,6 +188,7 @@ async def run_search_ingestion_task(
                 document_id=document_id,
                 tenant_id=tenant_id,
                 content=content,
+                event_id=event_id,
             )
     finally:
         await engine.dispose()

@@ -14,7 +14,11 @@ from pydantic import ValidationError
 from app.features.search.api.http.dto import (
     MAX_INGEST_CONTENT_CHARS,
     MAX_INGEST_METADATA_BYTES,
+    MAX_SEARCH_QUERY_CHARS,
+    HybridSearchRequest,
+    RagSearchRequest,
     SearchIngestRequest,
+    SearchMetadataFilter,
 )
 
 
@@ -40,7 +44,7 @@ def test_metadata_within_the_cap_is_accepted() -> None:
 
 
 def test_metadata_over_the_serialized_cap_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="doc_metadata"):
+    with pytest.raises(ValidationError, match="metadata"):
         _ingest(doc_metadata={"blob": "x" * (MAX_INGEST_METADATA_BYTES + 1)})
 
 
@@ -49,9 +53,36 @@ def test_deeply_nested_metadata_is_caught_by_the_serialized_cap() -> None:
     nested: dict[str, object] = {"leaf": True}
     for _ in range(500):
         nested = {"n": nested}
-    with pytest.raises(ValidationError, match="doc_metadata"):
+    with pytest.raises(ValidationError, match="metadata"):
         _ingest(doc_metadata=nested)
 
 
 def test_empty_metadata_is_accepted() -> None:
     assert _ingest().doc_metadata == {}
+
+
+def test_query_over_the_cap_is_rejected() -> None:
+    """Every query is one provider embedding call plus cache-digest input."""
+    with pytest.raises(ValidationError, match="query"):
+        HybridSearchRequest(query="q" * (MAX_SEARCH_QUERY_CHARS + 1))
+
+
+def test_query_within_the_cap_is_accepted() -> None:
+    request = HybridSearchRequest(query="q" * MAX_SEARCH_QUERY_CHARS)
+    assert len(request.query) == MAX_SEARCH_QUERY_CHARS
+
+
+def test_rag_request_inherits_the_query_cap() -> None:
+    with pytest.raises(ValidationError, match="query"):
+        RagSearchRequest(query="q" * (MAX_SEARCH_QUERY_CHARS + 1))
+
+
+def test_filter_metadata_over_the_cap_is_rejected() -> None:
+    """The filter rides every retrieval branch's containment predicate."""
+    with pytest.raises(ValidationError, match="metadata"):
+        SearchMetadataFilter(chunk_metadata={"blob": "x" * (MAX_INGEST_METADATA_BYTES + 1)})
+
+
+def test_filter_metadata_within_the_cap_is_accepted() -> None:
+    request = SearchMetadataFilter(chunk_metadata={"lang": "en"})
+    assert request.chunk_metadata == {"lang": "en"}

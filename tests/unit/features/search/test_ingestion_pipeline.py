@@ -107,7 +107,12 @@ async def test_empty_content_records_a_completed_zero_chunk_state(
         content="   \n\t ",
     )
 
-    assert result == {"status": "completed", "document_id": DOC_ID, "chunk_count": 0}
+    assert result == {
+        "status": "completed",
+        "document_id": DOC_ID,
+        "event_id": None,
+        "chunk_count": 0,
+    }
     assert pipeline.upsert_batches == []
     assert pipeline.statuses == [(DOC_ID, "completed")]
 

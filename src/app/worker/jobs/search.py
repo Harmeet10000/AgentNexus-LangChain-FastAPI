@@ -19,6 +19,7 @@ through every backoff.
 from __future__ import annotations
 
 import asyncio
+import traceback
 from typing import TYPE_CHECKING
 
 from app.config import get_settings
@@ -26,6 +27,7 @@ from app.features.search.application.ingestion import (
     SearchIngestTerminalError,
     run_search_ingestion_task,
 )
+from app.features.search.application.service import bump_tenant_cache_version
 from app.features.search.domain.models import TASK_CELERY_ID_CACHE_KEY
 from app.observability.logging import logger
 from app.shared.jobs.names import SEARCH_INGEST
@@ -38,7 +40,7 @@ celery_app = get_worker_celery_app()
 if TYPE_CHECKING:
     from typing import Any
 
-    from redis import Redis as SyncRedis
+    from redis.asyncio import Redis as AsyncRedis
 
 
 def _redis_task_lock_enabled() -> bool:
@@ -46,8 +48,8 @@ def _redis_task_lock_enabled() -> bool:
     return bool(get_settings().REDIS_URL)
 
 
-def record_celery_task_id(
-    redis_client: SyncRedis[str],
+async def record_celery_task_id(
+    redis_client: AsyncRedis[str],
     *,
     event_id: str | None,
     task_id: str | None,
@@ -56,20 +58,24 @@ def record_celery_task_id(
 
     The relay lets Celery assign the task id, so the id the API returned (the
     outbox event id) would poll as PENDING forever. The worker writes the
-    mapping on entry so status resolution can poll the real id. A write
-    failure degrades to a log line — the durable document status column, not
-    this cache, is the terminal truth.
+    mapping once it owns the processing, so status resolution can poll the
+    real id. A write failure degrades to a log line — the durable document
+    status column, not this cache, is the terminal truth.
     """
     if not event_id or not task_id:
         return
     try:
-        redis_client.set(
+        # The worker client is redis.asyncio: the set MUST be awaited, or the
+        # coroutine is discarded and the mapping is never stored (which left
+        # status polling stuck on QUEUED in production review).
+        await redis_client.set(
             TASK_CELERY_ID_CACHE_KEY.format(task_id=event_id),
             str(task_id),
             ex=get_settings().SEARCH_TASK_OWNER_TTL_SECONDS,
         )
     except Exception as exc:  # noqa: BLE001 — the mapping is an accelerator, not truth
         exc.add_note(f"operation=search_task_celery_id_record, event_id={event_id}")
+        exc.add_note(traceback.format_exc())
         logger.bind(event_id=event_id, task_id=task_id).warning(
             "search_task_celery_id_record_failed"
         )
@@ -106,27 +112,42 @@ def search_ingest(
         source_uri,
         doc_metadata,
     )  # identity fields; chunking needs content only
-    record_celery_task_id(
-        self.get_redis_client(),
-        event_id=event_id,
-        task_id=self.request.id,
-    )
-    idempotency_key = f"search-ingest:{tenant_id}:{document_id}"
+    # Redis availability gates EVERYTHING cache-shaped: with an empty REDIS_URL
+    # there is no client to construct, so the lock check must run before any
+    # get_redis_client() call.
     redis_lock_enabled = _redis_task_lock_enabled()
+    idempotency_key = f"search-ingest:{tenant_id}:{document_id}"
     if redis_lock_enabled and not self.acquire_idempotency_lock(
         idempotency_key,
         metadata={"document_id": document_id, "tenant_id": tenant_id},
     ):
         logger.bind(document_id=document_id, task_id=self.request.id).info("search_ingest_locked")
         return {"status": "skipped", "document_id": document_id, "tenant_id": tenant_id}
-    try:
-        result = asyncio.run(
-            run_search_ingestion_task(
-                document_id=document_id,
-                tenant_id=tenant_id,
-                content=content,
+
+    async def _run_owned_pipeline() -> dict[str, object]:
+        # Only the worker that won the idempotency lock records its dispatch
+        # id: a skipped redelivery must not overwrite the winner's mapping.
+        if redis_lock_enabled:
+            await record_celery_task_id(
+                self.get_redis_client(),
+                event_id=event_id,
+                task_id=self.request.id,
             )
+        result = await run_search_ingestion_task(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            content=content,
+            event_id=event_id,
         )
+        # Fresh ingest must not serve stale cached searches for the remainder
+        # of the cache TTL: bump the tenant's cache version so every digest
+        # computed afterwards misses (the old keys simply expire).
+        if redis_lock_enabled:
+            await bump_tenant_cache_version(self.get_redis_client(), tenant_id=tenant_id)
+        return result
+
+    try:
+        result = asyncio.run(_run_owned_pipeline())
     except Exception as exc:
         exc.add_note(f"operation=tasks.search_ingest, document_id={document_id}")
         if redis_lock_enabled:

@@ -22,8 +22,9 @@ from app.features.search.adapters.persistence.postgres.search_repository import 
 )
 from app.utils.sql_binds import uuid_any, uuid_param
 
-_REPO_SOURCE = Path(
-    "src/app/features/search/adapters/persistence/postgres/search_repository.py"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_REPO_SOURCE = (
+    _REPO_ROOT / "src/app/features/search/adapters/persistence/postgres/search_repository.py"
 ).read_text(encoding="utf-8")
 
 _DOCUMENT_TENANT = "tenant-1"
@@ -109,35 +110,76 @@ def test_chunk_upsert_statement_compiles_with_conflict_refresh_columns() -> None
         assert f"{column} = " in set_clause
 
 
-class _FakeUniqueViolationError(Exception):
+class _AsyncpgUniqueViolationError(Exception):
+    """asyncpg-style: SQLSTATE attribute, constraint name attribute."""
+
+    sqlstate = "23505"
+    constraint_name = "uq_search_documents_tenant_content_hash"
+
+
+class _PsycopgUniqueViolationError(Exception):
+    """psycopg-style: SQLSTATE attribute, structured diag object."""
+
+    sqlstate = "23505"
+
+    class diag:  # noqa: N801 — mirrors the driver's attribute name
+        constraint_name = "uq_search_documents_tenant_content_hash"
+
+
+class _NamelessUniqueViolationError(Exception):
+    """A driver that exposes only the SQLSTATE."""
+
     sqlstate = "23505"
 
 
-def _integrity_error(content_hash: str, sqlstate: str | None = "23505") -> IntegrityError:
-    orig = _FakeUniqueViolationError()
-    if sqlstate is None:
-        orig = Exception("driver without diagnostics")
-    else:
-        _FakeUniqueViolationError.sqlstate = sqlstate  # type: ignore[misc]
-    return IntegrityError("INSERT INTO search_documents ...", {"content_hash": content_hash}, orig)
+class _OtherConstraintError(Exception):
+    sqlstate = "23505"
+    constraint_name = "some_other_unique_key"
 
 
-def test_tenant_content_hash_race_is_detected_from_the_constraint() -> None:
+def _integrity_error(
+    orig: Exception | None = None, *, sqlstate: str | None = "23505"
+) -> IntegrityError:
+    if orig is None:
+        if sqlstate is None:
+            driver_error: Exception = Exception("driver without diagnostics")
+        else:
+            _NamelessUniqueViolationError.sqlstate = sqlstate  # type: ignore[misc]
+            driver_error = _NamelessUniqueViolationError()
+        return IntegrityError("INSERT INTO search_documents ...", {}, driver_error)
+    return IntegrityError("INSERT INTO search_documents ...", {}, orig)
+
+
+def test_race_is_detected_from_asyncpg_style_diagnostics() -> None:
     """A concurrent identical ingest losing the unique race is idempotent, not
     an infrastructure error: the winner's row is the dedupe identity."""
-    exc = _integrity_error("abc123")
+    assert _is_tenant_content_hash_race(_integrity_error(_AsyncpgUniqueViolationError()))
 
-    assert _is_tenant_content_hash_race(exc, content_hash="abc123")
+
+def test_race_is_detected_from_psycopg_style_diagnostics() -> None:
+    assert _is_tenant_content_hash_race(_integrity_error(_PsycopgUniqueViolationError()))
+
+
+def test_nameless_unique_violation_falls_back_to_the_rendered_statement() -> None:
+    exc = IntegrityError(
+        "INSERT ... CONSTRAINT uq_search_documents_tenant_content_hash ...",
+        {},
+        _NamelessUniqueViolationError(),
+    )
+
+    assert _is_tenant_content_hash_race(exc)
 
 
 def test_other_unique_violations_are_not_treated_as_the_race() -> None:
-    different_hash = _integrity_error("unrelated-value")
-    assert not _is_tenant_content_hash_race(different_hash, content_hash="abc123")
+    """A different unique constraint must not read as the race."""
+    assert not _is_tenant_content_hash_race(_integrity_error(_OtherConstraintError()))
 
 
 def test_non_unique_integrity_errors_are_not_treated_as_the_race() -> None:
-    foreign_key = _integrity_error("abc123", sqlstate="23503")
-    assert not _is_tenant_content_hash_race(foreign_key, content_hash="abc123")
+    """A foreign-key violation is never the dedupe race, whatever it renders."""
+    exc = _integrity_error(sqlstate="23503")
+
+    assert not _is_tenant_content_hash_race(exc)
 
 
 def test_chunk_rows_carry_the_tenant() -> None:

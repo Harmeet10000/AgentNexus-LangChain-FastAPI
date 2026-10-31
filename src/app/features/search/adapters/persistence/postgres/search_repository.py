@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from returns.result import Failure, Success
-from sqlalchemy import select, text
+from sqlalchemy import and_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -132,7 +132,7 @@ class SearchRepository:
         except IntegrityError as exc:
             add_database_error_note(exc, table="search_documents")
             await self.session.rollback()
-            if _is_tenant_content_hash_race(exc, content_hash=content_hash):
+            if _is_tenant_content_hash_race(exc):
                 # Concurrent ingest of identical content: the winner's row is
                 # the dedupe identity. Re-read it so the caller stages its job
                 # against the surviving document instead of erroring.
@@ -432,7 +432,13 @@ class SearchRepository:
                 .join_from(
                     SearchChunk,
                     SearchDocument,
-                    SearchDocument.id == SearchChunk.document_id,
+                    # The join repeats the composite-ownership pair, not just
+                    # the id: a chunk row claiming another tenant's document id
+                    # can never hydrate, even if a pre-migration row existed.
+                    and_(
+                        SearchDocument.id == SearchChunk.document_id,
+                        SearchDocument.tenant_id == SearchChunk.tenant_id,
+                    ),
                 )
                 .where(
                     SearchChunk.tenant_id == tenant_id,
@@ -464,19 +470,34 @@ class SearchRepository:
             )
 
 
-def _is_tenant_content_hash_race(exc: IntegrityError, *, content_hash: str) -> bool:
+def _is_tenant_content_hash_race(exc: IntegrityError) -> bool:
     """Whether ``exc`` is a concurrent identical ingest losing the unique race.
 
     Only the per-tenant content-hash constraint counts: any other violation is
-    a real conflict, not an idempotency race. The check reads the driver's
-    diagnostic fields when present (asyncpg exposes ``pgcode``/constraint
-    name) and falls back to the rendered constraint name in the message.
+    a real conflict, not an idempotency race. Identification order:
+
+    1. If the driver exposes a SQLSTATE, it must be 23505 (unique violation) —
+       anything else (foreign key, not-null) is never the race.
+    2. The constraint name is read from the driver's structured diagnostics
+       first (psycopg's ``diag.constraint_name``), then asyncpg's
+       ``constraint_name`` attribute, then the rendered message. Hash values
+       are deliberately NOT matched against the message: they appear in
+       rendered parameters regardless of which constraint fired.
     """
-    if content_hash not in str(exc):
+    original = getattr(exc, "orig", None)
+    if original is None:
         return False
-    orig = getattr(exc, "orig", None)
-    if getattr(orig, "sqlstate", None) == "23505" or getattr(orig, "pgcode", None) == "23505":
-        return True
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    if sqlstate is not None and str(sqlstate) != "23505":
+        return False
+    diagnostic = getattr(original, "diag", None)
+    constraint_name = (
+        getattr(original, "constraint_name", None)
+        or getattr(diagnostic, "constraint_name", None)
+        or ""
+    )
+    if constraint_name:
+        return constraint_name == "uq_search_documents_tenant_content_hash"
     return "uq_search_documents_tenant_content_hash" in str(exc)
 
 

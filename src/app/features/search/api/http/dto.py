@@ -32,8 +32,33 @@ MAX_INGEST_CONTENT_CHARS = 1_000_000
 #: Maximum serialized ``doc_metadata`` size. The metadata rides the broker
 #: message and lands in a JSONB column on every chunk-less write; 8 KiB covers
 #: any realistic site-page taxonomy without letting a hostile body inflate the
-#: outbox row.
+#: outbox row. The same cap bounds the chunk-metadata *filter*, which is
+#: interpolated into every retrieval branch's containment predicate.
 MAX_INGEST_METADATA_BYTES = 8_192
+
+#: Maximum query length. Every search spends one provider embedding call on
+#: the query and folds it (plus the filter) into cache digests; an unbounded
+#: query turns a free-feeling endpoint into metered spend per request.
+MAX_SEARCH_QUERY_CHARS = 1_000
+
+
+def _bound_serialized_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    """Reject metadata whose serialized size exceeds the cap (deep values included).
+
+    A pathological nesting depth makes even *measuring* the size explode
+    (recursion), which is itself a rejection: any structure the serializer
+    cannot walk within limits is not a site-page taxonomy. Shared by the
+    ingest body and the search filter so the two cannot drift.
+    """
+    try:
+        serialized_size = len(orjson.dumps(value))
+    except (TypeError, RecursionError) as exc:
+        unserializable = "metadata is not serializable within limits"
+        raise ValueError(unserializable) from exc
+    if serialized_size > MAX_INGEST_METADATA_BYTES:
+        oversized = f"metadata exceeds {MAX_INGEST_METADATA_BYTES} serialized bytes"
+        raise ValueError(oversized)
+    return value
 
 
 class SearchMetadataFilter(BaseModel):
@@ -41,7 +66,13 @@ class SearchMetadataFilter(BaseModel):
 
     model_config = _STRICT_CONFIG
 
-    chunk_metadata: dict[str, object] = Field(default_factory=dict)
+    chunk_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _bound_chunk_metadata(self) -> SearchMetadataFilter:
+        """Cap the serialized filter size (same fence as the ingest body)."""
+        _bound_serialized_metadata(self.chunk_metadata)
+        return self
 
 
 class SearchIngestRequest(BaseModel):
@@ -56,20 +87,8 @@ class SearchIngestRequest(BaseModel):
 
     @model_validator(mode="after")
     def _bound_doc_metadata(self) -> SearchIngestRequest:
-        """Cap the serialized metadata size (deep values included).
-
-        A pathological nesting depth makes even *measuring* the size explode
-        (recursion), which is itself a rejection: any structure the serializer
-        cannot walk within limits is not a site-page taxonomy.
-        """
-        try:
-            serialized_size = len(orjson.dumps(self.doc_metadata))
-        except (TypeError, RecursionError) as exc:
-            unserializable = "doc_metadata is not serializable within limits"
-            raise ValueError(unserializable) from exc
-        if serialized_size > MAX_INGEST_METADATA_BYTES:
-            oversized = f"doc_metadata exceeds {MAX_INGEST_METADATA_BYTES} serialized bytes"
-            raise ValueError(oversized)
+        """Cap the serialized metadata size (deep values included)."""
+        _bound_serialized_metadata(self.doc_metadata)
         return self
 
 
@@ -109,7 +128,7 @@ class HybridSearchRequest(BaseModel):
 
     model_config = _STRICT_CONFIG
 
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_CHARS)
     limit: int | None = Field(default=None, ge=1, le=100)
     candidate_limit: int | None = Field(default=None, ge=1, le=200)
     metadata_filter: SearchMetadataFilter = Field(default_factory=SearchMetadataFilter)

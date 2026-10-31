@@ -8,6 +8,7 @@ called with so the scoping claims are assertions, not narrative.
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 import orjson
@@ -18,7 +19,7 @@ from returns.result import Failure, Success
 from app.features.search.adapters.persistence.models import SearchDocument
 from app.features.search.api.http.dto import SearchIngestRequest
 from app.features.search.application import service as search_service_module
-from app.features.search.application.service import SearchService
+from app.features.search.application.service import SearchService, bump_tenant_cache_version
 from app.features.search.domain.errors import (
     SearchConflictError,
     SearchInfrastructureError,
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 TENANT = "tenant-1"
 OTHER_TENANT = "tenant-2"
 DOC_ID = "00000000-0000-0000-0000-0000000000aa"
+# sha256 of the canonical _ingest_payload content ("arbitrary site content").
+PAYLOAD_HASH = hashlib.sha256(b"arbitrary site content").hexdigest()
 
 
 class _FakeSession:
@@ -65,11 +68,15 @@ class _StubRepository:
         create_failure: SearchConflictError | None = None,
         lookup_failure: SearchInfrastructureError | None = None,
     ):
-        self.existing_document = existing_document
         self.create_failure = create_failure
         self.lookup_failure = lookup_failure
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.rollbacks = 0
+        # Documents keyed by the dedupe identity — (tenant_id, content_hash) —
+        # so dedupe tests exercise real keying, not a canned single return.
+        self.documents: dict[tuple[str, str], SearchDocument] = {}
+        if existing_document is not None:
+            self.documents[TENANT, existing_document.content_hash] = existing_document
         # The service binds transactional staging to the repo's session; the
         # staging guard checks for an async `execute` capability.
         self.session = _FakeSession()
@@ -84,7 +91,7 @@ class _StubRepository:
         self._record("get_document_by_content_hash", {"tenant_id": tenant_id})
         if self.lookup_failure is not None:
             return Failure(self.lookup_failure)
-        return Success(self.existing_document)
+        return Success(self.documents.get((tenant_id, content_hash)))
 
     async def create_document(self, **kwargs: Any) -> Any:
         self._record("create_document", dict(kwargs))
@@ -98,6 +105,7 @@ class _StubRepository:
             content_hash=kwargs["content_hash"],
             doc_metadata=kwargs["doc_metadata"],
         )
+        self.documents[kwargs["tenant_id"], kwargs["content_hash"]] = document
         return Success(document)
 
     async def get_document_by_id(self, *, tenant_id: str, document_id: str) -> Any:
@@ -249,7 +257,7 @@ def _celery_id_key(task_id: str) -> str:
 
 @pytest.mark.asyncio
 async def test_completed_document_short_circuits_without_staging() -> None:
-    existing = SearchDocument(id=_uuid(DOC_ID), status="completed")
+    existing = SearchDocument(id=_uuid(DOC_ID), status="completed", content_hash=PAYLOAD_HASH)
     repo = _StubRepository(existing_document=existing)
     staging = _RecordingStagingAdapter()
     service = _service(repo, job_bus=_job_bus(staging))
@@ -315,7 +323,7 @@ async def test_fresh_ingest_stages_typed_job_atomically_with_the_document() -> N
 @pytest.mark.asyncio
 async def test_pending_row_is_re_enqueued_not_reported_done() -> None:
     """A stored row whose pipeline never completed must be re-driven."""
-    existing = SearchDocument(id=_uuid(DOC_ID), status="pending")
+    existing = SearchDocument(id=_uuid(DOC_ID), status="pending", content_hash=PAYLOAD_HASH)
     repo = _StubRepository(existing_document=existing)
     staging = _RecordingStagingAdapter()
     service = _service(repo, job_bus=_job_bus(staging), redis=FakeRedis(decode_responses=True))
@@ -348,12 +356,10 @@ async def test_dedupe_is_per_tenant_for_identical_content() -> None:
     assert isinstance(second, Success)
     assert first.unwrap().duplicate is False
     assert second.unwrap().duplicate is False
-    second_lookup = next(
-        call
-        for name, call in repo.calls
-        if name == "get_document_by_content_hash" and call["tenant_id"] == OTHER_TENANT
-    )
-    assert second_lookup["tenant_id"] == OTHER_TENANT
+    # Real keyed store: tenant-2's identical hash is a distinct identity and
+    # produced its own document row.
+    assert (OTHER_TENANT, PAYLOAD_HASH) in repo.documents
+    assert repo.documents[OTHER_TENANT, PAYLOAD_HASH] is not repo.documents[TENANT, PAYLOAD_HASH]
 
 
 @pytest.mark.asyncio
@@ -706,6 +712,28 @@ async def test_hybrid_search_caches_per_tenant() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ingest_bump_invalidates_cached_searches() -> None:
+    """A successful ingest must not leave stale cached hits (G P2)."""
+    repo = _StubRepository()
+    redis = FakeRedis(decode_responses=True)
+    service = _service(repo, job_bus=None, redis=redis)
+
+    first = await service.hybrid_search(tenant_id=TENANT, payload=_hybrid_payload())
+    second = await service.hybrid_search(tenant_id=TENANT, payload=_hybrid_payload())
+    assert isinstance(first, Success)
+    assert isinstance(second, Success)
+    assert first.unwrap().cache_hit is False
+    assert second.unwrap().cache_hit is True
+
+    # What the worker calls after a successful pipeline run.
+    await bump_tenant_cache_version(redis, tenant_id=TENANT)
+
+    third = await service.hybrid_search(tenant_id=TENANT, payload=_hybrid_payload())
+    assert isinstance(third, Success)
+    assert third.unwrap().cache_hit is False
+
+
+@pytest.mark.asyncio
 async def test_bypass_cache_skips_reads_and_writes() -> None:
     repo = _StubRepository()
     redis = FakeRedis(decode_responses=True)
@@ -751,8 +779,15 @@ async def test_ingest_stages_through_the_transactional_seam_not_direct_publish()
     result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
 
     # The transactional adapter was used (its staging recorded, receipt is the
-    # outbox event id), so the direct path was never touched.
+    # outbox event id), so the direct path was never touched — and the payload
+    # stamp ran on the same request session, inside the same transaction.
     assert isinstance(result, Success)
+    stamp_statements = [
+        statement
+        for statement, _params in repo.session.executed
+        if statement is not None and "outbox_events" in str(statement)
+    ]
+    assert stamp_statements, "payload stamp must execute on the staging session"
 
 
 class _ExplodingDirectAdapter:

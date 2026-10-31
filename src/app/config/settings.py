@@ -3,7 +3,7 @@
 import warnings
 from decimal import Decimal
 from functools import cache
-from typing import Literal, override
+from typing import Final, Literal, override
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +24,13 @@ PRODUCTION_SECRET_FIELDS: dict[str, list[str]] = {
     "POSTGRES_PASSWORD": ["pass"],
     "LANGEXTRACT_API_KEY": ["empty-langextract-api-key"],
 }
+
+
+#: The width ``search_chunks.embedding`` is created with — pinned here (the
+#: single home of the value) because the vector column is concrete for the life
+#: of the database, and the embedding-producer setting must never drift from
+#: it. The ORM models re-export this name; validators fail fast on drift.
+SEARCH_EMBEDDING_DIM: Final[int] = 768
 
 
 class Settings(BaseSettings):
@@ -74,6 +81,20 @@ class Settings(BaseSettings):
                     f"EMBEDDING_DIMENSION={dim} but {model} expects {expected}",
                     stacklevel=2,
                 )
+
+        # The site-search column (search_chunks.embedding) is pinned at
+        # SEARCH_EMBEDDING_DIM (below), unlike the documents column which
+        # derives from this setting. A mismatch cannot be retried or converted
+        # at runtime — every search write and vector comparison would be
+        # wrong-width — so it is rejected at load, not at first ingest.
+        if dim is not None and dim != SEARCH_EMBEDDING_DIM:
+            drifted = (
+                f"EMBEDDING_DIMENSION={dim} but search_chunks.embedding stores "
+                f"{SEARCH_EMBEDDING_DIM}; the setting cannot drift from the "
+                "pinned search column (re-embedding would be required and no "
+                "conversion exists)."
+            )
+            raise ValueError(drifted)
         return values
 
     # --- Application Settings ---

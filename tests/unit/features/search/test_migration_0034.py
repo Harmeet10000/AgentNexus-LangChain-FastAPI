@@ -28,16 +28,38 @@ _MODELS = (_REPO_ROOT / "src/app/features/search/adapters/persistence/models.py"
 )
 
 
+def _class_tablename(node: ast.ClassDef) -> str | None:
+    """The literal ``__tablename__`` of an ORM class, if declared."""
+    for stmt in node.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "__tablename__"
+                for target in stmt.targets
+            )
+            and isinstance(stmt.value, ast.Constant)
+        ):
+            return str(stmt.value.value)
+    return None
+
+
 def _orm_index_names(table: str) -> set[str]:
-    """Index names declared on ``table`` in the search ORM models."""
+    """Index names declared on the ``table`` ORM class only.
+
+    Scoped to the ClassDef whose ``__tablename__`` matches, so an Index in
+    another model (present or future) can neither satisfy nor break this pin.
+    """
     tree = ast.parse(_MODELS)
     names: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or ast.unparse(node.func) != "Index":
+        if not isinstance(node, ast.ClassDef) or _class_tablename(node) != table:
             continue
-        if not node.args or not isinstance(node.args[0], ast.Constant):
-            continue
-        names.add(str(node.args[0].value))
+        for inner in ast.walk(node):
+            if not isinstance(inner, ast.Call) or ast.unparse(inner.func) != "Index":
+                continue
+            if not inner.args or not isinstance(inner.args[0], ast.Constant):
+                continue
+            names.add(str(inner.args[0].value))
     return names
 
 
@@ -84,6 +106,31 @@ def test_migration_creates_every_index_the_orm_declares() -> None:
     """
     for index_name in _orm_index_names("search_chunks"):
         assert index_name in _MIGRATION, f"ORM index {index_name} missing from 0034"
+
+
+def test_constraint_and_column_drops_are_if_exists_guarded() -> None:
+    """Consistent with the dual-shape hardening (CR MAJOR): no bare drops."""
+    upgrade_section = _MIGRATION.split("def upgrade()", 1)[1].split("def downgrade()", 1)[0]
+    assert "DROP CONSTRAINT IF EXISTS uq_search_documents_content_hash" in upgrade_section
+    assert "DROP COLUMN IF EXISTS content_tsv" in upgrade_section
+    assert "op.drop_constraint" not in upgrade_section
+    assert "op.drop_column" not in upgrade_section
+
+
+def test_composite_ownership_foreign_key_is_created() -> None:
+    """Chunks must reference a matching (id, tenant_id) pair on the parent."""
+    assert "uq_search_documents_id_tenant_id" in _MIGRATION
+    assert "fk_search_chunks_document_tenant" in _MIGRATION
+    assert "FOREIGN KEY (document_id, tenant_id)" in _MIGRATION
+    assert "REFERENCES search_documents (id, tenant_id)" in _MIGRATION
+
+
+def test_downgrade_drops_are_if_exists_guarded() -> None:
+    downgrade_section = _MIGRATION.split("def downgrade()", 1)[1]
+    assert "DROP CONSTRAINT IF EXISTS fk_search_chunks_document_tenant" in downgrade_section
+    assert "DROP CONSTRAINT IF EXISTS uq_search_documents_tenant_content_hash" in downgrade_section
+    assert "DROP COLUMN IF EXISTS tenant_id" in downgrade_section
+    assert "DROP COLUMN IF EXISTS status" in downgrade_section
 
 
 def test_extensions_are_created_if_not_exists() -> None:

@@ -22,7 +22,7 @@ from uuid import UUID, uuid4  # noqa: TC003 — UUID resolved at runtime by SQLA
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     DateTime,
-    ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -37,12 +37,13 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped resolved at runtime by SQ
     relationship,
 )
 
+from app.config.settings import SEARCH_EMBEDDING_DIM as SEARCH_EMBEDDING_DIMENSION
 from database.base import Base
 
-#: The width ``search_chunks.embedding`` is created with. The legacy feature
-#: pinned Gemini output at 768 dims; the column type is concrete for the life of
-#: the process, so it stays a literal rather than a settings read.
-SEARCH_EMBEDDING_DIM = 768
+#: The width ``search_chunks.embedding`` is created with. Pinned in
+#: ``config.settings`` (the single home of the value, whose validator rejects
+#: producer drift at load); re-exported here so feature code keeps one import.
+SEARCH_EMBEDDING_DIM = SEARCH_EMBEDDING_DIMENSION
 
 
 class SearchDocument(Base):
@@ -58,6 +59,10 @@ class SearchDocument(Base):
             "content_hash",
             name="uq_search_documents_tenant_content_hash",
         ),
+        # FK target for chunks' composite (document_id, tenant_id) foreign key:
+        # a chunk cannot point at another tenant's document, enforced by the
+        # database rather than by every reader remembering to join on tenant.
+        UniqueConstraint("id", "tenant_id", name="uq_search_documents_id_tenant_id"),
         Index("ix_search_documents_tenant_id", "tenant_id"),
     )
 
@@ -100,6 +105,16 @@ class SearchChunk(Base):
             "chunk_index",
             name="uq_search_chunks_document_chunk_index",
         ),
+        # Composite ownership FK: (document_id, tenant_id) must reference a
+        # matching (id, tenant_id) pair on the parent, so tenant B can never
+        # attach chunks to tenant A's document regardless of what the worker
+        # was handed. Replaces the single-column FK the legacy shape had.
+        ForeignKeyConstraint(
+            ["document_id", "tenant_id"],
+            ["search_documents.id", "search_documents.tenant_id"],
+            name="fk_search_chunks_document_tenant",
+            ondelete="CASCADE",
+        ),
         Index("ix_search_chunks_tenant_id", "tenant_id"),
         Index("ix_search_chunks_document_id", "document_id"),
         Index("ix_search_chunks_chunk_metadata_gin", "chunk_metadata", postgresql_using="gin"),
@@ -129,11 +144,7 @@ class SearchChunk(Base):
     # No Python-side default on purpose: a write without a tenant must fail at
     # the database, not silently file the row under an empty-string tenant.
     tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False)
-    document_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("search_documents.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float] | None] = mapped_column(

@@ -22,6 +22,11 @@ TASK_OWNER_CACHE_KEY = "search:task_owner:{task_id}"
 #: status resolution follows owner record -> this mapping -> document column.
 TASK_CELERY_ID_CACHE_KEY = "search:task_celery_id:{task_id}"
 
+#: Per-tenant counter folded into every response-cache digest. The worker
+#: bumps it on successful ingestion, so a fresh ingest never serves the stale
+#: cached results of the corpus it just changed — without a pattern SCAN.
+CACHE_VERSION_KEY = "search:cache_version:{tenant_id}"
+
 
 class SearchDocumentStatus(StrEnum):
     """Lifecycle of a search document's chunk/embed pipeline."""

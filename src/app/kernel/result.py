@@ -13,6 +13,8 @@ two-home layout this consolidation removes.
 from __future__ import annotations
 
 import inspect
+import sys
+import traceback
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -120,6 +122,12 @@ def add_database_error_note(
     if context:
         parts.extend(f"{key}={_bounded(value)}" for key, value in context.items())
     exc.add_note(", ".join(parts))
+    # The typed Failure that replaces this exception carries no traceback, so
+    # this note is the only durable record of where the driver error happened
+    # (EXCEPTION-RULES: notes die on the discarded exception). Only meaningful
+    # inside an except block — direct calls (tests, re-wrappers) add nothing.
+    if sys.exc_info()[0] is not None:
+        exc.add_note(traceback.format_exc())
 
 
 def _bounded(value: object, *, limit: int = 160) -> str:

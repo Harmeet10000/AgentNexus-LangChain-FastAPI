@@ -139,12 +139,36 @@ def upgrade() -> None:
     )
 
     # Dedupe was global; it must be per tenant, or one tenant's ingest would
-    # collide with another's identical content.
-    op.drop_constraint("uq_search_documents_content_hash", "search_documents", type_="unique")
+    # collide with another's identical content. Drops use IF EXISTS because
+    # the two arrival shapes differ in what they carry.
+    op.execute(
+        "ALTER TABLE search_documents DROP CONSTRAINT IF EXISTS uq_search_documents_content_hash"
+    )
     op.create_unique_constraint(
         "uq_search_documents_tenant_content_hash",
         "search_documents",
         ["tenant_id", "content_hash"],
+    )
+    # Composite ownership FK: chunks must reference a matching
+    # (id, tenant_id) pair on the parent, so a worker handed mismatched ids
+    # cannot attach tenant B chunks to tenant A's document.
+    op.create_unique_constraint(
+        "uq_search_documents_id_tenant_id",
+        "search_documents",
+        ["id", "tenant_id"],
+    )
+    op.execute(
+        "ALTER TABLE search_chunks DROP CONSTRAINT IF EXISTS "
+        "fk_search_chunks_document_id_search_documents"
+    )
+    op.execute(
+        """
+        ALTER TABLE search_chunks
+        ADD CONSTRAINT fk_search_chunks_document_tenant
+        FOREIGN KEY (document_id, tenant_id)
+        REFERENCES search_documents (id, tenant_id)
+        ON DELETE CASCADE
+        """
     )
 
     op.create_index("ix_search_documents_tenant_id", "search_documents", ["tenant_id"])
@@ -155,7 +179,7 @@ def upgrade() -> None:
     # hazard and the maintenance cost of the GENERATED ALWAYS column. The drop
     # is guarded because only the 0004 shape ever had either.
     op.execute("DROP INDEX IF EXISTS ix_search_chunks_content_tsv_gin")
-    op.drop_column("search_chunks", "content_tsv")
+    op.execute("ALTER TABLE search_chunks DROP COLUMN IF EXISTS content_tsv")
 
     for create_statement in _SEARCH_RETRIEVAL_INDEXES:
         op.execute(create_statement)
@@ -209,14 +233,21 @@ def downgrade() -> None:
     )
     op.drop_index("ix_search_chunks_tenant_id", table_name="search_chunks")
     op.drop_index("ix_search_documents_tenant_id", table_name="search_documents")
-    op.drop_constraint(
-        "uq_search_documents_tenant_content_hash", "search_documents", type_="unique"
+    op.execute(
+        "ALTER TABLE search_chunks DROP CONSTRAINT IF EXISTS fk_search_chunks_document_tenant"
+    )
+    op.execute(
+        "ALTER TABLE search_documents DROP CONSTRAINT IF EXISTS uq_search_documents_id_tenant_id"
+    )
+    op.execute(
+        "ALTER TABLE search_documents "
+        "DROP CONSTRAINT IF EXISTS uq_search_documents_tenant_content_hash"
     )
     op.create_unique_constraint(
         "uq_search_documents_content_hash",
         "search_documents",
         ["content_hash"],
     )
-    op.drop_column("search_chunks", "tenant_id")
-    op.drop_column("search_documents", "status")
-    op.drop_column("search_documents", "tenant_id")
+    op.execute("ALTER TABLE search_chunks DROP COLUMN IF EXISTS tenant_id")
+    op.execute("ALTER TABLE search_documents DROP COLUMN IF EXISTS status")
+    op.execute("ALTER TABLE search_documents DROP COLUMN IF EXISTS tenant_id")

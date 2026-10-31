@@ -124,10 +124,14 @@ async def stamp_outbox_payload_event_id(
         raise TypeError(message)
     await tx.execute(
         text(
+            # The CAST matters beyond style: asyncpg prepares statements, and
+            # an untyped bind feeding to_jsonb's anyelement parameter cannot
+            # be planned ("could not determine data type of parameter $1").
+            # The explicit CAST pins $1 as text end-to-end.
             """
             UPDATE outbox_events
-            SET payload = jsonb_set(payload, ARRAY['event_id'], to_jsonb(:event_id))
-            WHERE id = :event_id
+            SET payload = jsonb_set(payload, ARRAY['event_id'], to_jsonb(CAST(:event_id AS text)))
+            WHERE id = CAST(:event_id AS uuid)
             """
         ),
         {"event_id": event_id},

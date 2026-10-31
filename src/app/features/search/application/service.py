@@ -8,6 +8,7 @@ import traceback
 from typing import TYPE_CHECKING, Protocol
 
 import orjson
+from pydantic import ValidationError
 from returns.result import Failure, Success
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text
@@ -31,6 +32,7 @@ from app.features.search.domain.errors import (
     SearchNotFoundError,
 )
 from app.features.search.domain.models import (
+    CACHE_VERSION_KEY,
     TASK_CELERY_ID_CACHE_KEY,
     TASK_OWNER_CACHE_KEY,
     SearchDocumentStatus,
@@ -363,12 +365,20 @@ class SearchService:
             raw = await self.redis.get(TASK_OWNER_CACHE_KEY.format(task_id=task_id))
         except Exception as exc:  # noqa: BLE001 — cache is an optional accelerator
             exc.add_note(f"operation=search_task_owner_get, task_id={task_id}")
+            exc.add_note(traceback.format_exc())
             logger.bind(task_id=task_id).warning("search_task_owner_read_failed")
             return None
         if raw is None:
             return None
         raw_text = raw.decode("utf-8") if isinstance(raw, bytes | bytearray) else str(raw)
-        parsed = orjson.loads(raw_text)
+        try:
+            parsed = orjson.loads(raw_text)
+        except orjson.JSONDecodeError as exc:
+            # A corrupt record authorizes nobody: treat as absent and let the
+            # fail-closed ownership checks answer.
+            exc.add_note(f"operation=search_task_owner_decode, task_id={task_id}")
+            logger.bind(task_id=task_id).warning("search_task_owner_decode_failed")
+            return None
         return dict(parsed) if isinstance(parsed, dict) else None
 
     async def _task_celery_id_get(self, task_id: str) -> str | None:
@@ -379,6 +389,7 @@ class SearchService:
             raw = await self.redis.get(TASK_CELERY_ID_CACHE_KEY.format(task_id=task_id))
         except Exception as exc:  # noqa: BLE001 — cache is an optional accelerator
             exc.add_note(f"operation=search_task_celery_id_get, task_id={task_id}")
+            exc.add_note(traceback.format_exc())
             logger.bind(task_id=task_id).warning("search_task_celery_id_read_failed")
             return None
         if raw is None:
@@ -441,7 +452,12 @@ class SearchService:
         candidate_limit = payload.candidate_limit or get_settings().SEARCH_HYBRID_CANDIDATE_LIMIT
         metadata_filter = payload.metadata_filter.chunk_metadata
 
-        cache_key = _build_cache_key("hybrid", tenant_id, payload)
+        # The tenant's cache version is part of the digest: the ingest worker
+        # bumps it on completion, so post-ingest searches miss instead of
+        # serving the pre-ingest corpus for up to the cache TTL.
+        cache_key = _build_cache_key(
+            "hybrid", tenant_id, await self._cache_version(tenant_id), payload
+        )
         if not payload.bypass_cache and self.redis is not None:
             cached = await self._cache_get(cache_key)
             if cached is not None:
@@ -577,8 +593,9 @@ class SearchService:
     async def _cache_get(self, cache_key: str) -> SearchResponse | None:
         """Return the cached response, or ``None`` on miss OR backend failure.
 
-        A dead cache must never fail a search; degradation is logged and the
-        query proceeds uncached (a named degradation boundary).
+        A dead cache — or a corrupt entry, which reads as a miss — must never
+        fail a search; degradation is logged and the query proceeds uncached
+        (a named degradation boundary).
         """
         if self.redis is None:
             return None
@@ -586,12 +603,20 @@ class SearchService:
             cached = await self.redis.get(cache_key)
         except Exception as exc:  # noqa: BLE001 — cache is an optional accelerator
             exc.add_note(f"operation=search_cache_get, key={cache_key}")
+            exc.add_note(traceback.format_exc())
             logger.bind(key=cache_key).warning("search_cache_read_failed")
             return None
         if cached is None:
             return None
         raw = cached.decode("utf-8") if isinstance(cached, bytes | bytearray) else str(cached)
-        response = SearchResponse.model_validate_json(raw)
+        try:
+            response = SearchResponse.model_validate_json(raw)
+        except ValidationError as exc:
+            # A corrupt or foreign-schema entry is a miss, not a 500: the
+            # query recomputes and the SET below overwrites the bad value.
+            exc.add_note(f"operation=search_cache_decode, key={cache_key}")
+            logger.bind(key=cache_key).warning("search_cache_decode_failed")
+            return None
         return response.model_copy(update={"cache_hit": True})
 
     async def _cache_set(self, cache_key: str, response: SearchResponse) -> None:
@@ -602,7 +627,29 @@ class SearchService:
             await self.redis.setex(cache_key, ttl, response.model_dump_json())
         except Exception as exc:  # noqa: BLE001 — cache is an optional accelerator
             exc.add_note(f"operation=search_cache_set, key={cache_key}")
+            exc.add_note(traceback.format_exc())
             logger.bind(key=cache_key).warning("search_cache_write_failed")
+
+    async def _cache_version(self, tenant_id: str) -> str:
+        """The tenant's cache-version counter, ``"0"`` when absent/unavailable.
+
+        Folded into the digest so an ingest-time bump invalidates every cached
+        query for the tenant at once. A read failure degrades to ``"0"``: the
+        worst case is serving a pre-ingest cache entry until its TTL expires,
+        never cross-tenant data.
+        """
+        if self.redis is None:
+            return "0"
+        try:
+            raw = await self.redis.get(CACHE_VERSION_KEY.format(tenant_id=tenant_id))
+        except Exception as exc:  # noqa: BLE001 — cache is an optional accelerator
+            exc.add_note(f"operation=search_cache_version_get, tenant_id={tenant_id}")
+            exc.add_note(traceback.format_exc())
+            logger.bind(tenant_id=tenant_id).warning("search_cache_version_read_failed")
+            return "0"
+        if raw is None:
+            return "0"
+        return raw.decode("utf-8") if isinstance(raw, bytes | bytearray) else str(raw)
 
 
 def _width_guard_failure() -> SearchInfrastructureError | None:
@@ -646,11 +693,15 @@ def _resolve_branch_rows(
     return Success(row_sets)
 
 
-def _build_cache_key(kind: str, tenant_id: str, payload: HybridSearchRequest) -> str:
+def _build_cache_key(
+    kind: str, tenant_id: str, cache_version: str, payload: HybridSearchRequest
+) -> str:
     """Content-address the query and its scope.
 
     ``tenant_id`` is part of the digest: two tenants issuing the identical
     query must not share a cache entry, or one would read the other's results.
+    ``cache_version`` is the per-tenant invalidation counter the ingest worker
+    bumps on completion — a version change changes every digest at once.
     """
     normalized_query = " ".join(payload.query.lower().split())
     filter_json = orjson.dumps(payload.metadata_filter.chunk_metadata, option=orjson.OPT_SORT_KEYS)
@@ -658,6 +709,7 @@ def _build_cache_key(kind: str, tenant_id: str, payload: HybridSearchRequest) ->
         [
             kind.encode("utf-8"),
             tenant_id.encode("utf-8"),
+            f"v{cache_version}".encode(),
             normalized_query.encode("utf-8"),
             filter_json,
             str(payload.limit).encode("utf-8"),
@@ -665,6 +717,24 @@ def _build_cache_key(kind: str, tenant_id: str, payload: HybridSearchRequest) ->
         ]
     )
     return "search:" + hashlib.sha256(raw_key).hexdigest()
+
+
+async def bump_tenant_cache_version(redis_client: Any, *, tenant_id: str) -> None:
+    """Invalidate the tenant's cached searches after a successful ingest.
+
+    The version counter (not a key pattern SCAN) is the cheap correct
+    mechanism: one INCR changes every digest at once, and superseded entries
+    simply age out under the cache TTL. Best effort — a failed bump costs at
+    most TTL minutes of staleness, never wrong-tenant data.
+    """
+    key = CACHE_VERSION_KEY.format(tenant_id=tenant_id)
+    try:
+        await redis_client.incr(key)
+        await redis_client.expire(key, get_settings().SEARCH_TASK_OWNER_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — invalidation is an accelerator
+        exc.add_note(f"operation=search_cache_version_bump, tenant_id={tenant_id}")
+        exc.add_note(traceback.format_exc())
+        logger.bind(tenant_id=tenant_id).warning("search_cache_version_bump_failed")
 
 
 def _build_search_items(
