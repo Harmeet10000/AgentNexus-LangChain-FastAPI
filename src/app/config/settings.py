@@ -87,9 +87,18 @@ class Settings(BaseSettings):
         # derives from this setting. A mismatch cannot be retried or converted
         # at runtime — every search write and vector comparison would be
         # wrong-width — so it is rejected at load, not at first ingest.
-        if dim is not None and dim != SEARCH_EMBEDDING_DIM:
+        # mode="before" sees raw env strings: coerce before comparing, or a
+        # perfectly valid EMBEDDING_DIMENSION=768 from the environment kills
+        # startup because "768" != 768.
+        dim_int: int | None = None
+        if dim is not None:
+            try:
+                dim_int = int(str(dim))
+            except ValueError:
+                dim_int = None
+        if dim_int is not None and dim_int != SEARCH_EMBEDDING_DIM:
             drifted = (
-                f"EMBEDDING_DIMENSION={dim} but search_chunks.embedding stores "
+                f"EMBEDDING_DIMENSION={dim_int} but search_chunks.embedding stores "
                 f"{SEARCH_EMBEDDING_DIM}; the setting cannot drift from the "
                 "pinned search column (re-embedding would be required and no "
                 "conversion exists)."

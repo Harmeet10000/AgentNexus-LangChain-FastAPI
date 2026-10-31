@@ -72,6 +72,7 @@ async def process_search_ingestion_document(
     tenant_id: str,
     content: str,
     event_id: str | None = None,
+    doc_metadata: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Chunk, batch-embed, and upsert search chunks for one document.
 
@@ -124,7 +125,10 @@ async def process_search_ingestion_document(
                 "chunk_index": chunk.chunk_index,
                 "content": chunk.content,
                 "embedding": embedding,
-                "chunk_metadata": {"token_count": chunk.token_count},
+                "chunk_metadata": {
+                    **(doc_metadata or {}),
+                    "token_count": chunk.token_count,
+                },
             }
             for chunk, embedding in zip(batch, embeddings, strict=True)
         ]
@@ -175,6 +179,7 @@ async def run_search_ingestion_task(
     tenant_id: str,
     content: str,
     event_id: str | None = None,
+    doc_metadata: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Create a task-local async DB session and execute search ingestion."""
     from app.connections import init_db  # noqa: PLC0415 — keeps the web import graph worker-free
@@ -189,6 +194,7 @@ async def run_search_ingestion_task(
                 tenant_id=tenant_id,
                 content=content,
                 event_id=event_id,
+                doc_metadata=doc_metadata,
             )
     finally:
         await engine.dispose()

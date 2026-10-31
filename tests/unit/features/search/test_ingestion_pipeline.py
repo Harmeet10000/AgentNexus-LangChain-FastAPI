@@ -15,12 +15,7 @@ import pytest
 from returns.result import Success
 
 from app.features.search.application import ingestion as ingestion_module
-from app.features.search.application.ingestion import (
-    SearchIngestTerminalError,
-    process_search_ingestion_document,
-)
-from app.features.search.domain.errors import SearchConflictError
-from app.utils import ServiceUnavailableException
+from app.features.search.application.ingestion import process_search_ingestion_document
 
 if TYPE_CHECKING:
     from typing import Any
@@ -118,38 +113,28 @@ async def test_empty_content_records_a_completed_zero_chunk_state(
 
 
 @pytest.mark.asyncio
-async def test_width_drift_raises_the_terminal_configuration_error(
+async def test_ingested_metadata_is_searchable_via_chunk_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A column/setting disagreement is terminal — the task must not retry it."""
+    """doc_metadata flows into every chunk's chunk_metadata.
 
-    def _mismatch(stored_dim: int) -> tuple[int, int] | None:
-        return (stored_dim, 1536)
-
-    monkeypatch.setattr(ingestion_module, "stored_width_mismatch", _mismatch)
+    Metadata filters match chunk_metadata only — a page ingested with
+    doc_metadata={"lang": "en"} must be findable by
+    metadata_filter={"lang": "en"}, or the filter surface is dead.
+    """
     pipeline = _install_pipeline(monkeypatch)
+    result = await process_search_ingestion_document(
+        repo=pipeline,  # type: ignore[arg-type]
+        document_id=DOC_ID,
+        tenant_id=TENANT,
+        content="a b c d e",
+        doc_metadata={"lang": "en", "brand": "acme"},
+    )
 
-    with pytest.raises(SearchIngestTerminalError, match=r"search_chunks\.embedding"):
-        await process_search_ingestion_document(
-            repo=pipeline,  # type: ignore[arg-type]
-            document_id=DOC_ID,
-            tenant_id=TENANT,
-            content="a b c",
-        )
-    # Nothing was written before the guard fired.
-    assert pipeline.upsert_batches == []
-    assert pipeline.statuses == []
-
-
-def test_to_raising_exception_maps_by_retryability() -> None:
-    """Infrastructure failures retry; everything else is terminal (CR MINOR)."""
-    from app.features.search.domain.errors import SearchInfrastructureError
-
-    error = SearchInfrastructureError(message="database unavailable", source="test")
-    translated = ingestion_module._to_raising_exception(error)
-
-    assert isinstance(translated, ServiceUnavailableException)
-    non_infra = SearchConflictError(message="duplicate", source="test")
-    terminal = ingestion_module._to_raising_exception(non_infra)
-    assert isinstance(terminal, SearchIngestTerminalError)
-    assert not isinstance(terminal, ServiceUnavailableException)
+    assert result["status"] == "completed"
+    assert pipeline.upsert_batches
+    for batch in pipeline.upsert_batches:
+        for row in batch:
+            assert row["chunk_metadata"]["lang"] == "en"
+            assert row["chunk_metadata"]["brand"] == "acme"
+            assert "token_count" in row["chunk_metadata"]

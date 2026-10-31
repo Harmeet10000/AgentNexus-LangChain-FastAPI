@@ -110,8 +110,8 @@ def search_ingest(
         content_hash,
         title,
         source_uri,
-        doc_metadata,
-    )  # identity fields; chunking needs content only
+    )  # identity fields; chunking needs content only.  doc_metadata flows to
+    # the pipeline: it is what metadata filters match against.
     # Redis availability gates EVERYTHING cache-shaped: with an empty REDIS_URL
     # there is no client to construct, so the lock check must run before any
     # get_redis_client() call.
@@ -138,6 +138,7 @@ def search_ingest(
             tenant_id=tenant_id,
             content=content,
             event_id=event_id,
+            doc_metadata=doc_metadata,
         )
         # Fresh ingest must not serve stale cached searches for the remainder
         # of the cache TTL: bump the tenant's cache version so every digest
