@@ -208,6 +208,29 @@ GRAPHITI_EDGE_TYPE_MAP: dict[tuple[str, str], list[str]] = {
 }
 
 
+class RelationshipType(StrEnum):
+    """Closed typed-edge vocabulary for persisted legal relationship edges.
+
+    Lives in the retrieval layer because the graph read/write surface and the
+    ingestion extractor both validate against it; the agent_saul domain
+    re-imports it for its runtime state models.
+    """
+
+    INDEMNIFIES = "indemnifies"
+    TRIGGERED_BY = "triggered_by"
+    OVERRIDDEN_BY = "overridden_by"
+    DEADLINE = "deadline"
+    RESTRICTS = "restricts"
+    OBLIGES = "obliges"
+    # Ingestion pass-2 (relationship extraction) vocabulary: definitions,
+    # amendment/supersession chains, and cross-clause references.  The
+    # extractor validates against this closed enum, so new values flow
+    # through without producer changes.
+    DEFINES = "defines"
+    SUPERSEDES = "supersedes"
+    REFERENCES = "references"
+
+
 class LegalEdgeInput(BaseModel):
     """Input for writing a structured legal relationship edge to Graphiti.
 

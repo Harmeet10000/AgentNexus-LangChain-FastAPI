@@ -1,0 +1,1 @@
+"""Site-search persistence adapters."""

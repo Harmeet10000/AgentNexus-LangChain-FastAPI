@@ -104,3 +104,20 @@ class CrawlerJobPayload(CeleryTaskPayload):
 
     crawl_id: str
     request_payload: dict[str, object]
+
+
+class SearchIngestPayload(CeleryTaskPayload):
+    """Typed payload for the site-search chunk/embed ingestion task.
+
+    ``content`` travels on the wire (as in the legacy ``tasks.search_ingest``
+    call this replaces) because site search ingests arbitrary text that never
+    passes through object storage.
+    """
+
+    document_id: str
+    tenant_id: str
+    content: str
+    content_hash: str
+    title: str
+    source_uri: str | None = None
+    doc_metadata: dict[str, object] = Field(default_factory=dict)

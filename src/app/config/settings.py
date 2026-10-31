@@ -399,6 +399,24 @@ class Settings(BaseSettings):
     SEARCH_RATE_LIMIT_PER_MINUTE: int = Field(default=30)
     SEARCH_RATE_LIMIT_PER_HOUR: int = Field(default=500)
 
+    # --- Site Search (hybrid retrieval feature) ---
+    # Defaults ported from the legacy search feature constants; the feature
+    # reads these, never module constants, for tunables.
+    SEARCH_DEFAULT_PAGE_SIZE: int = Field(default=20, ge=1)
+    SEARCH_MAX_PAGE_SIZE: int = Field(default=100, ge=1)
+    SEARCH_CACHE_TTL_SECONDS: int = Field(default=900, ge=1)
+    SEARCH_RAG_DEFAULT_TOKEN_BUDGET: int = Field(default=2000, ge=1)
+    SEARCH_HYBRID_CANDIDATE_LIMIT: int = Field(default=50, ge=1)
+    SEARCH_RRF_K: int = Field(default=60, ge=1)
+    SEARCH_INGEST_CHUNK_SIZE: int = Field(default=512, ge=1)
+    SEARCH_INGEST_CHUNK_OVERLAP: int = Field(default=64, ge=0)
+    SEARCH_INGEST_EMBEDDING_BATCH_SIZE: int = Field(default=200, ge=1)
+    SEARCH_ANALYZE_THRESHOLD_CHUNKS: int = Field(default=10_000, ge=0)
+    SEARCH_DISKANN_QUERY_SEARCH_LIST_SIZE: int = Field(default=100, ge=1)
+    SEARCH_DISKANN_QUERY_RESCORE: int = Field(default=50, ge=1)
+    SEARCH_CHUNKS_BM25_INDEX_NAME: str = Field(default="search_chunks_bm25_idx")
+    SEARCH_TRIGRAM_SIMILARITY_THRESHOLD: float = Field(default=0.1, ge=0.0, le=1.0)
+
     # --- Redis Cache for Crawler ---
     REDIS_CRAWL_CACHE_TTL: int = Field(default=3600)  # 1 hour
 

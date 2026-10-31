@@ -18,6 +18,7 @@ from app.shared.jobs.payloads import (
     DocumentIngestTerminalPayload,
     NoKwargsPayload,
     PasswordResetEmailPayload,
+    SearchIngestPayload,
     VerificationEmailPayload,
 )
 from app.shared.jobs.registry import CeleryTaskRegistry
@@ -58,6 +59,15 @@ _VALID_SAMPLES = {
     CrawlerJobPayload: {
         "crawl_id": "crawl-1",
         "request_payload": {"url": "https://example.com"},
+    },
+    SearchIngestPayload: {
+        "document_id": "doc-1",
+        "tenant_id": "tenant-1",
+        "content": "site page body",
+        "content_hash": "hash-1",
+        "title": "Site page",
+        "source_uri": "https://example.com/page",
+        "doc_metadata": {"lang": "en"},
     },
 }
 

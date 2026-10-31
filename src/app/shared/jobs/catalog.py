@@ -31,6 +31,7 @@ from app.shared.jobs.names import (
     CREDITS_RECONCILE,
     DOCUMENTS_INGEST,
     DOCUMENTS_INGEST_TERMINAL,
+    SEARCH_INGEST,
     SEND_PASSWORD_RESET_EMAIL,
     SEND_VERIFICATION_EMAIL,
 )
@@ -42,6 +43,7 @@ from app.shared.jobs.payloads import (
     DocumentIngestTerminalPayload,
     NoKwargsPayload,
     PasswordResetEmailPayload,
+    SearchIngestPayload,
     VerificationEmailPayload,
 )
 
@@ -69,6 +71,7 @@ class JobCapability(StrEnum):
     CREDITS = "credits"
     DOCUMENT_INGESTION = "document_ingestion"
     EMAIL = "email"
+    SEARCH_INGESTION = "search_ingestion"
     TRANSCRIPT_SWEEP = "transcript_sweep"
     AUTH_SECURITY = "auth_security"
 
@@ -195,6 +198,13 @@ _CATALOG: dict[str, JobDefinition[CeleryTaskPayload]] = {
         queue=JobQueue.INGESTION,
         capability=JobCapability.DOCUMENT_INGESTION,
         declaring_module="app.worker.jobs.documents",
+    ),
+    SEARCH_INGEST: _job(
+        SEARCH_INGEST,
+        SearchIngestPayload,
+        queue=JobQueue.INGESTION,
+        capability=JobCapability.SEARCH_INGESTION,
+        declaring_module="app.worker.jobs.search",
     ),
     CRAWLER_CRAWL: _job(
         CRAWLER_CRAWL,

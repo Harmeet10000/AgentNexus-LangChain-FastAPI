@@ -350,6 +350,10 @@ todos:-
 - The actual Redis pool default was verified as 100 connections per app process, not 10.
 - ThreadLock was verified as an ownership-token lease with renewal every TTL/3.  DONE
 275. auth-lane gap found during runtime unification: features/auth/websocket_security.py::_check_session_validity validates session expiry on per-frame WS checks but never checks user_id (agent_saul handshake does both). Resolved per user policy: per-frame check now fails closed on Redis outage and rejects owner mismatch with a distinct structured event; periodic sweep remains fail-open because it is monitoring, not the enforcement gate. DONE
+281. Yes! Cloudflare R2 Object Storage offers a free monthly tier and is compatible with Python's AWS boto3 library for S3.  DONE
+136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing  DONE
+251. the repository has more than one ingestion flow. The documents-service path uses LangExtract; the separate ingestion graph has its own extraction/segmentation stages.   DONE
+190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,   DONE
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
@@ -421,10 +425,8 @@ To solve these problems, the creator shifted to a **production-grade database ar
 242. fix agent tools. need to check what are all the tools my agent has. does it have all the tools it needs or does it require more? what are the best practices and principles for making agent tools.
 
 250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
-251. the repository has more than one ingestion flow. The documents-service path uses LangExtract; the separate ingestion graph has its own extraction/segmentation stages. 
-190. see if documents/ can be moved in ingestion pipeline with langextract, pageindex, graphiti, postgres,
-136. use LangExtract outputs to build rich graph knowledge from your legal documents.  in document processing
-252. remove retrival graph if present and figure out is this is the best way to do retrival Full picture gathered. Here are the facts first, then one decision I need from you before touching the layout (the two halves of your instruction point at different homes).
+
+252. retrival graph if present and figure out is this is the best way to do retrival Full picture gathered. Here are the facts first, then one decision I need from you before touching the layout (the two halves of your instruction point at different homes).
 
 1. Is there a retrieval graph? — Yes, and it's deliberately unreachable
 
@@ -468,7 +470,6 @@ Current seams: implementation lives in shared/rag/graphiti/ (client 600L, schema
 Your first line says inline the functions into connections/graphiti.py; the second says shift into src/app/retrieval/graphiti — different homes. Which layout do you want?
 
 280. The gap is confirmed: fresh users get a tenant only via the backfill script's reconcile mode. Running it (documented as non-destructive), then retrying the tenant-gated flow.
-281. Yes! Cloudflare R2 Object Storage offers a free monthly tier and is compatible with Python's AWS boto3 library for S3.
 273. unify transcript sync orchestration — GATE RELEASED after item 279 E2E PASS. The recorder (turn-time apply_projection) and reconcile sweep (cron _transcript_sweep_async → _reconcile_once → apply_projection) are two orchestrators over the same projector; their divergence already cost a debugging session (closed=0 sweep analysis, items 262-263). Fold known sweep-batch issues into the same change: list_stale_sessions ordering tweak + integration-debris exclusion (≈200 non-terminal no-op snapshots clog the 20/beat batch); one orchestration module owning "apply snapshot + derive status + close turn + emit" with recorder and sweep as thin callers. Acceptance: parity test — recorder and sweep produce identical rows for the same snapshot; happy-path E2E green after refactor. IN PROGRESS.
 274. TextGenerator seam: SHELVED by read-only evaluation (no code changed). Cause: the seam wire contract is free text only — protocol.py `TextGenerator.generate(TextGenerationRequest) -> Result[GeneratedText]` = {prompt, system} → {text}; zero structured-output, zero usage/cost metadata (adapter discards usage_metadata), model pinned at lifespan build (GEMINI_PRO_MODEL, temp 0.7 vs documents-wanted 0.1, no passthrough). Meanwhile every LLM site in the documents `ask` loop uses `with_structured_output(…)` (query.py: _build_query_plan L690, _grade_context L763, _generate_answer L786) — a "one call-site pilot" actually means adding structured output to the seam itself, exceeding pilot scope and risking a JSON-in-free-text quality regression on the live /ask endpoint. Positive asset found: InMemoryTextGenerator + tests/unit/ai/test_generation.py is a ready-made harness (good). REOPEN condition: add a structured-output variant to ai/generation protocol/models/adapter as its own item, then pilot _grade_context (the lowest-risk site) first.
 
@@ -513,6 +514,17 @@ c hoose to build this thing? How has it benefited them? Are they still working o
 
 
 bit packing, texture atlasting, delta encoding, deduplication
+
+0:11 #1 git notes
+1:27 #2 git worktree
+6:00 #3 .gitkeep
+7:05 #4 git reflog
+8:06 #5 Send patches via email
+9:12 #6 Fun fact: The maintainer of git
+10:33 #7 The man page of git
+11:10 #8 git request-pull
+13:27 #9 git bisect
+15:51 #10 git rev-list
 
 
 <!-- memory usage of FastAPI app -->
@@ -559,7 +571,7 @@ bit packing, texture atlasting, delta encoding, deduplication
 
     The user finally logs in and clicks "Approve". LangGraph calls /resume. The checkpointer pulls the V1 state blob from the database and injects it into the V2 graph. The V2 graph expects compliance_region, doesn't find it, throws a KeyError, and the entire thread permanently crashes. The user's work is irrecoverably lost.
 
-    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.
+    The Insider Solution: Never trust the injected state from a checkpointer on resume without a migration layer. You must implement a StateHydrationNode as the absolute first step of any resume operation. This node intercepts the raw dictionary from the database, checks a schema_version key (which you must manually add to your base state), and runs a migration script to populate default values for any new fields introduced in newer deployments before allowing the core logic nodes to touch the state. Treat your LangGraph state with the exact same rigor as you treat your production database schema.   DONE
 
 6.
 7. Add Idempotency Layer
@@ -604,7 +616,7 @@ bit packing, texture atlasting, delta encoding, deduplication
         success: bool
         data: dict
         error: Optional[str]
-        metadata: dict
+        metadata: dict    DONE
 11. Citation Enforcement Layer
     Every output must include:
     {

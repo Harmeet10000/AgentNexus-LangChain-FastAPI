@@ -21,6 +21,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.features.agent_saul.domain.budget import BudgetLedger
+from app.retrieval.graphiti.schemas import RelationshipType
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -166,22 +167,6 @@ class ClauseType(StrEnum):
     PAYMENT = "payment"
     IP_OWNERSHIP = "ip_ownership"
     OTHER = "other"
-
-
-class RelationshipType(StrEnum):
-    INDEMNIFIES = "indemnifies"
-    TRIGGERED_BY = "triggered_by"
-    OVERRIDDEN_BY = "overridden_by"
-    DEADLINE = "deadline"
-    RESTRICTS = "restricts"
-    OBLIGES = "obliges"
-    # Ingestion pass-2 (relationship extraction) vocabulary: definitions,
-    # amendment/supersession chains, and cross-clause references.  The
-    # extractor validates against this closed enum, so new values flow
-    # through without producer changes.
-    DEFINES = "defines"
-    SUPERSEDES = "supersedes"
-    REFERENCES = "references"
 
 
 # ---------------------------------------------------------------------------

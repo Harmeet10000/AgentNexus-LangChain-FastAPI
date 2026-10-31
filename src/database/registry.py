@@ -24,6 +24,7 @@ MODEL_MODULE_NAMES: tuple[str, ...] = (
     "app.features.billing.credits.models",
     "app.features.documents.domain.document",
     "app.features.documents.domain.chunk",
+    "app.features.search.adapters.persistence.models",
     "app.features.auth.domain.tenancy_models",
     "app.features.billing.invoices.invoice_batch",
     "app.features.billing.invoices.invoice_void",

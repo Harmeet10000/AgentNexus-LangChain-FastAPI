@@ -9,6 +9,7 @@ from app.features.documents.api.http.legacy_ingest_router import router as inges
 from app.features.documents.api.http.router import router as documents_router
 from app.features.health.router import router as health_router
 from app.features.profile.router import router as profile_router
+from app.features.search.api.http.router import router as search_router
 from app.features.users.router import router as users_router
 
 v1_router = StrictEnvelopeAPIRouter(prefix="/api/v1", deprecated=True)
@@ -20,4 +21,5 @@ v1_router.include_router(ingestion_router)
 v1_router.include_router(users_router)
 v1_router.include_router(profile_router)
 v1_router.include_router(documents_router)
+v1_router.include_router(search_router)
 v1_router.include_router(agent_saul_router)

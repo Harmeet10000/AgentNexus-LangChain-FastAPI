@@ -27,12 +27,13 @@ from graphiti_core.errors import GraphitiError
 from graphiti_core.nodes import EpisodeType, EpisodicNode
 from neo4j.exceptions import Neo4jError
 
+from app.observability.logging import logger
+from app.retrieval.edge_expansion import LegalEdgeRecord
+
 # The closed relationship vocabulary is owned by the pass-2 producer. Reads
 # parse persisted edge episodes against the same enum so an episode whose
 # relationship is not in the vocabulary fails closed (dropped, never typed).
-from app.features.agent_saul.domain.state import RelationshipType
-from app.observability.logging import logger
-from app.retrieval.edge_expansion import LegalEdgeRecord
+from app.retrieval.graphiti.schemas import RelationshipType
 
 from .grouping import (
     GraphitiDocumentScope,
@@ -724,9 +725,7 @@ async def fetch_relationship_edges(
                     uuid_cursor=cursor,
                 )
                 raw_results.extend(page)
-                edges_seen = sum(
-                    1 for raw in raw_results if _is_relationship_episode_source(raw)
-                )
+                edges_seen = sum(1 for raw in raw_results if _is_relationship_episode_source(raw))
                 if edges_seen >= num_results or len(page) < _EPISODE_PAGE_SIZE:
                     break
                 cursor = str(getattr(page[-1], "uuid", "") or "")
