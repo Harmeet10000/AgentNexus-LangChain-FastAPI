@@ -12,6 +12,7 @@ from returns.result import Failure, Success
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.config import get_settings
+from app.events.writer import stamp_outbox_payload_event_id
 from app.features.search.adapters.persistence.models import SEARCH_EMBEDDING_DIM
 from app.features.search.api.http.dto import (
     RagContextSectionResponse,
@@ -29,7 +30,11 @@ from app.features.search.domain.errors import (
     SearchInfrastructureError,
     SearchNotFoundError,
 )
-from app.features.search.domain.models import SearchDocumentStatus
+from app.features.search.domain.models import (
+    TASK_CELERY_ID_CACHE_KEY,
+    TASK_OWNER_CACHE_KEY,
+    SearchDocumentStatus,
+)
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, reciprocal_rank_fusion
@@ -57,11 +62,6 @@ if TYPE_CHECKING:
     from app.features.search.domain.errors import SearchResult
     from app.retrieval.fusion import RankedResultRow
     from app.shared.jobs import JobBus
-
-#: Redis record written at ingest: task id -> the owning tenant and document.
-#: It is the authorization source while a task is queued, because the Celery
-#: result payload only carries the tenant after a worker has run.
-_TASK_OWNER_KEY = "search:task_owner:{task_id}"
 
 
 class EmbedQueryFn(Protocol):
@@ -191,6 +191,11 @@ class SearchService:
                 typed_job,
                 aggregate=AggregateRef(aggregate_type="search_document", aggregate_id=document_id),
             )
+            # The adapter generates the event id internally, so the payload was
+            # staged without it; stamping it into the stored row (same
+            # transaction) lets the worker bind its real Celery task id back to
+            # the event id the API returned to the client.
+            await stamp_outbox_payload_event_id(tx, event_id=receipt.event_id)
         except Exception as exc:  # noqa: BLE001 — staging failure is classified into the typed search error union
             exc.add_note(f"operation=search_ingest, document_id={document_id}")
             # The traceback note plus the structured log are the only durable
@@ -261,14 +266,22 @@ class SearchService:
         """Return ingest status for a task, fail-closed to the caller's tenant.
 
         Authorization rests on the ownership record written at enqueue
-        (``search:task_owner:{task_id}``), which exists for every task state —
-        the Celery result payload only carries the tenant once a worker has
-        run. The payload tenant and the tenant-scoped document row act as
+        (``TASK_OWNER_CACHE_KEY``), which exists for every task state — the
+        Celery result payload only carries the tenant once a worker has run.
+        The payload tenant and the tenant-scoped document row act as
         additional fences; a foreign tenant always gets the same answer as a
         nonexistent task.
+
+        Resolution order: the worker's celery-id mapping (it records the real
+        dispatch id against the event id — polling the event id itself would
+        report PENDING forever), then the durable document status column, then
+        the Celery state (QUEUED while still staged).
         """
         owner = await self._task_owner_get(task_id)
-        state, result_payload, error = await asyncio.to_thread(self._celery_snapshot, task_id)
+        celery_task_id = await self._task_celery_id_get(task_id)
+        state, result_payload, error = await asyncio.to_thread(
+            self._celery_snapshot, celery_task_id or task_id
+        )
 
         owner_tenant = str(owner.get("tenant_id", "")) if owner else ""
         payload_tenant = str(result_payload.get("tenant_id", ""))
@@ -301,6 +314,7 @@ class SearchService:
         document_id = str(document_id_raw) if document_id_raw else None
 
         result_view: dict[str, object] = dict(result_payload) if result_payload else {}
+        document: SearchDocument | None = None
         if document_id is not None:
             document_result = await self.repo.get_document_by_id(
                 tenant_id=tenant_id, document_id=document_id
@@ -316,9 +330,14 @@ class SearchService:
                     "source_uri": document.source_uri,
                 }
 
-        if state == "PENDING" and owner is not None:
-            # The outbox row is staged but no worker has picked it up yet; the
-            # Celery backend's PENDING is the "never seen this task" state.
+        if document is not None and self._is_completed(document):
+            # The status column is the durable terminal truth — the broker
+            # backend is an eventual cache over it, not the other way around.
+            state = "SUCCESS"
+        elif state == "PENDING" and owner is not None:
+            # The outbox row is staged but no worker has picked it up yet (or
+            # it has not recorded its dispatch id); the Celery backend's
+            # PENDING is the "never seen this task" state.
             state = "QUEUED"
 
         return Success(
@@ -341,7 +360,7 @@ class SearchService:
         if self.redis is None:
             return None
         try:
-            raw = await self.redis.get(_TASK_OWNER_KEY.format(task_id=task_id))
+            raw = await self.redis.get(TASK_OWNER_CACHE_KEY.format(task_id=task_id))
         except Exception as exc:  # noqa: BLE001 — cache is an optional accelerator
             exc.add_note(f"operation=search_task_owner_get, task_id={task_id}")
             logger.bind(task_id=task_id).warning("search_task_owner_read_failed")
@@ -352,6 +371,20 @@ class SearchService:
         parsed = orjson.loads(raw_text)
         return dict(parsed) if isinstance(parsed, dict) else None
 
+    async def _task_celery_id_get(self, task_id: str) -> str | None:
+        """The real dispatch id the worker recorded, or ``None`` when queued."""
+        if self.redis is None:
+            return None
+        try:
+            raw = await self.redis.get(TASK_CELERY_ID_CACHE_KEY.format(task_id=task_id))
+        except Exception as exc:  # noqa: BLE001 — cache is an optional accelerator
+            exc.add_note(f"operation=search_task_celery_id_get, task_id={task_id}")
+            logger.bind(task_id=task_id).warning("search_task_celery_id_read_failed")
+            return None
+        if raw is None:
+            return None
+        return raw.decode("utf-8") if isinstance(raw, bytes | bytearray) else str(raw)
+
     async def _task_owner_set(self, task_id: str, *, tenant_id: str, document_id: str) -> bool:
         """Record task ownership at enqueue; ``False`` when the cache is down."""
         if self.redis is None:
@@ -359,7 +392,7 @@ class SearchService:
         record = orjson.dumps({"tenant_id": tenant_id, "document_id": document_id})
         try:
             await self.redis.set(
-                _TASK_OWNER_KEY.format(task_id=task_id),
+                TASK_OWNER_CACHE_KEY.format(task_id=task_id),
                 record,
                 ex=get_settings().SEARCH_TASK_OWNER_TTL_SECONDS,
             )

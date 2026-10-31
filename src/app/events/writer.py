@@ -106,6 +106,34 @@ async def with_terminal_outbox(
     return event_id
 
 
+async def stamp_outbox_payload_event_id(
+    tx: "TransactionScope | AsyncSession",
+    *,
+    event_id: str,
+) -> None:
+    """Write the outbox event's own id into its JSONB payload, in-transaction.
+
+    The staging adapter generates the event id internally, so a producer that
+    needs the *consumer* to know it (site search's worker binds its real Celery
+    task id back to the event the API returned) cannot put it in the payload at
+    stage time. One ``jsonb_set`` on the caller's transaction keeps the fix
+    atomic with the staged row: it commits together or not at all.
+    """
+    if not is_transaction_scope(tx):
+        message = "Outbox payload stamping requires a transactional execute"
+        raise TypeError(message)
+    await tx.execute(
+        text(
+            """
+            UPDATE outbox_events
+            SET payload = jsonb_set(payload, ARRAY['event_id'], to_jsonb(:event_id))
+            WHERE id = :event_id
+            """
+        ),
+        {"event_id": event_id},
+    )
+
+
 class PostgresOutboxAdapter(TransactionalStagingAdapter):
     """Stage catalog-owned jobs in a caller-owned PostgreSQL transaction.
 
@@ -207,6 +235,7 @@ __all__ = [
     "PostgresOutboxAdapter",
     "PostgresTransactionalStagingAdapter",
     "TransactionalOutboxAdapter",
+    "stamp_outbox_payload_event_id",
     "terminal_event_id",
     "with_outbox",
     "with_terminal_outbox",

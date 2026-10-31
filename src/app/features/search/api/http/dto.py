@@ -7,14 +7,33 @@ Numeric bounds are protocol constants (wire contract), pinned here; the
 *tunables* (page-size defaults, candidate limit, token budget) default to
 ``None`` and are resolved by the service from ``config.settings`` SEARCH_*
 fields, so configuration — not module constants — drives behavior.
+
+Size bounds are DoS fences, not style: every accepted body is written to an
+outbox row, carried on the broker message, and spent on provider embedding
+calls per chunk. An unbounded body converts one anonymous POST into storage,
+queue, and metered-API spend, so both the content and the metadata are capped
+before validation succeeds.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
+
+import orjson
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _STRICT_CONFIG = ConfigDict(extra="forbid")
 _READ_MODEL_CONFIG = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
+
+#: Maximum accepted ``content`` length (1 MB). The legacy feature accepted
+#: unbounded bodies; the chunk pipeline spends O(content) provider calls.
+MAX_INGEST_CONTENT_CHARS = 1_000_000
+
+#: Maximum serialized ``doc_metadata`` size. The metadata rides the broker
+#: message and lands in a JSONB column on every chunk-less write; 8 KiB covers
+#: any realistic site-page taxonomy without letting a hostile body inflate the
+#: outbox row.
+MAX_INGEST_METADATA_BYTES = 8_192
 
 
 class SearchMetadataFilter(BaseModel):
@@ -31,9 +50,27 @@ class SearchIngestRequest(BaseModel):
     model_config = _STRICT_CONFIG
 
     title: str = Field(min_length=1, max_length=500)
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=MAX_INGEST_CONTENT_CHARS)
     source_uri: str | None = Field(default=None, max_length=2048)
-    doc_metadata: dict[str, object] = Field(default_factory=dict)
+    doc_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _bound_doc_metadata(self) -> SearchIngestRequest:
+        """Cap the serialized metadata size (deep values included).
+
+        A pathological nesting depth makes even *measuring* the size explode
+        (recursion), which is itself a rejection: any structure the serializer
+        cannot walk within limits is not a site-page taxonomy.
+        """
+        try:
+            serialized_size = len(orjson.dumps(self.doc_metadata))
+        except (TypeError, RecursionError) as exc:
+            unserializable = "doc_metadata is not serializable within limits"
+            raise ValueError(unserializable) from exc
+        if serialized_size > MAX_INGEST_METADATA_BYTES:
+            oversized = f"doc_metadata exceeds {MAX_INGEST_METADATA_BYTES} serialized bytes"
+            raise ValueError(oversized)
+        return self
 
 
 class SearchIngestResponse(BaseModel):

@@ -62,7 +62,9 @@ class SearchDocument(Base):
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False, default="")
+    # No Python-side default on purpose: a write without a tenant must fail at
+    # the database, not silently file the row under an empty-string tenant.
+    tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False)
     source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str] = mapped_column(String(length=500), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(length=64), nullable=False)
@@ -124,7 +126,9 @@ class SearchChunk(Base):
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False, default="")
+    # No Python-side default on purpose: a write without a tenant must fail at
+    # the database, not silently file the row under an empty-string tenant.
+    tenant_id: Mapped[str] = mapped_column(String(length=255), nullable=False)
     document_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("search_documents.id", ondelete="CASCADE"),

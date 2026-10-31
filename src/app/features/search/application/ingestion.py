@@ -6,7 +6,9 @@ settings-driven shared Gemini embedding client (``app.ai.embeddings``) instead
 of a per-call module-level client, and tenant-scoped chunk rows.
 
 Celery entrypoints raise (EXCEPTION-RULES); retryable infrastructure failures
-propagate to the task's autoretry policy.
+propagate to the task's autoretry policy, while terminal failures raise
+:data:`SearchIngestTerminalError` — the task's ``dont_autoretry_for`` exempts
+it, because a retry cannot fix a configuration drift or a constraint.
 """
 
 from __future__ import annotations
@@ -27,8 +29,8 @@ from app.features.search.domain.chunking import chunk_text
 from app.features.search.domain.errors import SearchInfrastructureError
 from app.features.search.domain.models import SearchDocumentStatus
 from app.observability.logging import logger
-from app.utils import InfrastructureException, ServiceUnavailableException
-from app.utils.embedding import assert_stored_width_matches_configured
+from app.utils import ServiceUnavailableException
+from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -37,17 +39,30 @@ if TYPE_CHECKING:
     from app.features.search.domain.errors import SearchError
 
 
+class SearchIngestTerminalError(Exception):
+    """A terminal search-ingest failure: retrying cannot change the outcome.
+
+    Configuration drift (the stored vector width disagreeing with the
+    configured producer) and non-retryable constraint failures land here. The
+    ``tasks.search_ingest`` task's ``dont_autoretry_for`` exempts this class,
+    so it dead-letters immediately instead of spinning through backoff while
+    the document stays pending.
+    """
+
+
 def _to_raising_exception(error: SearchError) -> Exception:
     """Translate the typed search error union at the Celery raising boundary.
 
     ``FeatureError`` is a Pydantic model, never raised (EXCEPTION-RULES): the
     task body must raise real exceptions so the autoretry policy can classify
     them. Infrastructure-class failures map to the retryable 503 exception the
-    task's ``autoretry_for`` names; anything else is terminal.
+    task's ``autoretry_for`` names; everything else (validation, conflict,
+    not-found — all ``retryable=False`` by construction) is terminal, because
+    the same payload redelivered to the same table can only collide again.
     """
     if isinstance(error, SearchInfrastructureError):
         return ServiceUnavailableException(detail=error.message, data=error.details)
-    return InfrastructureException(detail=error.message, data=error.details)
+    return SearchIngestTerminalError(error.message)
 
 
 async def process_search_ingestion_document(
@@ -68,8 +83,13 @@ async def process_search_ingestion_document(
     settings = get_settings()
     # Fail fast when the configured producer width disagrees with the width
     # this relation stores: a retry loop cannot fix a column/setting drift,
-    # so the configuration error must be terminal, not retried.
-    assert_stored_width_matches_configured(SEARCH_EMBEDDING_DIM, relation="search_chunks.embedding")
+    # so this raises the terminal (non-retried) exception class directly.
+    mismatch = stored_width_mismatch(SEARCH_EMBEDDING_DIM)
+    if mismatch is not None:
+        stored, expected = mismatch
+        raise SearchIngestTerminalError(
+            width_mismatch_detail(stored, expected, relation="search_chunks.embedding")
+        )
     chunks = chunk_text(
         content,
         chunk_size=settings.SEARCH_INGEST_CHUNK_SIZE,

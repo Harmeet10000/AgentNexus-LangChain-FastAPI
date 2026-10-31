@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from app.config import get_settings
+from app.shared.jobs.names import SEARCH_INGEST
 from app.worker.celery.app import celery_app
 from app.worker.celery.cli import build_worker_argv
 from app.worker.celery.completeness import (
@@ -35,6 +36,16 @@ def test_role_profile_owns_process_shape(role: str, queue: str, concurrency: int
     assert command[command.index("--pool") + 1] == "prefork"
     assert command[command.index("--concurrency") + 1] == str(concurrency)
     assert profile.queue != get_settings().CELERY_DEAD_LETTER_QUEUE
+
+
+def test_ingestion_profile_registers_the_search_ingest_job() -> None:
+    """tasks.search_ingest rides the ingestion queue and its declaring module
+    is in that worker role's explicit import subset (CR MAJOR: a profile gap
+    would leave the job queued forever with no consumer)."""
+    profile = profile_for_role("ingestion")
+
+    assert SEARCH_INGEST in profile.task_names
+    assert "app.worker.jobs.search" in profile.task_modules
 
 
 def test_role_command_rejects_duplicate_queue_or_process_flags() -> None:

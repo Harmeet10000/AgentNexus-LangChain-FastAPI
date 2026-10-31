@@ -13,8 +13,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 from app.features.search.adapters.persistence.postgres.search_repository import (
+    _is_tenant_content_hash_race,
     build_chunk_rows,
     build_chunk_upsert_statement,
 )
@@ -105,6 +107,37 @@ def test_chunk_upsert_statement_compiles_with_conflict_refresh_columns() -> None
     set_clause = statement_text.split("SET ", 1)[1]
     for column in ("content", "embedding", "chunk_metadata", "updated_at"):
         assert f"{column} = " in set_clause
+
+
+class _FakeUniqueViolationError(Exception):
+    sqlstate = "23505"
+
+
+def _integrity_error(content_hash: str, sqlstate: str | None = "23505") -> IntegrityError:
+    orig = _FakeUniqueViolationError()
+    if sqlstate is None:
+        orig = Exception("driver without diagnostics")
+    else:
+        _FakeUniqueViolationError.sqlstate = sqlstate  # type: ignore[misc]
+    return IntegrityError("INSERT INTO search_documents ...", {"content_hash": content_hash}, orig)
+
+
+def test_tenant_content_hash_race_is_detected_from_the_constraint() -> None:
+    """A concurrent identical ingest losing the unique race is idempotent, not
+    an infrastructure error: the winner's row is the dedupe identity."""
+    exc = _integrity_error("abc123")
+
+    assert _is_tenant_content_hash_race(exc, content_hash="abc123")
+
+
+def test_other_unique_violations_are_not_treated_as_the_race() -> None:
+    different_hash = _integrity_error("unrelated-value")
+    assert not _is_tenant_content_hash_race(different_hash, content_hash="abc123")
+
+
+def test_non_unique_integrity_errors_are_not_treated_as_the_race() -> None:
+    foreign_key = _integrity_error("abc123", sqlstate="23503")
+    assert not _is_tenant_content_hash_race(foreign_key, content_hash="abc123")
 
 
 def test_chunk_rows_carry_the_tenant() -> None:

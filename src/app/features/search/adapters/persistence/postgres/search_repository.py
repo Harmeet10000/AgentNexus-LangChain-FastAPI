@@ -132,6 +132,18 @@ class SearchRepository:
         except IntegrityError as exc:
             add_database_error_note(exc, table="search_documents")
             await self.session.rollback()
+            if _is_tenant_content_hash_race(exc, content_hash=content_hash):
+                # Concurrent ingest of identical content: the winner's row is
+                # the dedupe identity. Re-read it so the caller stages its job
+                # against the surviving document instead of erroring.
+                survivor = await self.get_document_by_content_hash(
+                    tenant_id=tenant_id, content_hash=content_hash
+                )
+                if isinstance(survivor, Success) and survivor.unwrap() is not None:
+                    return Success(survivor.unwrap())
+                # The winner vanished between the violation and the re-read
+                # (impossible under row-level timing, but never guess): report
+                # the conflict and let the caller retry the whole ingest.
             return Failure(
                 SearchConflictError(
                     message="Search document creation failed due to a constraint violation",
@@ -450,6 +462,22 @@ class SearchRepository:
                     source="search_repository",
                 )
             )
+
+
+def _is_tenant_content_hash_race(exc: IntegrityError, *, content_hash: str) -> bool:
+    """Whether ``exc`` is a concurrent identical ingest losing the unique race.
+
+    Only the per-tenant content-hash constraint counts: any other violation is
+    a real conflict, not an idempotency race. The check reads the driver's
+    diagnostic fields when present (asyncpg exposes ``pgcode``/constraint
+    name) and falls back to the rendered constraint name in the message.
+    """
+    if content_hash not in str(exc):
+        return False
+    orig = getattr(exc, "orig", None)
+    if getattr(orig, "sqlstate", None) == "23505" or getattr(orig, "pgcode", None) == "23505":
+        return True
+    return "uq_search_documents_tenant_content_hash" in str(exc)
 
 
 def _bm25_index_name() -> str:

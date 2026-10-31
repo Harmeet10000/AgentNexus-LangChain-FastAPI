@@ -8,7 +8,12 @@ provider, so it provisions a task-local session via ``init_db`` instead of the
 document capability's graphiti/ingestion-graph stack.
 
 The task body converts the pipeline's ``Result`` boundary into raises — Celery
-entrypoints raise; the autoretry policy owns retry and dead-letter.
+entrypoints raise; the autoretry policy owns retry and dead-letter. Retryable
+infrastructure failures map to the exceptions in ``autoretry_for``; terminal
+failures (configuration drift, uniqueness conflicts) raise
+``SearchIngestTerminalError``, which ``dont_autoretry_for`` exempts from the
+retry loop — a retry cannot fix them and the document would stay pending
+through every backoff.
 """
 
 from __future__ import annotations
@@ -17,7 +22,11 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from app.config import get_settings
-from app.features.search.application.ingestion import run_search_ingestion_task
+from app.features.search.application.ingestion import (
+    SearchIngestTerminalError,
+    run_search_ingestion_task,
+)
+from app.features.search.domain.models import TASK_CELERY_ID_CACHE_KEY
 from app.observability.logging import logger
 from app.shared.jobs.names import SEARCH_INGEST
 from app.utils import InfrastructureException, ServiceUnavailableException
@@ -29,10 +38,41 @@ celery_app = get_worker_celery_app()
 if TYPE_CHECKING:
     from typing import Any
 
+    from redis import Redis as SyncRedis
+
 
 def _redis_task_lock_enabled() -> bool:
     """Return whether the optional Redis-backed outer task lock is configured."""
     return bool(get_settings().REDIS_URL)
+
+
+def record_celery_task_id(
+    redis_client: SyncRedis[str],
+    *,
+    event_id: str | None,
+    task_id: str | None,
+) -> None:
+    """Bind the real Celery dispatch id to the outbox event id (best effort).
+
+    The relay lets Celery assign the task id, so the id the API returned (the
+    outbox event id) would poll as PENDING forever. The worker writes the
+    mapping on entry so status resolution can poll the real id. A write
+    failure degrades to a log line — the durable document status column, not
+    this cache, is the terminal truth.
+    """
+    if not event_id or not task_id:
+        return
+    try:
+        redis_client.set(
+            TASK_CELERY_ID_CACHE_KEY.format(task_id=event_id),
+            str(task_id),
+            ex=get_settings().SEARCH_TASK_OWNER_TTL_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001 — the mapping is an accelerator, not truth
+        exc.add_note(f"operation=search_task_celery_id_record, event_id={event_id}")
+        logger.bind(event_id=event_id, task_id=task_id).warning(
+            "search_task_celery_id_record_failed"
+        )
 
 
 @celery_app.task(
@@ -44,6 +84,7 @@ def _redis_task_lock_enabled() -> bool:
         InfrastructureException,
         ServiceUnavailableException,
     ),
+    dont_autoretry_for=(SearchIngestTerminalError,),
     soft_time_limit=1500,
     time_limit=1620,
 )
@@ -57,6 +98,7 @@ def search_ingest(
     title: str,
     source_uri: str | None = None,
     doc_metadata: dict[str, Any] | None = None,
+    event_id: str | None = None,
 ) -> dict[str, object]:
     del (
         content_hash,
@@ -64,6 +106,11 @@ def search_ingest(
         source_uri,
         doc_metadata,
     )  # identity fields; chunking needs content only
+    record_celery_task_id(
+        self.get_redis_client(),
+        event_id=event_id,
+        task_id=self.request.id,
+    )
     idempotency_key = f"search-ingest:{tenant_id}:{document_id}"
     redis_lock_enabled = _redis_task_lock_enabled()
     if redis_lock_enabled and not self.acquire_idempotency_lock(

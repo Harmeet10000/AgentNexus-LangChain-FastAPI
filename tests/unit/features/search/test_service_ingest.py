@@ -42,11 +42,17 @@ DOC_ID = "00000000-0000-0000-0000-0000000000aa"
 
 
 class _FakeSession:
-    """Just the staging capability the transaction guard looks for."""
+    """Records executed statements (the outbox payload stamp) for assertions."""
 
-    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:  # pragma: no cover
-        message = "unit doubles never execute SQL"
-        raise NotImplementedError(message)
+    def __init__(self) -> None:
+        self.executed: list[tuple[object, dict[str, object] | None]] = []
+
+    async def execute(self, *args: Any, **kwargs: Any) -> Any:
+        params = kwargs.get("params")
+        if params is None and len(args) > 1:
+            params = args[1]
+        self.executed.append((args[0] if args else None, params))
+        return None
 
 
 class _StubRepository:
@@ -234,6 +240,10 @@ def _owner_key(task_id: str) -> str:
     return f"search:task_owner:{task_id}"
 
 
+def _celery_id_key(task_id: str) -> str:
+    return f"search:task_celery_id:{task_id}"
+
+
 # --- ingest: dedupe, staging, ownership -------------------------------------
 
 
@@ -293,6 +303,13 @@ async def test_fresh_ingest_stages_typed_job_atomically_with_the_document() -> N
     assert owner_raw is not None
     owner = orjson.loads(owner_raw)
     assert owner == {"tenant_id": TENANT, "document_id": response.document_id}
+    # The staged payload was stamped with its own event id, so the worker can
+    # bind its real Celery task id back to the id the client polls.
+    stamp_params = next(
+        params for _statement, params in repo.session.executed if params and "event_id" in params
+    )
+    assert stamp_params is not None
+    assert stamp_params["event_id"] == "event-1"
 
 
 @pytest.mark.asyncio
@@ -538,6 +555,70 @@ async def test_failure_state_surfaces_the_exception_message(
     assert status.status == "FAILURE"
     assert status.error is not None
     assert "embedding quota exceeded" in status.error
+
+
+@pytest.mark.asyncio
+async def test_worker_recorded_celery_id_is_polled_instead_of_the_event_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once the worker records the mapping, status reflects the real state."""
+    polled: list[str] = []
+
+    class _RecordingAsyncResult:
+        def __init__(self, task_id: str):
+            polled.append(task_id)
+            self.state = "SUCCESS"
+            self.result = {"status": "completed", "tenant_id": TENANT, "document_id": DOC_ID}
+
+    from app.connections import celery_app
+
+    monkeypatch.setattr(celery_app, "AsyncResult", _RecordingAsyncResult)
+    repo = _StubRepository()
+    redis = FakeRedis(decode_responses=True)
+    await redis.set(
+        _owner_key("event-1"),
+        orjson.dumps({"tenant_id": TENANT, "document_id": DOC_ID}),
+    )
+    await redis.set(_celery_id_key("event-1"), "celery-abc")
+    service = _service(repo, redis=redis)
+
+    result = await service.get_ingest_status(tenant_id=TENANT, task_id="event-1")
+
+    assert isinstance(result, Success)
+    assert status_task_id_polled(polled) == "celery-abc"
+    assert result.unwrap().status == "SUCCESS"
+
+
+def status_task_id_polled(polled: list[str]) -> str:
+    assert len(polled) == 1
+    return polled[0]
+
+
+@pytest.mark.asyncio
+async def test_durable_document_status_beats_a_pending_broker_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed document column is the terminal truth the DTO prefers."""
+    _seed_owner(monkeypatch, state="PENDING", result=None)
+    repo = _StubRepository()
+    redis = FakeRedis(decode_responses=True)
+    await redis.set(
+        _owner_key("task-1"),
+        orjson.dumps({"tenant_id": TENANT, "document_id": DOC_ID}),
+    )
+
+    # The tenant-scoped document row resolves and reports completion.
+    async def _completed_document(*, tenant_id: str, document_id: str) -> Any:
+        repo._record("get_document_by_id", {"tenant_id": tenant_id, "document_id": document_id})
+        return Success(SearchDocument(id=_uuid(DOC_ID), status="completed"))
+
+    repo.get_document_by_id = _completed_document  # type: ignore[method-assign]
+    service = _service(repo, redis=redis)
+
+    result = await service.get_ingest_status(tenant_id=TENANT, task_id="task-1")
+
+    assert isinstance(result, Success)
+    assert result.unwrap().status == "SUCCESS"
 
 
 # --- hybrid search: fusion, cache, width guard, tenant scoping --------------

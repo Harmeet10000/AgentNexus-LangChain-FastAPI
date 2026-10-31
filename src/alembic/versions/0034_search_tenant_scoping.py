@@ -18,9 +18,19 @@ method directly on ``content`` (see ``search_repository.bm25_search``); the
 tsvector would double-count that signal in the three-branch fusion, and
 nothing in the application ever read it.
 
-The remaining retrieval indexes (bm25 / diskann / trgm / metadata gin) already
-exist from 0004 with the same names the ORM declares, so this revision only
-touches tenancy beyond that.
+Two database shapes reach this revision (idempotent against both)
+---------------------------------------------------------------
+- 0004-executed databases: the search tables carry the full index set.
+- 0014-repaired databases (stamped, never migrated): ``0014`` recreates the
+  tables with **no indexes at all** — its docstring records that
+  ``search_chunks_bm25_idx`` was referenced by settings but never created.
+
+Therefore every index drop here is ``DROP INDEX IF EXISTS`` (a plain
+``op.drop_index`` would abort on the 0014 shape), and the retrieval indexes
+the search branches require — bm25, DiskANN, trigram GIN, metadata GIN,
+document-id btree, plus their extensions — are created ``IF NOT EXISTS`` with
+the exact definitions/names 0004 used and the ORM declares, so search works
+after either upgrade path.
 
 Revision ID: 0034
 Revises: 0033
@@ -50,8 +60,45 @@ depends_on: str | Sequence[str] | None = None
 #: has exactly one spelled-out home.
 _LEGACY_TENANT = "search:legacy"
 
+#: The retrieval indexes the search branches require, in the exact shape 0004
+#: created them on executed databases. Applied ``IF NOT EXISTS`` so the
+#: 0014-repaired shape (tables, no indexes) gains them and the 0004 shape
+#: keeps its originals untouched.
+_SEARCH_RETRIEVAL_INDEXES = (
+    # Lexical leg: pg_textsearch bm25 directly on content. The name is a
+    # literal contract — search_repository passes it to to_bm25query().
+    """
+    CREATE INDEX IF NOT EXISTS search_chunks_bm25_idx ON search_chunks
+    USING bm25(content) WITH (text_config='english')
+    """,
+    # Dense leg: DiskANN cosine over the 768-dim embeddings.
+    """
+    CREATE INDEX IF NOT EXISTS search_chunks_embedding_idx ON search_chunks
+    USING diskann (embedding vector_cosine_ops)
+    """,
+    # Fuzzy leg: pg_trgm GIN over content.
+    """
+    CREATE INDEX IF NOT EXISTS ix_search_chunks_content_trgm ON search_chunks
+    USING gin (content gin_trgm_ops)
+    """,
+    # Metadata JSONB containment filters.
+    """
+    CREATE INDEX IF NOT EXISTS ix_search_chunks_chunk_metadata_gin ON search_chunks
+    USING gin (chunk_metadata)
+    """,
+    # Foreign-key btree for hydration joins and cascade deletes.
+    "CREATE INDEX IF NOT EXISTS ix_search_chunks_document_id ON search_chunks (document_id)",
+)
+
 
 def upgrade() -> None:
+    # The 0014-repaired shape never ran 0004's extension setup either.
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    op.execute("CREATE EXTENSION IF NOT EXISTS vectorscale")
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_textsearch")
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    op.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
+
     op.add_column(
         "search_documents",
         sa.Column("tenant_id", sa.String(length=255), nullable=True),
@@ -105,9 +152,13 @@ def upgrade() -> None:
 
     # The tsvector column is unread legacy surface: pg_textsearch bm25 is the
     # lexical leg. Dropping it (and its GIN index) removes the double-count
-    # hazard and the maintenance cost of the GENERATED ALWAYS column.
-    op.drop_index("ix_search_chunks_content_tsv_gin", table_name="search_chunks")
+    # hazard and the maintenance cost of the GENERATED ALWAYS column. The drop
+    # is guarded because only the 0004 shape ever had either.
+    op.execute("DROP INDEX IF EXISTS ix_search_chunks_content_tsv_gin")
     op.drop_column("search_chunks", "content_tsv")
+
+    for create_statement in _SEARCH_RETRIEVAL_INDEXES:
+        op.execute(create_statement)
 
 
 def downgrade() -> None:
@@ -117,7 +168,7 @@ def downgrade() -> None:
     # would fail mid-constraint-swap or, worse, tempt a "fix" that deletes
     # tenant data. Policy: fail loudly, name the conflicting hashes, change
     # nothing. The operator must resolve duplicates explicitly (delete or
-    # re-hash per tenant) before downgrading.
+    # re-key per tenant) before downgrading.
     conn = op.get_bind()
     conflicts = conn.execute(
         sa.text(
@@ -151,8 +202,10 @@ def downgrade() -> None:
             nullable=False,
         ),
     )
-    op.create_index(
-        "ix_search_chunks_content_tsv_gin", "search_chunks", ["content_tsv"], unique=False
+    # GIN, matching 0004's original — a plain btree would not serve the
+    # tsvector containment lookups the legacy shape relied on.
+    op.execute(
+        "CREATE INDEX ix_search_chunks_content_tsv_gin ON search_chunks USING gin (content_tsv)"
     )
     op.drop_index("ix_search_chunks_tenant_id", table_name="search_chunks")
     op.drop_index("ix_search_documents_tenant_id", table_name="search_documents")

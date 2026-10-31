@@ -15,9 +15,12 @@ import pytest
 from returns.result import Success
 
 from app.features.search.application import ingestion as ingestion_module
-from app.features.search.application.ingestion import process_search_ingestion_document
+from app.features.search.application.ingestion import (
+    SearchIngestTerminalError,
+    process_search_ingestion_document,
+)
 from app.features.search.domain.errors import SearchConflictError
-from app.utils import InfrastructureException, ServiceUnavailableException
+from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
     from typing import Any
@@ -110,19 +113,18 @@ async def test_empty_content_records_a_completed_zero_chunk_state(
 
 
 @pytest.mark.asyncio
-async def test_width_drift_raises_a_typed_configuration_error(
+async def test_width_drift_raises_the_terminal_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A column/setting disagreement is terminal — never retried (G P1)."""
+    """A column/setting disagreement is terminal — the task must not retry it."""
 
-    def _raise(stored_dim: int, *, relation: str) -> None:
-        msg = f"{relation} stores {stored_dim}-dimensional vectors but EMBEDDING_DIMENSION differs"
-        raise InfrastructureException(msg)
+    def _mismatch(stored_dim: int) -> tuple[int, int] | None:
+        return (stored_dim, 1536)
 
-    monkeypatch.setattr(ingestion_module, "assert_stored_width_matches_configured", _raise)
+    monkeypatch.setattr(ingestion_module, "stored_width_mismatch", _mismatch)
     pipeline = _install_pipeline(monkeypatch)
 
-    with pytest.raises(InfrastructureException, match=r"search_chunks\.embedding"):
+    with pytest.raises(SearchIngestTerminalError, match=r"search_chunks\.embedding"):
         await process_search_ingestion_document(
             repo=pipeline,  # type: ignore[arg-type]
             document_id=DOC_ID,
@@ -134,8 +136,8 @@ async def test_width_drift_raises_a_typed_configuration_error(
     assert pipeline.statuses == []
 
 
-def test_to_raising_exception_maps_retryable_to_503() -> None:
-    """Infrastructure-class failures must reach the task's autoretry policy."""
+def test_to_raising_exception_maps_by_retryability() -> None:
+    """Infrastructure failures retry; everything else is terminal (CR MINOR)."""
     from app.features.search.domain.errors import SearchInfrastructureError
 
     error = SearchInfrastructureError(message="database unavailable", source="test")
@@ -143,4 +145,6 @@ def test_to_raising_exception_maps_retryable_to_503() -> None:
 
     assert isinstance(translated, ServiceUnavailableException)
     non_infra = SearchConflictError(message="duplicate", source="test")
-    assert isinstance(ingestion_module._to_raising_exception(non_infra), InfrastructureException)
+    terminal = ingestion_module._to_raising_exception(non_infra)
+    assert isinstance(terminal, SearchIngestTerminalError)
+    assert not isinstance(terminal, ServiceUnavailableException)

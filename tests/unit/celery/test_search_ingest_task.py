@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from app.features.search.application.ingestion import SearchIngestTerminalError
 from app.shared.jobs.names import SEARCH_INGEST
 from app.utils import InfrastructureException
+from app.worker.jobs.search import record_celery_task_id
 
 if TYPE_CHECKING:
     from typing import Any
@@ -33,6 +35,38 @@ def test_retryable_infrastructure_failures_are_in_the_task_retry_policy(
     search_tasks = importlib.import_module("app.worker.jobs.search")
 
     assert InfrastructureException in search_tasks.search_ingest.autoretry_for
+
+
+def test_terminal_errors_are_exempt_from_autoretry(real_celery: object) -> None:
+    """Configuration drift and constraint conflicts must dead-letter, not spin."""
+    del real_celery
+    search_tasks = importlib.import_module("app.worker.jobs.search")
+
+    assert SearchIngestTerminalError in (search_tasks.search_ingest.dont_autoretry_for or ())
+
+
+def test_worker_records_celery_task_id_under_the_event_id(real_celery: object) -> None:
+    """The relay lets Celery assign the task id; the worker binds it back."""
+    del real_celery
+    from fakeredis import FakeRedis
+
+    redis = FakeRedis()
+    record_celery_task_id(redis, event_id="event-1", task_id="celery-abc")
+
+    assert redis.get("search:task_celery_id:event-1") == b"celery-abc"
+
+
+def test_celery_id_record_skips_an_incomplete_identity(real_celery: object) -> None:
+    """Without both halves there is nothing to bind — and nothing to crash on."""
+    del real_celery
+    from fakeredis import FakeRedis
+
+    redis = FakeRedis()
+    record_celery_task_id(redis, event_id="", task_id="celery-abc")
+    record_celery_task_id(redis, event_id="event-2", task_id=None)
+
+    assert redis.get("search:task_celery_id:event-1") is None
+    assert redis.get("search:task_celery_id:event-2") is None
 
 
 def test_task_runs_without_the_optional_redis_lock(
