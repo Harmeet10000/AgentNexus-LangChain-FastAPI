@@ -61,7 +61,13 @@ from app.features.documents.retrieval.graph import (
 )
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
+from app.retrieval.edge_expansion import (
+    EdgeExpansion,
+    EdgeSeedChunk,
+    expand_along_edges,
+)
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
+from app.retrieval.graphiti.client import fetch_relationship_edges
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
 from app.retrieval.structural_navigator import navigate_tree
 from app.retrieval.token_counter import count_tokens as default_count_tokens
@@ -69,7 +75,7 @@ from app.shared.langchain_layer import serialize_to_toon
 from app.utils import to_sorted_key_bytes
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
     from typing import Any
 
     from graphiti_core.graphiti import Graphiti
@@ -97,6 +103,12 @@ _FALLBACK_ANSWER = (
     "I do not have enough grounded document context to answer this reliably. "
     "Please narrow the question or ingest the relevant document sections."
 )
+# Edge-aware context expansion bounds. Additive and small by construction: at
+# most a few server-authored grounding lines per reranked chunk, never a
+# second retrieval pass, and only for queries that actually touch edges.
+_EDGE_EXPANSION_MAX_TOKENS: int = 256
+_EDGE_EXPANSION_MAX_BLOCKS_PER_SEED: int = 4
+_EDGE_FETCH_LIMIT: int = 32
 _KNOWLEDGE_EXTRACTION_PROMPT = (
     "Extract grounded legal clauses and their attributes. Use extraction classes such as "
     "indemnity, termination, payment, confidentiality, governing_law, arbitration, "
@@ -310,6 +322,10 @@ def lookup_to_rows(
                 "chunk_text": record.get("content"),
                 "preamble": record.get("preamble") or "",
                 "clause_type": record.get("clause_type"),
+                # `document_id` backs citation provenance and coverage counts;
+                # `parent_doc_id` is the historical `_row_to_chunk` key. Both
+                # name the same hydrated identity.
+                "document_id": record.get("document_id"),
                 "parent_doc_id": record.get("document_id"),
                 "metadata_": record.get("chunk_metadata") or {},
                 "custom_metadata": {},
@@ -901,6 +917,10 @@ class DocumentQueryService:
         response_warnings: list[QualityWarningDTO] = []
         answer = GeneratedAnswer(answer=_FALLBACK_ANSWER, citations=[], confidence="uncertain")
         grade = ContextGrade(sufficient=False, missing_aspects=["No retrieved chunks"])
+        # Edge-grounded expansion is additive: it stays empty unless an
+        # authorized graph scope, a healthy graphiti, and at least one typed
+        # edge touching the reranked chunks all exist.
+        edge_expansions: list[EdgeExpansion] = []
 
         for iteration in range(2):
             rewritten_query = (
@@ -976,10 +996,25 @@ class DocumentQueryService:
             response_warnings = _merge_warning_lists([_warnings_from_rows(rows)])
             if grade.sufficient or iteration == 1:
                 if grade.sufficient:
+                    edge_expansions = await _edge_grounding_for_reranked(
+                        graphiti=self.graphiti,
+                        query=plan.rewritten_query,
+                        tenant_id=tenant_id,
+                        scope_ids=scope_ids if explicit_scope else (),
+                        scope_versions=scope_versions,
+                        scope_contracts=scope_contracts,
+                        contract_index=payload.contract_index,
+                        reranked=reranked,
+                    )
                     answer = await _generate_answer(
                         generator_llm=generator_llm,
                         query=plan.rewritten_query,
                         reranked=reranked,
+                        grounding_edges=[
+                            block.text
+                            for expansion in edge_expansions
+                            for block in expansion.blocks
+                        ],
                     )
                 break
 
@@ -991,12 +1026,14 @@ class DocumentQueryService:
         graph_document_ids = {
             str(row["document_id"]) for row in rows if bool(row.get("graphiti_verified", False))
         }
+        citations = [
+            _citation_response(citation, rows_by_chunk_id.get(citation.chunk_id))
+            for citation in answer.citations
+        ]
+        citations.extend(_edge_citations(edge_expansions, rows_by_chunk_id))
         response = UnifiedAskResponse(
             answer=answer.answer,
-            citations=[
-                _citation_response(citation, rows_by_chunk_id.get(citation.chunk_id))
-                for citation in answer.citations
-            ],
+            citations=citations,
             confidence=answer.confidence,
             evidence_policy=evidence_policy,
             coverage=EvidenceCoverage(
@@ -1214,10 +1251,17 @@ async def _generate_answer(
     generator_llm: Any,
     query: str,
     reranked: Sequence[RetrievedChunk],
+    grounding_edges: Sequence[str] | None = None,
 ) -> GeneratedAnswer:
-    payload = serialize_to_toon(
-        {"query": query, "chunks": [chunk.model_dump() for chunk in reranked]}
-    )
+    payload_data: dict[str, Any] = {
+        "query": query,
+        "chunks": [chunk.model_dump() for chunk in reranked],
+    }
+    # The key exists only when edge expansion actually produced blocks, so a
+    # query that touches no edges renders the exact pre-edge payload.
+    if grounding_edges:
+        payload_data["grounding_edges"] = list(grounding_edges)
+    payload = serialize_to_toon(payload_data)
     messages = [SystemMessage(content=_GENERATOR_SYSTEM_PROMPT), HumanMessage(content=payload)]
     try:
         raw = await retry_immediate(
@@ -1229,6 +1273,115 @@ async def _generate_answer(
     if answer.confidence == "uncertain" and _FALLBACK_ANSWER not in answer.answer:
         return answer.model_copy(update={"answer": f"{answer.answer}\n\n{_FALLBACK_ANSWER}"})
     return answer
+
+
+async def _edge_grounding_for_reranked(
+    *,
+    graphiti: Graphiti | None,
+    query: str,
+    tenant_id: str,
+    scope_ids: Sequence[str],
+    scope_versions: Sequence[tuple[str, int, str | None]],
+    scope_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]],
+    contract_index: int | None,
+    reranked: Sequence[RetrievedChunk],
+) -> list[EdgeExpansion]:
+    """Expand reranked chunk context along persisted typed relationship edges.
+
+    Fails closed on every axis: without a live graphiti, a resolved tenant, or
+    an explicit non-empty authorized document scope there is no edge read at
+    all — the same boundary ``_graphiti_filter_chunk_ids`` enforces.  A
+    transport failure inside the reader degrades to no expansion, so an
+    edge-free query keeps the exact pre-edge ask contract.
+    """
+    if graphiti is None or not tenant_id or not scope_ids:
+        return []
+    edges = await fetch_relationship_edges(
+        graphiti,
+        query,
+        allowed_doc_ids=tuple(dict.fromkeys(scope_ids)),
+        tenant_id=tenant_id,
+        contract_index=contract_index,
+        document_versions=scope_versions,
+        document_contracts=scope_contracts,
+        num_results=_EDGE_FETCH_LIMIT,
+    )
+    if not edges or not reranked:
+        return []
+    seeds = [
+        EdgeSeedChunk(
+            chunk_id=chunk.chunk_id,
+            document_id=chunk.parent_doc_id,
+            content=chunk.chunk_text,
+            clause_ids=_chunk_clause_ids(chunk),
+        )
+        for chunk in reranked
+    ]
+    return expand_along_edges(
+        seeds=seeds,
+        edges=edges,
+        max_expansion_tokens=_EDGE_EXPANSION_MAX_TOKENS,
+        count_tokens=default_count_tokens,
+        max_blocks_per_seed=_EDGE_EXPANSION_MAX_BLOCKS_PER_SEED,
+    )
+
+
+def _chunk_clause_ids(chunk: RetrievedChunk) -> tuple[str, ...]:
+    """Read server-persisted clause identities from chunk metadata, if any."""
+    metadata = chunk.metadata_ or {}
+    raw = metadata.get("clause_ids", metadata.get("clause_id"))
+    if isinstance(raw, str) and raw:
+        return (raw,)
+    if isinstance(raw, (list, tuple, set, frozenset)):
+        return tuple(str(item) for item in raw if item)
+    return ()
+
+
+def _edge_citations(
+    expansions: Sequence[EdgeExpansion],
+    rows_by_chunk_id: Mapping[str, dict[str, object]],
+) -> list[LegalCitationResponse]:
+    """Server-derived citations for edge-grounded expansion blocks.
+
+    Provenance discipline matches ``_citation_response``: document identity,
+    version, and contract come from the hydrated chunk row — never from the
+    edge text or any model output — and the claim is authored here,
+    deterministically, from the edge's grounded span.
+    """
+    citations: list[LegalCitationResponse] = []
+    seen: set[tuple[str, str]] = set()
+    for expansion in expansions:
+        row = rows_by_chunk_id.get(expansion.seed_chunk_id)
+        # Fail closed: expansion for a chunk that did not survive hydration
+        # earns no citation.
+        if row is None:
+            continue
+        for block in expansion.blocks:
+            span = (
+                f"chars {block.char_start}-{block.char_end}"
+                if block.char_start is not None and block.char_end is not None
+                else "unavailable span"
+            )
+            claim = (
+                f"Grounded by {block.relationship.upper()} edge "
+                f"'{block.from_entity}' -> '{block.to_entity}' at {span} "
+                f"(clause {block.clause_id}, edge {block.edge_id})"
+            )
+            key = (expansion.seed_chunk_id, claim)
+            if key in seen:
+                continue
+            seen.add(key)
+            citations.append(
+                _citation_response(
+                    Citation(
+                        chunk_id=expansion.seed_chunk_id,
+                        clause_type=str(row.get("clause_type") or "other"),
+                        claim=claim,
+                    ),
+                    row,
+                )
+            )
+    return citations
 
 
 def _to_ranked_rows(rows: list[dict[str, object]]) -> list[RankedResultRow]:

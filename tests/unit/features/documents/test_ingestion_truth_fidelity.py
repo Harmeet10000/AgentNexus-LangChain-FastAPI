@@ -172,10 +172,15 @@ class _Idempotency:
 # Relationship-phase truth through the pipeline
 
 
-async def test_relationship_phase_persists_skipped_not_implemented(
+async def test_relationship_phase_reports_succeeded_with_zero_valid_edges(
     monkeypatch: Any,
 ) -> None:
-    """Regression: the empty relationship list must never collapse into success."""
+    """A pass that ran and found no valid edges is succeeded-with-zero, not a skip.
+
+    The hermetic provider emits only a pass-1-style clause extraction, so the
+    second pass runs, finds no ``relationship``-class candidates, and the
+    persisted truth is a real success over zero attempted writes.
+    """
     extraction = lx.data.Extraction(
         extraction_class="payment",
         extraction_text="Payment is due in thirty days.",
@@ -193,14 +198,16 @@ async def test_relationship_phase_persists_skipped_not_implemented(
         idempotency=_Idempotency(),
     )
 
-    assert result.unwrap()["graph_relationships_status"] == "skipped_not_implemented"
+    assert result.unwrap()["graph_relationships_status"] == "succeeded"
     for status_call in repo.status_calls:
-        if "metadata_" not in status_call:
+        if "metadata_" not in status_call or "graph_relationships" not in status_call.get(
+            "metadata_", {}
+        ):
             continue
         persisted = status_call["metadata_"]["graph_relationships"]
-        assert persisted["status"] == "skipped_not_implemented"
-        assert persisted["reason"] == "relationship_extraction_not_implemented"
+        assert persisted["status"] == "succeeded"
         assert persisted["relationships_attempted"] == 0
+        assert persisted["relationships_succeeded"] == 0
 
 
 async def test_relationship_phase_not_attempted_without_segments(
@@ -229,7 +236,9 @@ async def test_zero_chunks_for_non_empty_document_is_not_a_success(
     assert "fidelity" not in repo.status_calls[0]["metadata_"]
 
 
-async def test_write_phase_reports_relationships_skipped_with_clause_counts() -> None:
+async def test_write_phase_reports_succeeded_zero_edge_pass_with_clause_counts() -> None:
+    from app.extraction.langextract.relationships import RelationshipPassResult
+
     extraction = lx.data.Extraction(
         extraction_class="payment",
         extraction_text="Payment is due.",
@@ -238,8 +247,15 @@ async def test_write_phase_reports_relationships_skipped_with_clause_counts() ->
     outcome = ExtractionSucceeded(
         documents=(lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
     )
+    segments = document_ingest._extract_clause_segments(outcome, document_id="doc-1")
     result = await _write_extracted_clause_episodes(
-        outcome=outcome,
+        segments=segments,
+        relationships=[],
+        edge_spans={},
+        relationship_pass=RelationshipPassResult(
+            ran=True,
+            budget=outcome.budget,
+        ),
         graph_writer=_SucceedingWriter(),
         idempotency=_Idempotency(),
         document_id="doc-1",
@@ -250,7 +266,8 @@ async def test_write_phase_reports_relationships_skipped_with_clause_counts() ->
     assert result.success is True
     assert result.clause_writes_attempted == 1
     assert result.clause_writes_succeeded == 1
-    assert result.relationships.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
+    assert result.relationships.status is GraphRelationshipsStatus.SUCCEEDED
+    assert result.relationships.relationships_attempted == 0
 
 
 # ---------------------------------------------------------------------------
@@ -433,10 +450,10 @@ async def test_later_boundary_extraction_failure_keeps_earlier_states() -> None:
         document_type="generic",
     )
     assert isinstance(outcome, ExtractionFailed)
-    # Boundary 0's skipped-not-implemented truth must survive boundary 1's
+    # Boundary 0's succeeded-with-zero-edges truth must survive boundary 1's
     # extraction failure — the aggregate never collapses back to not_attempted.
-    assert state.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
-    assert state.reason == "relationship_extraction_not_implemented"
+    assert state.status is GraphRelationshipsStatus.SUCCEEDED
+    assert state.relationships_attempted == 0
 
 
 # ---------------------------------------------------------------------------

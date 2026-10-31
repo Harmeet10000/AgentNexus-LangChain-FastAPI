@@ -57,6 +57,13 @@ class GraphRelationshipsState(BaseModel):
     reason: str | None = None
     relationships_attempted: int = Field(default=0, ge=0)
     relationships_succeeded: int = Field(default=0, ge=0)
+    # Fail-closed span/identity validation: candidates dropped before any
+    # write was attempted.  ``invalid_span`` counts edges whose char interval
+    # did not resolve inside the boundary text; ``dropped`` counts every
+    # other rejection (unknown type, unknown clause, ungrounded endpoint,
+    # duplicate, over-cap).  Dropped edges are never persisted.
+    relationships_invalid_span: int = Field(default=0, ge=0)
+    relationships_dropped: int = Field(default=0, ge=0)
 
     def model_dump_for_metadata(self) -> dict[str, object]:
         """Stable JSON shape persisted under ``documents.metadata_.graph_relationships``."""
@@ -65,6 +72,8 @@ class GraphRelationshipsState(BaseModel):
             "reason": self.reason,
             "relationships_attempted": self.relationships_attempted,
             "relationships_succeeded": self.relationships_succeeded,
+            "relationships_invalid_span": self.relationships_invalid_span,
+            "relationships_dropped": self.relationships_dropped,
         }
 
 
@@ -90,6 +99,8 @@ def aggregate_relationship_states(
             reason=failed[0].reason,
             relationships_attempted=sum(state.relationships_attempted for state in states),
             relationships_succeeded=sum(state.relationships_succeeded for state in states),
+            relationships_invalid_span=sum(state.relationships_invalid_span for state in states),
+            relationships_dropped=sum(state.relationships_dropped for state in states),
         )
     succeeded = [state for state in states if state.status is GraphRelationshipsStatus.SUCCEEDED]
     if succeeded:
@@ -98,6 +109,8 @@ def aggregate_relationship_states(
             reason=succeeded[0].reason,
             relationships_attempted=sum(state.relationships_attempted for state in states),
             relationships_succeeded=sum(state.relationships_succeeded for state in states),
+            relationships_invalid_span=sum(state.relationships_invalid_span for state in states),
+            relationships_dropped=sum(state.relationships_dropped for state in states),
         )
     ran_clause_writes = any(
         state.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED for state in states
@@ -121,6 +134,8 @@ def aggregate_relationship_states(
         ),
         relationships_attempted=sum(state.relationships_attempted for state in states),
         relationships_succeeded=sum(state.relationships_succeeded for state in states),
+        relationships_invalid_span=sum(state.relationships_invalid_span for state in states),
+        relationships_dropped=sum(state.relationships_dropped for state in states),
     )
 
 
@@ -232,7 +247,7 @@ class GraphWritePhaseResult(BaseModel):
 
     @classmethod
     def skipped_relationships(cls) -> GraphRelationshipsState:
-        """The canonical typed state for the not-yet-implemented relationship pass."""
+        """The typed state for a relationship pass disabled by configuration."""
         return GraphRelationshipsState(
             status=GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED,
             reason=RELATIONSHIP_SKIP_REASON,

@@ -230,11 +230,19 @@ class LegalEdgeInput(BaseModel):
     thread_id: str
     citation_source: str
     confidence: float = Field(ge=0.0, le=1.0)
+    # Char interval grounding the relationship in the source boundary text.
+    # Optional for legacy callers; ingestion's second pass always supplies it
+    # so every persisted edge resolves back to a verifiable span.
+    char_start: int | None = None
+    char_end: int | None = None
 
     def to_episode_body(self) -> str:
-        return (
+        body = (
             f"{self.from_entity} {self.relationship} {self.to_entity}. "
             f"Source clause: {self.clause_id}. "
             f"Citation: {self.citation_source}. "
             f"Confidence: {self.confidence:.2f}."
         )
+        if self.char_start is not None and self.char_end is not None:
+            body = f"{body} Grounding: chars {self.char_start}-{self.char_end}."
+        return body

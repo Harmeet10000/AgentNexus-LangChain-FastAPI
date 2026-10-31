@@ -18,6 +18,16 @@ from app.ai.embeddings import EmbeddingTaskType, embed_texts
 from app.config import get_settings
 from app.events import with_outbox, with_terminal_outbox
 from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
+from app.extraction.langextract.relationships import (
+    RELATIONSHIP_BUDGET_EXHAUSTED_REASON,
+    RELATIONSHIP_CONFIG_DISABLED_REASON,
+    ClauseIdentity,
+    GroundedRelationship,
+    RelationshipPassResult,
+    relationship_edge_id,
+    relationship_pass_config_from_settings,
+    run_relationship_pass,
+)
 from app.extraction.langextract.service import (
     ExtractionBudget,
     ExtractionFailed,
@@ -25,7 +35,12 @@ from app.extraction.langextract.service import (
     ExtractionRequest,
     ExtractionSucceeded,
 )
-from app.features.agent_saul.domain.state import ClauseSegment, ClauseType
+from app.features.agent_saul.domain.state import (
+    Citation,
+    ClauseSegment,
+    ClauseType,
+    LegalRelationship,
+)
 from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
@@ -102,6 +117,7 @@ _GRAPHITI_EVENT_ERRORS = (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
@@ -1105,6 +1121,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             ),
         )
     settings = get_settings()
+    relationship_config = relationship_pass_config_from_settings(settings)
     budget = ExtractionBudget(
         max_contracts=settings.LANGEXTRACT_MAX_CONTRACTS,
         max_model_calls=settings.LANGEXTRACT_MAX_MODEL_CALLS,
@@ -1113,6 +1130,10 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
         max_cost_usd=settings.LANGEXTRACT_MAX_COST_USD,
         cost_per_1k_tokens_usd=settings.LANGEXTRACT_COST_PER_1K_TOKENS_USD,
         wall_clock_seconds=settings.LANGEXTRACT_WALL_CLOCK_SECONDS,
+        relationship_max_model_calls=relationship_config.max_model_calls,
+        relationship_max_input_tokens=relationship_config.max_input_tokens,
+        relationship_max_output_tokens=relationship_config.max_output_tokens,
+        relationship_max_cost_usd=relationship_config.max_cost_usd,
     )
     # Rehydrate the checkpointed ledger before a Celery retry.  A retry must
     # not receive a fresh model-call/token budget merely because the worker
@@ -1242,8 +1263,69 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             )
         budget = outcome.budget
         documents.extend(outcome.documents)
+        segments = _extract_clause_segments(
+            outcome,
+            document_id=job.document_id,
+            contract_index=boundary.contract_index,
+        )
+        # Second pass: a different prompt over different input. Pass-1 clause
+        # identities are fed back as server-derived inventory; document text
+        # travels only inside the delimited untrusted region; every edge is
+        # span-validated and identity-validated before it can be persisted.
+        writer_ready = runtime.graph_writer is not None and runtime.idempotency is not None
+        if segments and writer_ready:
+            relationship_pass = await run_relationship_pass(
+                extraction=runtime.extraction,
+                boundary_text=boundary.markdown,
+                inventory=[
+                    ClauseIdentity(
+                        clause_id=segment.clause_id,
+                        clause_type=segment.clause_type.value,
+                        section_ref=segment.section_ref,
+                        char_start=segment.start_char,
+                        char_end=segment.end_char,
+                    )
+                    for segment in segments
+                ],
+                entity_corpus=[segment.text for segment in segments],
+                budget=budget,
+                config=relationship_config,
+                document_id=job.document_id,
+                tenant_id=job.tenant_id,
+                document_version=job.document_version,
+                contract_index=boundary.contract_index,
+                max_char_buffer=settings.LANGEXTRACT_MAX_CHAR_BUFFER,
+                max_workers=settings.LANGEXTRACT_MAX_WORKERS,
+            )
+        else:
+            relationship_pass = RelationshipPassResult(
+                ran=False,
+                skip_reason=(
+                    "no_clause_segments_extracted" if not segments else "graph_writer_unconfigured"
+                ),
+                budget=budget,
+            )
+        budget = relationship_pass.budget
+        legal_edges = [
+            _legal_relationship_from_grounded(
+                edge,
+                document_id=job.document_id,
+                contract_index=boundary.contract_index,
+            )
+            for edge in relationship_pass.edges
+        ]
+        edge_spans = {
+            relationship.edge_id: (
+                relationship_pass.edges[index].char_start,
+                relationship_pass.edges[index].char_end,
+            )
+            for index, relationship in enumerate(legal_edges)
+        }
         phase_result = await _write_extracted_clause_episodes(
-            outcome=outcome,
+            segments=segments,
+            relationships=legal_edges,
+            edge_spans=edge_spans,
+            relationship_pass=relationship_pass,
             graph_writer=runtime.graph_writer,
             idempotency=runtime.idempotency,
             document_id=job.document_id,
@@ -1270,26 +1352,16 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
     )
 
 
-async def _write_extracted_clause_episodes(
-    *,
+def _extract_clause_segments(
     outcome: ExtractionSucceeded,
-    graph_writer: object | None,
-    idempotency: object | None,
+    *,
     document_id: str,
-    tenant_id: str = "",
-    document_version: int = 1,
     contract_index: int = 0,
-    user_id: str,
-    jurisdiction: str | None,
-    document_type: str,
-) -> GraphWritePhaseResult:
-    """Map grounded clause extractions into the existing canonical writer.
+) -> list[ClauseSegment]:
+    """Map grounded pass-1 clause extractions into canonical clause segments.
 
-    Success is computed over clause writes only.  The relationship pass does not
-    exist yet (ingestion passes an empty relationship list), so when clause
-    writes ran, the phase reports the typed
-    ``skipped_not_implemented``/``not_attempted`` relationship state — never a
-    vacuous ``all([])`` success over an empty result list.
+    Ungrounded extractions (``char_interval is None``) are skipped exactly as
+    ``langextract_to_graph`` does — they can never become segments or edges.
     """
     segments: list[ClauseSegment] = []
     valid_types = {member.value: member for member in ClauseType}
@@ -1320,12 +1392,116 @@ async def _write_extracted_clause_episodes(
                     contract_index=contract_index,
                 )
             )
+    return segments
+
+
+def _legal_relationship_from_grounded(
+    edge: GroundedRelationship,
+    *,
+    document_id: str,
+    contract_index: int,
+) -> LegalRelationship:
+    """Convert a validated pass-2 edge into the canonical writer edge model.
+
+    Server-owned identity: only ``document_id``/``contract_index`` (job
+    identity) and content-derived entity/clause text enter the edge.  Content
+    can never influence tenant, group, or writer binding — the Graphiti
+    writer derives those from the server context, and the injection gate
+    proves it for this pass too.
+    """
+    return LegalRelationship(
+        edge_id=relationship_edge_id(
+            document_id=document_id,
+            contract_index=contract_index,
+            edge=edge,
+        ),
+        from_node=edge.from_entity,
+        relationship=edge.relationship,
+        to_node=edge.to_entity,
+        clause_id=edge.clause_id,
+        citation=Citation(
+            claim=f"{edge.from_entity} {edge.relationship.value} {edge.to_entity}",
+            source=f"{document_id}#contract={contract_index};clause={edge.clause_id}",
+            confidence=edge.confidence,
+            quoted_text=edge.quote[:2_000],
+        ),
+        contract_index=contract_index,
+    )
+
+
+def _relationship_state_from_pass(
+    *,
+    relationship_pass: RelationshipPassResult,
+    relationship_results: Sequence[object],
+) -> GraphRelationshipsState:
+    """Typed truth for the relationship phase given the pass and write results."""
+    attempted = len(relationship_results)
+    succeeded = sum(1 for result in relationship_results if getattr(result, "success", False))
+    if not relationship_pass.ran:
+        if relationship_pass.provider_error is not None:
+            return GraphRelationshipsState(
+                status=GraphRelationshipsStatus.FAILED,
+                reason=f"relationship_provider_error:{relationship_pass.provider_error}",
+                relationships_dropped=relationship_pass.drops.total,
+            )
+        if relationship_pass.budget_exhausted:
+            skip_reason = RELATIONSHIP_BUDGET_EXHAUSTED_REASON
+        else:
+            skip_reason = relationship_pass.skip_reason or "relationship_pass_not_run"
+        return GraphRelationshipsState(
+            status=(
+                GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
+                if skip_reason == RELATIONSHIP_CONFIG_DISABLED_REASON
+                else GraphRelationshipsStatus.NOT_ATTEMPTED
+            ),
+            reason=skip_reason,
+            relationships_dropped=relationship_pass.drops.total,
+        )
+    write_failures = attempted - succeeded
+    return GraphRelationshipsState(
+        status=(
+            GraphRelationshipsStatus.FAILED
+            if write_failures
+            else GraphRelationshipsStatus.SUCCEEDED
+        ),
+        reason="relationship_edge_write_failed" if write_failures else None,
+        relationships_attempted=attempted,
+        relationships_succeeded=succeeded,
+        relationships_invalid_span=relationship_pass.drops.invalid_span,
+        relationships_dropped=relationship_pass.drops.total - relationship_pass.drops.invalid_span,
+    )
+
+
+async def _write_extracted_clause_episodes(
+    *,
+    segments: list[ClauseSegment],
+    relationships: list[LegalRelationship],
+    edge_spans: dict[str, tuple[int, int]],
+    relationship_pass: RelationshipPassResult,
+    graph_writer: object | None,
+    idempotency: object | None,
+    document_id: str,
+    tenant_id: str = "",
+    document_version: int = 1,
+    contract_index: int = 0,
+    user_id: str,
+    jurisdiction: str | None,
+    document_type: str,
+) -> GraphWritePhaseResult:
+    """Map grounded clause extractions into the existing canonical writer.
+
+    Success is computed over clause writes only: a clause-write failure fails
+    the phase (the document degrades), while the relationship phase reports
+    its own typed truth — extraction outcome, drop counts, and per-edge write
+    results — through ``GraphRelationshipsState``.
+    """
     if not segments:
         return GraphWritePhaseResult(
             success=True,
             relationships=GraphRelationshipsState(
                 status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                 reason="no_clause_segments_extracted",
+                relationships_dropped=relationship_pass.drops.total,
             ),
         )
     if graph_writer is None and idempotency is None:
@@ -1336,6 +1512,7 @@ async def _write_extracted_clause_episodes(
             relationships=GraphRelationshipsState(
                 status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                 reason="graph_writer_unconfigured",
+                relationships_dropped=relationship_pass.drops.total,
             ),
         )
     if graph_writer is None or idempotency is None:
@@ -1348,11 +1525,12 @@ async def _write_extracted_clause_episodes(
             relationships=GraphRelationshipsState(
                 status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                 reason="graph_writer_dependencies_incomplete",
+                relationships_dropped=relationship_pass.drops.total,
             ),
         )
     clause_results, relationship_results = await write_clause_episodes_to_graphiti(
         segments,
-        [],
+        relationships,
         GraphIngestionContext(
             document_id=document_id,
             tenant_id=tenant_id,
@@ -1365,25 +1543,30 @@ async def _write_extracted_clause_episodes(
         ),
         graphiti_service=cast("ClauseWriterService", graph_writer),
         idempotency=cast("IdempotencyGuard", idempotency),
+        edge_spans=edge_spans or None,
     )
-    # The relationship list is empty because grounded relationship extraction is
-    # not implemented.  Report that as its own typed state with a distinct
-    # structured event so dashboards count the skip instead of reading success.
-    logger.bind(
+    relationships_state = _relationship_state_from_pass(
+        relationship_pass=relationship_pass,
+        relationship_results=relationship_results,
+    )
+    log = logger.bind(
         document_id=document_id,
-        relationships_attempted=len(relationship_results),
-        reason="relationship_extraction_not_implemented",
-    ).warning("graph_relationships_skipped")
+        relationships_attempted=relationships_state.relationships_attempted,
+        relationships_succeeded=relationships_state.relationships_succeeded,
+        relationships_invalid_span=relationships_state.relationships_invalid_span,
+        relationships_dropped=relationships_state.relationships_dropped,
+    )
+    if relationships_state.status is GraphRelationshipsStatus.FAILED:
+        log.warning("graph_relationships_failed", reason=relationships_state.reason)
+    elif relationships_state.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED:
+        log.warning("graph_relationships_skipped", reason=relationships_state.reason)
+    else:
+        log.info("graph_relationships_written")
     return GraphWritePhaseResult(
         success=all(result.success for result in clause_results),
         clause_writes_attempted=len(clause_results),
         clause_writes_succeeded=sum(1 for result in clause_results if result.success),
-        relationships=GraphRelationshipsState(
-            status=GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED,
-            reason="relationship_extraction_not_implemented",
-            relationships_attempted=len(relationship_results),
-            relationships_succeeded=sum(1 for result in relationship_results if result.success),
-        ),
+        relationships=relationships_state,
     )
 
 

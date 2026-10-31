@@ -175,6 +175,13 @@ class RelationshipType(StrEnum):
     DEADLINE = "deadline"
     RESTRICTS = "restricts"
     OBLIGES = "obliges"
+    # Ingestion pass-2 (relationship extraction) vocabulary: definitions,
+    # amendment/supersession chains, and cross-clause references.  The
+    # extractor validates against this closed enum, so new values flow
+    # through without producer changes.
+    DEFINES = "defines"
+    SUPERSEDES = "supersedes"
+    REFERENCES = "references"
 
 
 # ---------------------------------------------------------------------------

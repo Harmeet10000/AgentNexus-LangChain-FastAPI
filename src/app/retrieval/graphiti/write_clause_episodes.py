@@ -43,6 +43,8 @@ from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from .schemas import ClauseEpisodeMetadata, LegalEdgeInput
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from app.features.agent_saul.domain.state import ClauseSegment, LegalRelationship
 
 
@@ -101,8 +103,13 @@ async def write_clause_episodes_to_graphiti(
     *,
     graphiti_service: GraphitiService,
     idempotency: IdempotencyGuard,
+    edge_spans: Mapping[str, tuple[int, int]] | None = None,
 ) -> tuple[list[ClauseWriteResult], list[RelationshipWriteResult]]:
     """Write clause episodes + relationship edges to Graphiti.
+
+    ``edge_spans`` optionally maps ``edge_id -> (char_start, char_end)`` so
+    relationship edges persist the char interval that grounds them in the
+    source boundary text.
 
     Returns (clause_results, relationship_results).
     Partial failures are recorded per-item — caller decides on retry.
@@ -140,6 +147,7 @@ async def write_clause_episodes_to_graphiti(
     log.info("clause_episodes_written", successful=successful_clauses, total=len(segments))
 
     # Phase 2: Relationship edges (sequential — edges reference episode entities)
+    spans = edge_spans or {}
     rel_results: list[RelationshipWriteResult] = []
     for rel in relationships:
         result = await _write_single_relationship_edge(
@@ -149,6 +157,7 @@ async def write_clause_episodes_to_graphiti(
             thread_id=ctx.thread_id,
             tenant_id=ctx.tenant_id,
             document_version=ctx.document_version,
+            span=spans.get(rel.edge_id),
             graphiti_service=graphiti_service,
             idempotency=idempotency,
         )
@@ -259,6 +268,7 @@ async def _write_single_relationship_edge(
     thread_id: str,
     tenant_id: str,
     document_version: int,
+    span: tuple[int, int] | None = None,
     graphiti_service: GraphitiService,
     idempotency: IdempotencyGuard,
 ) -> RelationshipWriteResult:
@@ -297,6 +307,8 @@ async def _write_single_relationship_edge(
             thread_id=thread_id,
             citation_source=relationship.citation.source,
             confidence=relationship.citation.confidence,
+            char_start=span[0] if span is not None else None,
+            char_end=span[1] if span is not None else None,
         )
         uuid = await graphiti_service.write_relationship_edge(edge_input)
 
