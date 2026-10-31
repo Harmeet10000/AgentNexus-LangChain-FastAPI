@@ -402,3 +402,70 @@ Unmeasured sophistication is indistinguishable from luck. k=60 and trigram-weigh
   channel optional, so a disjoint state dict type-checks clean. The only gate
   that catches the class is a key-set assertion at the boundary. That's why
   the ledger makes it a precondition, not a suggestion.
+
+---
+
+## Step 6 expansion (2026-10-31): retrieval-graph unification decision matrix
+
+Status input: completion audit on main @ bf9441f+ — Phase F ~10% (the inline `ask`
+still serves production; the compiled graph lost its last external caller when
+features/search shipped, so it is now purely quarantined duplication), and the
+two paths have already diverged (edge-aware grounding exists only in the inline
+path, `documents.py:1002-1032`).
+
+### Approaches
+
+**A. Status quo (keep both, graph quarantined).** Zero risk today; the duplication
+drift is already real (edges, and every future inline improvement will not reach the
+graph). Maintainability cost compounds with each change to the ask path.
+
+**B. Delete the graph; inline is the survivor.** One code path, dead code gone, the
+recorded debt closed by deletion. Cost: the plan's "intended survivor" is gone —
+future agentic multi-hop (G8) would rebuild orchestration from scratch, and the
+plan→retrieve→grade→generate modularity exists only as inline functions.
+
+**C. Mount the graph (cutover).** The graph becomes the served implementation.
+Pros: single implementation with modular nodes, state checkpointing, per-node
+tracing, streaming/HITL affordances for G8. Cons: behavior change on a live
+endpoint; the graph's cache key is documented weaker than the inline path's
+version-aware keys; edge-aware grounding is missing from the graph (quality
+regression until ported); LangGraph state serialization adds overhead; every
+inline parity detail (fallback answer, warning merges, citation provenance) must
+be reproduced and proven.
+
+**D. Extract the shared core; both orchestrations become thin callers.** Lift the
+node bodies (plan, retrieve, fusion, rerank, grade, generate) into one module of
+pure functions; `ask` and `ask_via_retrieval_graph` become two orchestrations over
+the same tested core. Pros: kills the drift *immediately* with zero user-facing
+change (inline behavior preserved bit-for-bit — no cutover risk); makes the later
+parity evaluation cheap because both paths share the core; keeps B and C both
+available afterwards. Cons: real refactor effort; needs a context object seam; no
+instant LOC reduction.
+
+**E. Measured cutover (the plan's original gate).** Build the parity evaluation
+(answer-quality metrics on the gold corpus + latency distribution + citation
+grounding rate) comparing the two paths, then choose B or C with data.
+
+### Recommendation
+
+**D → E → then C or B on the numbers.** D first (drift dies, nothing user-facing
+changes), E second (the parity harness runs against one shared core), and only
+then decide cutover. Cutover criteria to write down before E runs: answer-quality
+metrics within noise, p95 latency no worse than inline +5%, citation grounding
+rate equal or better, cache-key parity proven. If any fails and cannot be fixed
+cheaply, B (delete) is the honest outcome — the inline path is the battle-tested
+one, and G8's orchestration can be rebuilt on the shared core when actually needed.
+
+### Decision inputs (measured, not taste)
+
+- Answer quality: retrieval metrics (recall@k, MRR, nDCG on the gold corpus — G1
+  currently ~70% fueled at 105 queries) + citation grounding rate + fallback rate.
+- User-facing latency: p50/p95 per stage. The LLM and reranker calls dominate
+  (hundreds of ms each); LangGraph orchestration overhead is marginal *unless* a
+  checkpointer is attached (then per-ask state writes add DB round-trips — decide
+  explicitly whether the compiled graph runs with or without one).
+- Maintainability: one test surface vs two; every future inline fix currently costs
+  a double port or a drift.
+- Risk: C is a live-endpoint behavior change (the single biggest risk in the plan's
+  remaining work); D and E are zero-user-risk.
+- Observability: C enables per-node spans for G6 almost for free; A/B keeps two.
