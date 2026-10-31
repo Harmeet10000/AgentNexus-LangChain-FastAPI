@@ -1118,21 +1118,21 @@ class DocumentRepository:
 
     @trace_layer("repository")
     async def list_document_ids_for_tenant(
-        self, *, tenant_id: str, limit: int = 10_000
+        self, *, tenant_id: str
     ) -> DocumentResult[tuple[str, ...]]:
         """Return the server-owned document capability for one tenant.
 
         This query is deliberately separate from retrieval.  It establishes
         the allowlist used to intersect client filters before any chunk read;
         tenant membership remains the authority and no user-supplied IDs are
-        ever used to populate it.
+        ever used to populate it.  The result is intentionally unbounded: a
+        truncated allowlist would reject otherwise valid tenant documents.
         """
         try:
             statement = (
                 select(cast(UnifiedDocument.id, String).label("document_id"))
                 .where(UnifiedDocument.tenant_id == tenant_id)
                 .order_by(cast(UnifiedDocument.id, String).asc())
-                .limit(max(1, min(limit, 100_000)))
             )
             result = await self.session.execute(statement)
             return Success(tuple(str(row[0]) for row in result.all()))
