@@ -172,7 +172,10 @@ class EscalationSink(Protocol):
    grade-loop tests). This deletes hand-rolled retry logic rather than adding any.
 5. **agent_saul.** Type-level adoption only: its mechanical gates + entailment +
    HITL already implement the pattern; map them onto the shared report/decision types
-   so all seams speak one vocabulary. No behavior change.
+   so all seams speak one vocabulary. No behavior change. The Saul-side detail — which
+   seams adopt, the `HumanReviewSink` wiring to `make_human_review_node`, budget-ledger
+   charging, and the middleware boundary for its tool-calling seams — is specified in
+   `PLAN-agent-tools.md` § D7 (gated on this step 1; sequenced after its D6).
 6. **Docs + settings.** `PLAN` checkboxes updated; any new settings get
    `SEARCH_*`-style typed Fields; lint-imports must stay 5/5.
 

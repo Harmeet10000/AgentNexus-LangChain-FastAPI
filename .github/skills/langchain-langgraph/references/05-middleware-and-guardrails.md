@@ -363,6 +363,14 @@ LangChain `AgentMiddleware` is best understood as a local policy/composition lay
 
 The main tradeoff is convenience versus control. Built-ins reduce implementation effort for limits, PII transformations, retries, approval, and context reduction, but their provider compatibility, stream behavior, and state details vary. Explicit graph nodes and application-owned tool boundaries require more code, yet they make replay and transaction semantics visible. AgentNexus should use middleware for bounded, testable policy; keep effects idempotent and authorization in business boundaries; and adopt provider conveniences only when exact-version tests show they preserve those guarantees.
 
+## Cross-Reference
+
+Middleware retry scope: `ModelRetryMiddleware` retries exceptions raised *by the model
+call* (transport/provider failures) — it never sees successful output, so schema-error
+retries (`ToolStrategy.handle_errors`) and semantic/content validation live outside
+middleware. The full boundary and post-LLM validation-pipeline guidance:
+see `14-output-validation-and-retry.md`.
+
 ## References
 
 1. *Persistence*. https://docs.langchain.com/oss/python/langgraph/persistence

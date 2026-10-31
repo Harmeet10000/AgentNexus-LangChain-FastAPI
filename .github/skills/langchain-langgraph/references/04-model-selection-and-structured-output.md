@@ -125,3 +125,9 @@ def state_based_output(
 ```
 
 Store-based response format and runtime-context response format follow the same pattern, using stored preferences or user role to select the schema.
+
+## Cross-Reference
+
+Malformed-output behavior (`include_raw`'s `'parsing_error'` contract, schema-vs-dict
+validation strength), `ToolStrategy.handle_errors` retry semantics, and what to do when
+structured output parses but is semantically wrong: see `14-output-validation-and-retry.md`.

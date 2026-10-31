@@ -281,3 +281,74 @@ deliberately NOT a tool.**
 See `openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md` (retired
 2026-10-31, archived) for the step-6 decision matrix
 and the completion audit that motivated mounting over extraction.
+
+---
+
+## D7 — Saul adoption of the Result Validation Layer (specified 2026-10-31; gated — not started)
+
+**Companion:** `PLAN-result-validation-layer.md` (repo root) specifies the core module —
+`src/app/ai/validation/`, its `ValidationDecision` (ACCEPT/RETRY/ESCALATE),
+`ValidationOutcome`, `SemanticEvaluator`, retry-feedback, and escalation-sink contracts.
+**This section covers only the Saul-side integration and duplicates nothing from that
+spec.** D7 is gated on the core module existing (integration-order step 1 there); it is
+not started. Execution order: **after D6** — D6 mounts the retrieval graph as qna's
+engine, and its grade loop (integration-order step 4 in the validation plan) is the
+parity refactor Saul's qna inherits; adopting the shared vocabulary before that refactor
+lands would mean typing a seam twice.
+
+### Which seams adopt, and how
+
+**1. The verdict/entailment path (`features/agent_saul/graph/nodes.py`) — type-level
+adoption, no behavior change.** The mechanical evidence-handle gates before model
+entailment (`_verify_quotes_against_canonical_source` and the span-containment /
+entity-in-quote checks, nodes.py:1842 and the call sites at :2024, :2081) plus the
+entailment pass already *implement* the pattern the validation layer names: pure
+mechanical predicates first, model consulted only for what mechanics cannot decide —
+exactly the `CompositeEvaluator` shape (mechanical first; LLM evaluator only if mechanics
+pass). Adoption is **vocabulary, not rewiring**: the gates' local pass/fail shapes map
+onto `SemanticReport` (findings with locators; mechanical predicates become
+`MechanicalEvaluator` predicate callables), and the verdict path's accept/escalate exits
+map onto `ValidationOutcome` with `ValidationDecision`. Every finding code Saul emits
+enters the layer's stable reason vocabulary so all seams speak one language. No gate
+logic moves; tests must prove observably identical behavior.
+
+**2. ESCALATE → the existing HITL review node — `HumanReviewSink` wiring.**
+`make_human_review_node` (nodes.py:2335, wired as `human_review` in
+`graph/factory.py:259`) becomes the concrete `HumanReviewSink` from the validation
+layer's `escalation.py`: an ESCALATE outcome from any Saul-side pipeline routes there
+instead of inventing a fourth escalation path. Routing stays caller-decided per the
+layer's contract — the pipeline decides ESCALATE + reason; Saul's graph wires the sink.
+
+**3. Budget: validation retries draw from Saul's ledger.** Where a Saul seam runs the
+pipeline with retries, the `BudgetLedger` (`features/agent_saul/domain/budget.py:44`) is
+the supplied ledger: every re-invocation of `produce` charges it, exhaustion mid-pipeline
+⇒ ESCALATE with reason `budget_exhausted`, and no fresh allowance is minted (the PR #110
+lesson, restated as contract rule 5 in the validation plan). The entailment pass is
+already budget-attributed; the pipeline adds nothing new except charging through the same
+ledger instead of ad-hoc counting.
+
+### What Saul does NOT adopt
+
+**Tool-calling seams stay on guardrails middleware.** The upstream boundary is explicit:
+`ModelRetryMiddleware` retries exceptions raised *by the model call* (transport/provider
+failures, `retry_on` predicate, backoff) and never inspects successful output — content
+validation cannot live there. Conversely, `ToolStrategy.handle_errors` owns in-agent
+schema-error retries via `ToolMessage` feedback, and parsers own format repair. Saul's
+`search_evidence` / `read_evidence_by_id` / transfer tools (and the D5/D6 subgraph
+wrappers) therefore keep `ModelRetryMiddleware` / `ToolRetryMiddleware` for transport
+retry exactly as they are. The validation layer exists for the *other* half of the
+boundary: semantic gates over values that already parsed — grounding, entailment,
+evidence contracts. See `.github/skills/langchain-langgraph/references/14-output-validation-and-retry.md`
+for the fetched-doc basis of this boundary.
+
+### Acceptance
+
+- Type-level adoption compiles against `app/ai/validation` (lint-imports stays 5/5) with
+  a test proving the verdict path emits `ValidationOutcome` decisions reachable for
+  ACCEPT and ESCALATE, and that behavior is unchanged (existing verdict-path tests green,
+  unmodified).
+- ESCALATE with a review-class reason routes to `human_review`; a test drives the
+  interrupt through the sink, not around it.
+- A retryable-finding test shows the retry charging `BudgetLedger` and carrying
+  `RetryFeedback`; exhaustion yields ESCALATE/`budget_exhausted`, never a fresh pool.
+- Tool seams' middleware stack is asserted unchanged (transport retry still middleware).

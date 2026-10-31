@@ -80,6 +80,12 @@ This skill is split into bounded reference files so opencode can load only the r
   - vector stores
   - retrievers
   - RAG architecture
+- Use `14-output-validation-and-retry.md` for:
+  - malformed structured-output behavior and `include_raw`
+  - structured-output error handling (`ToolStrategy.handle_errors`)
+  - output-parser fix/retry semantics (`OutputFixingParser`, `RetryOutputParser`)
+  - transport retry vs content validation boundary
+  - post-LLM validation pipeline decision guidance
 
 ## Quick Reminders
 
