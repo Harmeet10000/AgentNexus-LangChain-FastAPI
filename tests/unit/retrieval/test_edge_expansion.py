@@ -277,3 +277,30 @@ async def test_unknown_scoping_on_either_side_stays_permissive() -> None:
     )
     assert len(expansions) == 1
     assert expansions[0].blocks[0].edge_id == "edge-1"
+
+
+def test_ungrounded_edges_sort_after_grounded_ones() -> None:
+    """Legacy unspanned edges must not fill the block cap first.
+
+    The per-seed cap is 4; with 4 ungrounded + 1 grounded edge, the grounded
+    (span-cited) edge must survive expansion.
+    """
+    ungrounded = [
+        _edge(
+            edge_id=f"legacy-{index}",
+            clause_id=f"{index}.0",
+            char_start=None,
+            char_end=None,
+        )
+        for index in range(4)
+    ]
+    grounded = [_edge(edge_id="grounded-1")]
+    seed = _seed(content="The Employer shall pay the monthly charge. Acme Corp signs.")
+    expansions = expand_along_edges(
+        seeds=[seed],
+        edges=[*ungrounded, *grounded],
+        max_expansion_tokens=10_000,
+        count_tokens=lambda text: len(text.split()),
+    )
+    assert expansions[0].blocks[0].edge_id == "grounded-1"
+    assert len(expansions[0].blocks) == 4

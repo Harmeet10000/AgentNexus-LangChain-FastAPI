@@ -31,6 +31,7 @@ from app.features.documents.retrieval.graph import (
     QueryPlan,
     RetrievedChunk,
 )
+from app.retrieval.graphiti import client as graphiti_client_module
 
 if TYPE_CHECKING:
     from typing import Any
@@ -72,20 +73,31 @@ def _episode(
     )
 
 
-class _ScopingGraphiti:
-    """Fake client answering exactly like the provider's group partition."""
+class _FakeGraphiti:
+    """Fake client: search (chunk filter) + driver-backed episode reads."""
 
     def __init__(self, episodes: list[Any]) -> None:
         self._episodes = episodes
+        self.graph_driver: object = object()
         self.calls: list[dict[str, Any]] = []
 
     async def search(self, *, query: str, group_ids: list[str], num_results: int) -> list[Any]:
-        self.calls.append(
-            {"query": query, "group_ids": list(group_ids), "num_results": num_results}
-        )
+        self.calls.append({"surface": "search", "group_ids": list(group_ids), "limit": num_results})
         return [episode for episode in self._episodes if episode.group_id in group_ids][
             :num_results
         ]
+
+
+def _install_episode_source(monkeypatch: pytest.MonkeyPatch, episodes: list[Any]) -> _FakeGraphiti:
+    """Patch the episode read surface; the reader reads episodes by group."""
+    graphiti = _FakeGraphiti(episodes)
+
+    async def fake_read(_driver: object, *, group_ids: list[str], limit: int) -> list[Any]:
+        graphiti.calls.append({"surface": "episodes", "group_ids": list(group_ids), "limit": limit})
+        return [episode for episode in episodes if episode.group_id in group_ids][:limit]
+
+    monkeypatch.setattr(graphiti_client_module, "_read_episodes_by_group", fake_read)
+    return graphiti
 
 
 class _StubRepository:
@@ -219,8 +231,11 @@ def _wired(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.usefixtures("_wired")
-async def test_ask_cites_edges_with_server_derived_provenance() -> None:
-    graphiti = _ScopingGraphiti(
+async def test_ask_cites_edges_with_server_derived_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graphiti = _install_episode_source(
+        monkeypatch,
         [
             _episode(
                 "edge-1",
@@ -228,7 +243,7 @@ async def test_ask_cites_edges_with_server_derived_provenance() -> None:
                 content=_EDGE_BODY,
                 source_description=_edge_source(_DOC_ID),
             )
-        ]
+        ],
     )
     service = _service(graphiti)
 
@@ -258,9 +273,12 @@ async def test_ask_cites_edges_with_server_derived_provenance() -> None:
 
 
 @pytest.mark.usefixtures("_wired")
-async def test_ask_feeds_edge_grounding_to_the_generator() -> None:
+async def test_ask_feeds_edge_grounding_to_the_generator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     llm = _FakeStructuredLLM()
-    graphiti = _ScopingGraphiti(
+    graphiti = _install_episode_source(
+        monkeypatch,
         [
             _episode(
                 "edge-1",
@@ -268,7 +286,7 @@ async def test_ask_feeds_edge_grounding_to_the_generator() -> None:
                 content=_EDGE_BODY,
                 source_description=_edge_source(_DOC_ID),
             )
-        ]
+        ],
     )
     service = _service(graphiti, llm)
 
@@ -288,10 +306,13 @@ async def test_ask_feeds_edge_grounding_to_the_generator() -> None:
 
 
 @pytest.mark.usefixtures("_wired")
-async def test_ask_cannot_expand_through_another_tenant_edges() -> None:
+async def test_ask_cannot_expand_through_another_tenant_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     tenant_a_group = _tenant_group(_TENANT_A, _DOC_ID)
     tenant_b_group = _tenant_group(_TENANT_B, "doc-b")
-    graphiti = _ScopingGraphiti(
+    graphiti = _install_episode_source(
+        monkeypatch,
         [
             _episode(
                 "edge-a",
@@ -306,7 +327,7 @@ async def test_ask_cannot_expand_through_another_tenant_edges() -> None:
                 "Citation: clause 7.2. Confidence: 0.90. Grounding: chars 5-90.",
                 source_description=_edge_source("doc-b"),
             ),
-        ]
+        ],
     )
     service = _service(graphiti)
 
@@ -329,10 +350,13 @@ async def test_ask_cannot_expand_through_another_tenant_edges() -> None:
 
 
 @pytest.mark.usefixtures("_wired")
-async def test_ask_without_edges_keeps_the_pre_edge_contract() -> None:
+async def test_ask_without_edges_keeps_the_pre_edge_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # A graphiti holding only non-edge episodes must behave exactly like no
     # graphiti at all: no grounding_edges payload key, no extra citations.
-    bare_graphiti = _ScopingGraphiti(
+    bare_graphiti = _install_episode_source(
+        monkeypatch,
         [
             _episode(
                 "clause-1",
@@ -340,7 +364,7 @@ async def test_ask_without_edges_keeps_the_pre_edge_contract() -> None:
                 content="The Employer shall pay within fourteen days.",
                 source_description=json.dumps({"type": "clause_episode"}),
             )
-        ]
+        ],
     )
     bare_llm = _FakeStructuredLLM()
     bare_service = _service(bare_graphiti, bare_llm)
@@ -375,7 +399,8 @@ async def test_ask_without_edges_keeps_the_pre_edge_contract() -> None:
 async def test_edge_grounding_helper_fails_closed_without_explicit_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    graphiti = _ScopingGraphiti(
+    graphiti = _install_episode_source(
+        monkeypatch,
         [
             _episode(
                 "edge-1",
@@ -383,7 +408,7 @@ async def test_edge_grounding_helper_fails_closed_without_explicit_scope(
                 content=_EDGE_BODY,
                 source_description=_edge_source(_DOC_ID),
             )
-        ]
+        ],
     )
 
     result = await documents_module._edge_grounding_for_reranked(

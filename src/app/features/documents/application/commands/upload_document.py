@@ -24,6 +24,7 @@ from app.extraction.langextract.relationships import (
     ClauseIdentity,
     GroundedRelationship,
     RelationshipPassResult,
+    prompt_safe_attribution,
     relationship_edge_id,
     relationship_pass_config_from_settings,
     run_relationship_pass,
@@ -115,13 +116,10 @@ _GRAPHITI_EVENT_ERRORS = (
     TypeError,
     ValueError,
 )
-# A model-derived attribution string may enter the pass-2 prompt's trusted
-# server-derived section only in this bounded single-line form.
-_MAX_ATTRIBUTION_CHARS: Final[int] = 64
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import Any, Final, Literal
+    from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
     from langgraph.graph.state import CompiledStateGraph
@@ -1355,24 +1353,6 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
     )
 
 
-def _validated_attribution(raw: object) -> str | None:
-    """Validate model-derived clause attribution for the trusted prompt section.
-
-    Pass-1 ``clause_id``/``section_ref`` attributes are model output over
-    untrusted document content: a document can steer them to carry
-    instructions.  They may surface as *attribution* (the section reference)
-    but never as identity, and only in a bounded single-line, control-
-    character-free form; anything else is rejected and the caller falls back
-    to the server-issued value.
-    """
-    text = str(raw).strip() if raw is not None else ""
-    if not text or len(text) > _MAX_ATTRIBUTION_CHARS:
-        return None
-    if any(not character.isprintable() for character in text):
-        return None
-    return text
-
-
 def _extract_clause_segments(
     outcome: ExtractionSucceeded,
     *,
@@ -1404,8 +1384,8 @@ def _extract_clause_segments(
                 f"{document_id}:{contract_index}:{interval.start_pos}:{interval.end_pos}:{extraction.extraction_text}".encode()
             ).hexdigest()[:20]
             section_ref = (
-                _validated_attribution(attributes.get("section_ref"))
-                or _validated_attribution(
+                prompt_safe_attribution(attributes.get("section_ref"))
+                or prompt_safe_attribution(
                     attributes.get("clause_id") or attributes.get("clause_number")
                 )
                 or issued_id

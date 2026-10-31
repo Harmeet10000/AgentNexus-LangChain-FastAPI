@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 from graphiti_core.errors import GraphitiError
 
+from app.retrieval.graphiti import client as client_module
 from app.retrieval.graphiti.client import (
     _parse_relationship_edge,
     fetch_relationship_edges,
@@ -68,28 +69,44 @@ def _edge_episode(
     )
 
 
-class _ScopingGraphiti:
-    """Fake client that answers exactly like the provider's group partition."""
+class _FakeGraphiti:
+    """Fake client exposing only the graph driver the reader needs."""
 
-    def __init__(self, episodes: list[SimpleNamespace]) -> None:
-        self._episodes = episodes
+    def __init__(self) -> None:
+        self.graph_driver: object = object()
         self.calls: list[dict[str, Any]] = []
 
-    async def search(
-        self, *, query: str, group_ids: list[str], num_results: int
+
+def _install_episode_source(
+    monkeypatch: pytest.MonkeyPatch, episodes: list[SimpleNamespace]
+) -> _FakeGraphiti:
+    """Patch the episode read surface; records the scoped groups it reads."""
+
+    async def fake_read(
+        _driver: object, *, group_ids: list[str], limit: int
     ) -> list[SimpleNamespace]:
-        self.calls.append(
-            {"query": query, "group_ids": list(group_ids), "num_results": num_results}
-        )
-        return [episode for episode in self._episodes if episode.group_id in group_ids][
-            :num_results
-        ]
+        source.calls.append({"group_ids": list(group_ids), "limit": limit})
+        return [episode for episode in episodes if episode.group_id in group_ids][:limit]
+
+    source = _FakeGraphiti()
+    monkeypatch.setattr(client_module, "_read_episodes_by_group", fake_read)
+    return source
 
 
 class _ExplodingGraphiti:
-    async def search(self, **_kwargs: object) -> list[SimpleNamespace]:
+    graph_driver: object = object()
+
+
+def _install_exploding_source(monkeypatch: pytest.MonkeyPatch) -> _ExplodingGraphiti:
+    async def explode(
+        _driver: object, *, group_ids: list[str], limit: int
+    ) -> list[SimpleNamespace]:
         message = "graph is down"
         raise GraphitiError(message)
+
+    graphiti = _ExplodingGraphiti()
+    monkeypatch.setattr(client_module, "_read_episodes_by_group", explode)
+    return graphiti
 
 
 _TENANT_A_GROUP = build_graphiti_group_id(
@@ -100,8 +117,12 @@ _TENANT_B_GROUP = build_graphiti_group_id(
 )
 
 
-async def test_empty_allowlist_fails_closed_without_a_search_call() -> None:
-    graphiti = _ScopingGraphiti([_edge_episode("edge-1", group_id=_TENANT_A_GROUP)])
+async def test_empty_allowlist_fails_closed_without_a_search_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graphiti = _install_episode_source(
+        monkeypatch, [_edge_episode("edge-1", group_id=_TENANT_A_GROUP)]
+    )
 
     result = await fetch_relationship_edges(graphiti, "payment", allowed_doc_ids=())
 
@@ -109,8 +130,12 @@ async def test_empty_allowlist_fails_closed_without_a_search_call() -> None:
     assert graphiti.calls == []
 
 
-async def test_allowlist_without_tenant_never_issues_an_unscoped_search() -> None:
-    graphiti = _ScopingGraphiti([_edge_episode("edge-1", group_id=_TENANT_A_GROUP)])
+async def test_allowlist_without_tenant_never_issues_an_unscoped_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graphiti = _install_episode_source(
+        monkeypatch, [_edge_episode("edge-1", group_id=_TENANT_A_GROUP)]
+    )
 
     result = await fetch_relationship_edges(
         graphiti,
@@ -124,10 +149,14 @@ async def test_allowlist_without_tenant_never_issues_an_unscoped_search() -> Non
     assert graphiti.calls == []
 
 
-async def test_scope_without_resolvable_groups_reads_nothing() -> None:
+async def test_scope_without_resolvable_groups_reads_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # A document with no authorized version resolves to no partitions; the
     # read must fail closed rather than widen to a legacy group.
-    graphiti = _ScopingGraphiti([_edge_episode("edge-1", group_id=_TENANT_A_GROUP)])
+    graphiti = _install_episode_source(
+        monkeypatch, [_edge_episode("edge-1", group_id=_TENANT_A_GROUP)]
+    )
 
     result = await fetch_relationship_edges(
         graphiti,
@@ -140,8 +169,10 @@ async def test_scope_without_resolvable_groups_reads_nothing() -> None:
     assert graphiti.calls == []
 
 
-async def test_edge_episode_parses_into_a_typed_record() -> None:
-    graphiti = _ScopingGraphiti([_edge_episode("edge-1", group_id=_TENANT_A_GROUP)])
+async def test_edge_episode_parses_into_a_typed_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    graphiti = _install_episode_source(
+        monkeypatch, [_edge_episode("edge-1", group_id=_TENANT_A_GROUP)]
+    )
 
     result = await fetch_relationship_edges(
         graphiti,
@@ -166,7 +197,9 @@ async def test_edge_episode_parses_into_a_typed_record() -> None:
     assert edge.group_id == _TENANT_A_GROUP
 
 
-async def test_non_edge_episodes_and_untypeable_bodies_are_dropped() -> None:
+async def test_non_edge_episodes_and_untypeable_bodies_are_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     clause_episode = _edge_episode(
         "clause-1",
         group_id=_TENANT_A_GROUP,
@@ -187,7 +220,9 @@ async def test_non_edge_episodes_and_untypeable_bodies_are_dropped() -> None:
         score=0.5,
         created_at=None,
     )
-    graphiti = _ScopingGraphiti([clause_episode, no_relationship, missing_source])
+    graphiti = _install_episode_source(
+        monkeypatch, [clause_episode, no_relationship, missing_source]
+    )
 
     result = await fetch_relationship_edges(
         graphiti,
@@ -201,9 +236,11 @@ async def test_non_edge_episodes_and_untypeable_bodies_are_dropped() -> None:
     assert result == ()
 
 
-async def test_transport_failure_degrades_to_an_empty_tuple() -> None:
+async def test_transport_failure_degrades_to_an_empty_tuple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     result = await fetch_relationship_edges(
-        _ExplodingGraphiti(),
+        _install_exploding_source(monkeypatch),
         "payment",
         allowed_doc_ids=("doc-a",),
         tenant_id="tenant-a",
@@ -214,11 +251,12 @@ async def test_transport_failure_degrades_to_an_empty_tuple() -> None:
     assert result == ()
 
 
-async def test_a_tenant_cannot_read_another_tenant_edges() -> None:
+async def test_a_tenant_cannot_read_another_tenant_edges(monkeypatch: pytest.MonkeyPatch) -> None:
     # Tenant B's edges exist in the store, but the read is scoped to tenant A's
     # authorized partitions: the fake provider never returns them, and the
     # service never even asks for tenant B's group id.
-    graphiti = _ScopingGraphiti(
+    graphiti = _install_episode_source(
+        monkeypatch,
         [
             _edge_episode("edge-a", group_id=_TENANT_A_GROUP, doc_id="doc-a"),
             _edge_episode(
@@ -227,7 +265,7 @@ async def test_a_tenant_cannot_read_another_tenant_edges() -> None:
                 doc_id="doc-b",
                 body=_edge_body("BetaCorp", "obliges", "Gamma LLC"),
             ),
-        ]
+        ],
     )
 
     result = await fetch_relationship_edges(
@@ -250,16 +288,17 @@ async def test_a_tenant_cannot_read_another_tenant_edges() -> None:
     [("OBLIGES", "obliges"), ("Indemnifies", "indemnifies")],
 )
 async def test_relationship_word_is_matched_case_insensitively(
-    relationship: str, expected: str
+    relationship: str, expected: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    graphiti = _ScopingGraphiti(
+    graphiti = _install_episode_source(
+        monkeypatch,
         [
             _edge_episode(
                 "edge-1",
                 group_id=_TENANT_A_GROUP,
                 body=_edge_body("Acme Corp", relationship, "GlobalTech Ltd"),
             )
-        ]
+        ],
     )
 
     result = await fetch_relationship_edges(
@@ -274,7 +313,9 @@ async def test_relationship_word_is_matched_case_insensitively(
     assert result[0].relationship == expected
 
 
-async def test_structured_triple_survives_abbreviated_entity_names() -> None:
+async def test_structured_triple_survives_abbreviated_entity_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """New rows read the triple from source_description, never prose.
 
     'Acme Corp. obliges GlobalTech Ltd.' contains sentence punctuation; the
@@ -300,7 +341,9 @@ async def test_structured_triple_survives_abbreviated_entity_names() -> None:
     assert record.contract_index is None  # not asserted by legacy fixture
 
 
-async def test_structured_fields_carry_contract_and_version() -> None:
+async def test_structured_fields_carry_contract_and_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """contract_index/document_version ride in source_description for scoping."""
     episode = _edge_episode("edge-scoped", group_id="g1")
     meta = json.loads(episode.source_description)
@@ -316,7 +359,9 @@ async def test_structured_fields_carry_contract_and_version() -> None:
     assert record.document_version == 3
 
 
-async def test_legacy_prose_rows_still_parse_despite_abbreviations() -> None:
+async def test_legacy_prose_rows_still_parse_despite_abbreviations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Pre-structured rows fall back to prose — the vocabulary scan spans the
     whole first line, so 'Acme Corp. obliges GlobalTech Ltd.' parses instead
     of being truncated at the abbreviation period."""

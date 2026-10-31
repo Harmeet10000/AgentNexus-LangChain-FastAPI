@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid5
 
 from graphiti_core.errors import GraphitiError
-from graphiti_core.nodes import EpisodeType
+from graphiti_core.nodes import EpisodeType, EpisodicNode
 from neo4j.exceptions import Neo4jError
 
 # The closed relationship vocabulary is owned by the pass-2 producer. Reads
@@ -623,6 +623,16 @@ def _scoped_group_ids(
 # ---------------------------------------------------------------------------
 
 
+async def _read_episodes_by_group(
+    driver: Any,
+    *,
+    group_ids: list[str],
+    limit: int,
+) -> list[Any]:
+    """Read the producer's episodes for the scoped groups from the graph."""
+    return await EpisodicNode.get_by_group_ids(driver, group_ids=group_ids, limit=limit)
+
+
 async def fetch_relationship_edges(
     graphiti: Graphiti,
     query: str,
@@ -639,9 +649,14 @@ async def fetch_relationship_edges(
     Same authorization scaffold as ``search_for_risk_context``: an empty
     allowlist is a fail-closed boundary, a scope without resolvable groups
     reads nothing, and every returned record was persisted by the pass-2
-    producer (``source_description`` ``type == "relationship_edge"``).  A
-    transport failure degrades to an empty tuple — expansion is additive and
-    must never turn a healthy ask into a failed one.
+    producer (``source_description`` ``type == "relationship_edge"``).  The
+    read is identity-scoped, not query-ranked: ``Graphiti.search`` returns
+    ``EntityEdge`` facts (no episode body or source description), so the
+    producer's own episodes are read directly by server-derived group.
+    Expansion matching is entity/clause-based, so query relevance is not
+    load-bearing here.  A transport failure degrades to an empty tuple —
+    expansion is additive and must never turn a healthy ask into a failed
+    one.
     """
     if not allowed_doc_ids:
         return ()
@@ -661,11 +676,14 @@ async def fetch_relationship_edges(
         group_ids=group_ids,
     ).info("Fetching typed relationship edges")
 
+    driver = getattr(graphiti, "graph_driver", None)
+    if driver is None:
+        return ()
     try:
-        raw_results = await graphiti.search(
-            query=query,
+        raw_results = await _read_episodes_by_group(
+            driver,
             group_ids=group_ids,
-            num_results=num_results,
+            limit=num_results,
         )
     except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note(f"query={query[:80]}, task=relationship_edges")

@@ -225,11 +225,18 @@ def _entity_occurs(entity: str, content: str) -> bool:
     return entity.casefold() in content.casefold()
 
 
-def _edge_order_key(edge: LegalEdgeRecord) -> tuple[int, int, str, str, str, str, str]:
-    """Span-first deterministic order; ungrounded edges sort last by identity."""
+def _edge_order_key(edge: LegalEdgeRecord) -> tuple[int, int, int, str, str, str, str, str]:
+    """Span-first deterministic order; ungrounded edges sort last by identity.
+
+    A fully grounded edge (both span endpoints present) precedes every
+    ungrounded one — legacy rows without spans must not fill the per-seed
+    block cap and push span-cited expansions out.
+    """
+    grounded = edge.char_start is not None and edge.char_end is not None
     return (
-        edge.char_start if edge.char_start is not None else -1,
-        edge.char_end if edge.char_end is not None else -1,
+        0 if grounded else 1,
+        edge.char_start if edge.char_start is not None else 0,
+        edge.char_end if edge.char_end is not None else 0,
         edge.clause_id,
         edge.from_entity,
         edge.relationship,

@@ -16,10 +16,14 @@ Security contract (mirrors ``ingestion.enrichment.legal_metadata``):
 - The prompt description carries only server-derived data (clause ids,
   clause types, char offsets) — never raw document text.  Clause identities
   are issued server-side from boundary coordinates; pass-1 model-derived
-  attribution may enter the trusted section only in a bounded single-line
-  form (see ``_is_prompt_safe``), and inventory entries that fail the check
-  are dropped and counted.  Pass-1 clause texts are used exclusively for
-  server-side endpoint validation.
+  attribution may enter the trusted section only as a short section-number-
+  ish token (see ``prompt_safe_attribution``), and inventory entries that
+  fail the check are dropped and counted.  Pass-1 clause texts are used
+  exclusively for server-side endpoint validation.
+- The document travels in a SINGLE model prompt: the request's
+  ``max_char_buffer`` is never smaller than the wrapped text, so langextract
+  cannot split the untrusted region across per-chunk prompts (a middle chunk
+  would carry raw document text with no delimiters).
 - Every candidate edge is validated before it can be persisted: the char
   interval must resolve inside the boundary text, the relationship value must
   be in the closed ``RelationshipType`` vocabulary, the clause reference must
@@ -34,6 +38,8 @@ Security contract (mirrors ``ingestion.enrichment.legal_metadata``):
 from __future__ import annotations
 
 import hashlib
+import math
+import re
 from enum import StrEnum
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -71,8 +77,11 @@ _RELATIONSHIP_TEXT_PREFIX: Final[str] = f"{UNTRUSTED_DOCUMENT_BEGIN}\n"
 _RELATIONSHIP_TEXT_SUFFIX: Final[str] = f"\n{UNTRUSTED_DOCUMENT_END}"
 _MAX_ENTITY_CHARS: Final[int] = 256
 # A model-derived attribution string may enter the prompt's trusted
-# server-derived section only in this bounded single-line form.
-_MAX_PROMPT_ATTR_CHARS: Final[int] = 64
+# server-derived section only as a short section-number-ish token: letters,
+# digits, and the punctuation section labels use.  Anything else (prose,
+# spaces, semicolons, control characters) is rejected, so a document cannot
+# steer instructions into the trusted section even in bounded form.
+_ATTRIBUTION_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.()§\-]{1,32}")
 _DEFAULT_CONFIDENCE: Final[float] = 0.5
 
 _RELATIONSHIP_PROMPT_INSTRUCTION: Final[str] = (
@@ -303,6 +312,16 @@ def build_relationship_request(
     The document itself travels only inside the delimited untrusted region of
     the text channel, so no document content exists outside the region in the
     rendered prompt.
+
+    SINGLE-CALL GUARANTEE: langextract's annotator chunks the input text into
+    ``max_char_buffer``-sized pieces and renders ONE model prompt per chunk,
+    each carrying only its own slice of the text.  A mid-document chunk would
+    then hold raw document text with no delimiters at all, breaking the
+    untrusted-region contract at the model-prompt level.  The request
+    therefore raises ``max_char_buffer`` to at least the wrapped text length,
+    pinning the boundary to exactly one chunk (and one charged model call,
+    which the budget accounting in ``AsyncExtractionService`` computes from
+    the same buffer).
     """
     frame = wrap_boundary_text(boundary_text)
     inventory_lines = "\n".join(
@@ -324,7 +343,10 @@ def build_relationship_request(
         # does for pass 1).
         extraction_passes=1,
         max_workers=max_workers,
-        max_char_buffer=max_char_buffer,
+        # Never smaller than the wrapped text: see the single-call guarantee
+        # above.  A smaller buffer would split the untrusted region across
+        # per-chunk prompts.
+        max_char_buffer=max(max_char_buffer, len(frame.wrapped)),
         document_id=document_id,
         tenant_id=tenant_id,
         document_version=document_version,
@@ -414,14 +436,20 @@ def _relationship_share_budget(budget: ExtractionBudget) -> ExtractionBudget:
 
 
 def _merge_relationship_charge(
-    *, original: ExtractionBudget, returned: ExtractionBudget
+    *, original: ExtractionBudget, returned: ExtractionBudget | None
 ) -> ExtractionBudget:
     """Restore shared maxima and accumulate the pass-2 charge into the pool.
 
     ``original`` is the pre-call shared ledger: its maxima were only ever
     tightened on the call-scoped copy, so they are restored here, and the
     counter deltas against it are exactly what this pass spent.
+
+    ``returned`` may be None: failure outcomes may carry no budget, and the
+    pass-level failure handling already records the failure — there is
+    nothing to merge.
     """
+    if returned is None:
+        return original
     return returned.model_copy(
         update={
             "max_model_calls": original.max_model_calls,
@@ -440,19 +468,25 @@ def _merge_relationship_charge(
     )
 
 
-def _is_prompt_safe(value: str) -> bool:
-    """A string may enter the prompt's trusted section only in bounded form.
+def prompt_safe_attribution(raw: object) -> str | None:
+    """Validate model-derived clause attribution for the trusted prompt section.
 
     Pass-1 clause attribution is model output over untrusted document
-    content.  Short, single-line, control-character-free strings cannot
-    smuggle instructions across the trust boundary; anything else is
-    rejected (and its inventory entry dropped and counted).
+    content: a document can steer it to carry instructions.  Only a short
+    section-number-ish token (``_ATTRIBUTION_PATTERN``: letters, digits,
+    ``_.()§-``) can enter the prompt's trusted server-derived section;
+    prose, separators, and control characters are all rejected, and the
+    caller falls back to the server-issued identity.
     """
-    return (
-        bool(value)
-        and len(value) <= _MAX_PROMPT_ATTR_CHARS
-        and all(character.isprintable() for character in value)
-    )
+    text = str(raw).strip() if raw is not None else ""
+    if not text or _ATTRIBUTION_PATTERN.fullmatch(text) is None:
+        return None
+    return text
+
+
+def _is_prompt_safe(value: str) -> bool:
+    """Whether a string may enter the prompt's trusted section at all."""
+    return prompt_safe_attribution(value) is not None
 
 
 def _sanitize_inventory(
@@ -668,10 +702,18 @@ def _entity_grounded(entity: str, corpus: str) -> bool:
 
 
 def _parse_confidence(raw: object) -> float:
-    """Parse a model-supplied confidence, defaulting when absent/invalid."""
+    """Parse a model-supplied confidence, defaulting when absent/invalid.
+
+    Non-finite floats (``NaN``, ``inf``) slip past the range comparisons —
+    both are false for NaN — so they are rejected explicitly; a non-finite
+    confidence would otherwise raise inside ``GroundedRelationship`` and kill
+    the whole ingestion task instead of dropping one candidate.
+    """
     try:
         value = float(str(raw))
     except (TypeError, ValueError):
+        return _DEFAULT_CONFIDENCE
+    if not math.isfinite(value):
         return _DEFAULT_CONFIDENCE
     if value < 0.0:
         return 0.0
