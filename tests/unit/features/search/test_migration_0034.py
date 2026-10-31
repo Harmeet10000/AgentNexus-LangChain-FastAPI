@@ -151,3 +151,22 @@ def test_downgrade_preflights_cross_tenant_duplicate_hashes() -> None:
     """The global unique constraint cannot survive cross-tenant dedupe (G P1)."""
     assert "COUNT(DISTINCT tenant_id) > 1" in _MIGRATION
     assert "this downgrade never deletes tenant data automatically" in _MIGRATION
+
+
+def test_downgrade_restores_the_original_cascade_fk() -> None:
+    """Rolling back to 0033 must restore 0009's single-column CASCADE FK.
+
+    Without it, deleting a search document orphans its chunks and the
+    database accepts chunks pointing at missing documents.
+    """
+    assert "fk_search_chunks_document_id_search_documents" in _MIGRATION
+    assert "ON DELETE CASCADE" in _MIGRATION
+    # The restore must come after the composite-FK drop in the downgrade.
+    downgrade_start = _MIGRATION.index("def downgrade")
+    drop_pos = _MIGRATION.index(
+        "DROP CONSTRAINT IF EXISTS fk_search_chunks_document_tenant", downgrade_start
+    )
+    restore_pos = _MIGRATION.index(
+        "ADD CONSTRAINT fk_search_chunks_document_id_search_documents", drop_pos
+    )
+    assert restore_pos > drop_pos

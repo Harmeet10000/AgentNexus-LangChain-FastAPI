@@ -236,6 +236,16 @@ def downgrade() -> None:
     op.execute(
         "ALTER TABLE search_chunks DROP CONSTRAINT IF EXISTS fk_search_chunks_document_tenant"
     )
+    # Restore 0009's original single-column CASCADE FK: after a rollback to
+    # 0033 the ORM model expects it, and without it deleting a search
+    # document orphans its chunks.
+    op.execute(
+        """
+        ALTER TABLE search_chunks
+        ADD CONSTRAINT fk_search_chunks_document_id_search_documents
+        FOREIGN KEY (document_id) REFERENCES search_documents(id) ON DELETE CASCADE
+        """
+    )
     op.execute(
         "ALTER TABLE search_documents DROP CONSTRAINT IF EXISTS uq_search_documents_id_tenant_id"
     )

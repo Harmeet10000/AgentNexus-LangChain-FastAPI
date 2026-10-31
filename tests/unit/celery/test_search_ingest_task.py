@@ -23,6 +23,21 @@ if TYPE_CHECKING:
     from typing import Any
 
 
+@pytest.fixture(autouse=True)
+def _fresh_worker_loop():
+    """Each test gets a fresh persistent loop matching its fresh FakeRedis.
+
+    The worker runner retains one loop per process; other test modules close
+    it, and a fakeredis connection pooled on a closed loop raises
+    "Event loop is closed" in later tests.
+    """
+    from app.worker.execution import runtime
+
+    runtime.close()
+    yield
+    runtime.close()
+
+
 def test_search_ingest_keeps_the_stable_wire_name(real_celery: object) -> None:
     del real_celery
     search_tasks = importlib.import_module("app.worker.jobs.search")

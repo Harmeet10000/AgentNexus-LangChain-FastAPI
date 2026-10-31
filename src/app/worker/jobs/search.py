@@ -18,7 +18,6 @@ through every backoff.
 
 from __future__ import annotations
 
-import asyncio
 import traceback
 from typing import TYPE_CHECKING
 
@@ -34,6 +33,7 @@ from app.shared.jobs.names import SEARCH_INGEST
 from app.utils import InfrastructureException, ServiceUnavailableException
 from app.worker.celery.app import get_worker_celery_app
 from app.worker.celery.task import ResilientTask
+from app.worker.execution.runtime import run
 
 celery_app = get_worker_celery_app()
 
@@ -147,7 +147,12 @@ def search_ingest(
         return result
 
     try:
-        result = asyncio.run(_run_owned_pipeline())
+        # The worker's cached async Redis client is bound to the persistent
+        # per-process loop; running the pipeline on a fresh asyncio.run loop
+        # would reuse open connections across loops.  runtime.run retains one
+        # loop between tasks, so every Redis call — lock, task-id link, cache
+        # bump — stays on the same event loop.
+        result = run(_run_owned_pipeline())
     except Exception as exc:
         exc.add_note(f"operation=tasks.search_ingest, document_id={document_id}")
         if redis_lock_enabled:
