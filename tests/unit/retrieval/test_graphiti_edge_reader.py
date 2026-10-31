@@ -73,7 +73,7 @@ class _FakeGraphiti:
     """Fake client exposing only the graph driver the reader needs."""
 
     def __init__(self) -> None:
-        self.graph_driver: object = object()
+        self.driver: object = object()
         self.calls: list[dict[str, Any]] = []
 
 
@@ -94,7 +94,7 @@ def _install_episode_source(
 
 
 class _ExplodingGraphiti:
-    graph_driver: object = object()
+    driver: object = object()
 
 
 def _install_exploding_source(monkeypatch: pytest.MonkeyPatch) -> _ExplodingGraphiti:

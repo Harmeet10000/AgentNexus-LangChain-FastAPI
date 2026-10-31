@@ -696,7 +696,10 @@ async def fetch_relationship_edges(
         group_ids=group_ids,
     ).info("Fetching typed relationship edges")
 
-    driver = getattr(graphiti, "graph_driver", None)
+    # graphiti-core stores the connection as ``driver`` (set in __init__);
+    # reading the constructor parameter name instead returns None on the
+    # real client and the fetch silently exits before any episode read.
+    driver = getattr(graphiti, "driver", None)
     if driver is None:
         return ()
     try:

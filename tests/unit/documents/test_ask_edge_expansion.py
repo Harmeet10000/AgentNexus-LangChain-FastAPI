@@ -78,7 +78,7 @@ class _FakeGraphiti:
 
     def __init__(self, episodes: list[Any]) -> None:
         self._episodes = episodes
-        self.graph_driver: object = object()
+        self.driver: object = object()
         self.calls: list[dict[str, Any]] = []
 
     async def search(self, *, query: str, group_ids: list[str], num_results: int) -> list[Any]:
