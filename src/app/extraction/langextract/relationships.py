@@ -14,13 +14,18 @@ Security contract (mirrors ``ingestion.enrichment.legal_metadata``):
   delimiter-literal neutralization, and the prompt carries the shared
   never-follow-document-instructions directive.
 - The prompt description carries only server-derived data (clause ids,
-  clause types, char offsets) — never raw document text.  Pass-1 clause
-  texts are used exclusively for server-side endpoint validation.
+  clause types, char offsets) — never raw document text.  Clause identities
+  are issued server-side from boundary coordinates; pass-1 model-derived
+  attribution may enter the trusted section only in a bounded single-line
+  form (see ``_is_prompt_safe``), and inventory entries that fail the check
+  are dropped and counted.  Pass-1 clause texts are used exclusively for
+  server-side endpoint validation.
 - Every candidate edge is validated before it can be persisted: the char
   interval must resolve inside the boundary text, the relationship value must
   be in the closed ``RelationshipType`` vocabulary, the clause reference must
-  resolve to a pass-1 clause identity, and both endpoints must occur in the
-  pass-1 entity corpus.  Anything else is dropped and counted — never written.
+  resolve to a pass-1 clause identity whose inventory range contains the
+  validated span, and both endpoints must occur in the pass-1 entity corpus.
+  Anything else is dropped and counted — never written.
 - Server-owned identity: edges never carry tenant/document/group identity
   from content.  Identity is attached at the writer boundary from job
   identity only.
@@ -30,7 +35,7 @@ from __future__ import annotations
 
 import hashlib
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import langextract as lx
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,7 +45,7 @@ from app.features.documents.ingestion.enrichment.legal_metadata import (
     UNTRUSTED_CONTENT_DIRECTIVE,
     UNTRUSTED_DOCUMENT_BEGIN,
     UNTRUSTED_DOCUMENT_END,
-    neutralize_untrusted_delimiters,
+    neutralize_untrusted_delimiters_with_map,
 )
 
 from .service import (
@@ -51,7 +56,7 @@ from .service import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from typing import Final
 
     from .service import AsyncExtractionService
@@ -65,6 +70,9 @@ RELATIONSHIP_BUDGET_EXHAUSTED_REASON: Final[str] = "relationship_budget_exhauste
 _RELATIONSHIP_TEXT_PREFIX: Final[str] = f"{UNTRUSTED_DOCUMENT_BEGIN}\n"
 _RELATIONSHIP_TEXT_SUFFIX: Final[str] = f"\n{UNTRUSTED_DOCUMENT_END}"
 _MAX_ENTITY_CHARS: Final[int] = 256
+# A model-derived attribution string may enter the prompt's trusted
+# server-derived section only in this bounded single-line form.
+_MAX_PROMPT_ATTR_CHARS: Final[int] = 64
 _DEFAULT_CONFIDENCE: Final[float] = 0.5
 
 _RELATIONSHIP_PROMPT_INSTRUCTION: Final[str] = (
@@ -181,9 +189,11 @@ class RelationshipDropReason(StrEnum):
     INVALID_SPAN = "invalid_span"
     INVALID_TYPE = "invalid_type"
     UNKNOWN_CLAUSE = "unknown_clause"
+    CLAUSE_SPAN_MISMATCH = "clause_span_mismatch"
     INVALID_ENDPOINT = "invalid_endpoint"
     DUPLICATE = "duplicate"
     OVER_CAP = "over_cap"
+    INVALID_CLAUSE_IDENTITY = "invalid_clause_identity"
 
 
 class RelationshipDropCounts(BaseModel):
@@ -194,9 +204,11 @@ class RelationshipDropCounts(BaseModel):
     invalid_span: int = Field(default=0, ge=0)
     invalid_type: int = Field(default=0, ge=0)
     unknown_clause: int = Field(default=0, ge=0)
+    clause_span_mismatch: int = Field(default=0, ge=0)
     invalid_endpoint: int = Field(default=0, ge=0)
     duplicate: int = Field(default=0, ge=0)
     over_cap: int = Field(default=0, ge=0)
+    invalid_clause_identity: int = Field(default=0, ge=0)
 
     def bump(self, reason: RelationshipDropReason) -> RelationshipDropCounts:
         updates = {reason.value: getattr(self, reason.value) + 1}
@@ -208,9 +220,11 @@ class RelationshipDropCounts(BaseModel):
             self.invalid_span
             + self.invalid_type
             + self.unknown_clause
+            + self.clause_span_mismatch
             + self.invalid_endpoint
             + self.duplicate
             + self.over_cap
+            + self.invalid_clause_identity
         )
 
 
@@ -234,16 +248,40 @@ class RelationshipPassResult(BaseModel):
     budget: ExtractionBudget
 
 
-def wrap_boundary_text(boundary_text: str) -> tuple[str, str, int]:
+class BoundaryFrame(NamedTuple):
+    """The wrapped pass-2 text plus its mapping back to original coordinates.
+
+    ``body`` is the neutralized document text the provider's char intervals
+    resolve against, ``wrapped`` the delimited text actually sent, and
+    ``prefix_len`` the shift between wrapped and body coordinates.
+    ``to_original`` maps a body offset back to the ORIGINAL boundary text:
+    delimiter-literal neutralization replaces markers with a different-length
+    string, so offsets after a marker drift — validation, quotes, and saved
+    spans must always cite the document as written, never its neutralized
+    form.
+    """
+
+    body: str
+    wrapped: str
+    prefix_len: int
+    to_original: Callable[[int], int]
+
+
+def wrap_boundary_text(boundary_text: str) -> BoundaryFrame:
     """Neutralize delimiter literals and wrap the body in the untrusted region.
 
-    Returns ``(body, wrapped_text, prefix_len)`` where ``body`` is the
-    neutralized document text the pass-2 char intervals resolve against
-    (they are relative to ``wrapped_text`` and shift by ``prefix_len``).
+    Returns the :class:`BoundaryFrame` for the boundary: the neutralized
+    body, the wrapped text, the wrapped-to-body prefix shift, and the
+    sanitized-to-original offset map.
     """
-    body, _neutralized_count = neutralize_untrusted_delimiters(boundary_text)
+    body, _count, to_original = neutralize_untrusted_delimiters_with_map(boundary_text)
     wrapped = f"{_RELATIONSHIP_TEXT_PREFIX}{body}{_RELATIONSHIP_TEXT_SUFFIX}"
-    return body, wrapped, len(_RELATIONSHIP_TEXT_PREFIX)
+    return BoundaryFrame(
+        body=body,
+        wrapped=wrapped,
+        prefix_len=len(_RELATIONSHIP_TEXT_PREFIX),
+        to_original=to_original,
+    )
 
 
 def build_relationship_request(
@@ -266,7 +304,7 @@ def build_relationship_request(
     the text channel, so no document content exists outside the region in the
     rendered prompt.
     """
-    _body, wrapped, _prefix_len = wrap_boundary_text(boundary_text)
+    frame = wrap_boundary_text(boundary_text)
     inventory_lines = "\n".join(
         f"- clause_id={entry.clause_id} type={entry.clause_type} "
         f"section_ref={entry.section_ref} chars={entry.char_start}-{entry.char_end}"
@@ -278,7 +316,7 @@ def build_relationship_request(
         f"{inventory_lines}"
     )
     return ExtractionRequest(
-        text=wrapped,
+        text=frame.wrapped,
         prompt_description=prompt_description,
         examples=_relationship_examples(),
         # One pass: this is a different prompt over different input, not a
@@ -341,17 +379,36 @@ def _relationship_share_budget(budget: ExtractionBudget) -> ExtractionBudget:
     and cost.  Tightening the call-scoped maxima means the shared budget
     cannot be driven past the pool boundary by this pass; the counters stay
     cumulative so the checkpoint ledger remains crash-truthful.
+
+    Every tightened ceiling is additionally clamped to the document's
+    ORIGINAL limit: a pass-1 that ran at its cap must not be allowed to
+    spend its relationship share past the configured document ceiling
+    (``current_usage + remaining_share`` can otherwise exceed it).
     """
     return budget.model_copy(
         update={
-            "max_model_calls": budget.model_calls
-            + max(0, budget.relationship_max_model_calls - budget.relationship_model_calls),
-            "max_input_tokens": budget.input_tokens
-            + max(0, budget.relationship_max_input_tokens - budget.relationship_input_tokens),
-            "max_output_tokens": budget.output_tokens
-            + max(0, budget.relationship_max_output_tokens - budget.relationship_output_tokens),
-            "max_cost_usd": budget.cost_estimate_usd
-            + max(0, budget.relationship_max_cost_usd - budget.relationship_cost_estimate_usd),
+            "max_model_calls": min(
+                budget.max_model_calls,
+                budget.model_calls
+                + max(0, budget.relationship_max_model_calls - budget.relationship_model_calls),
+            ),
+            "max_input_tokens": min(
+                budget.max_input_tokens,
+                budget.input_tokens
+                + max(0, budget.relationship_max_input_tokens - budget.relationship_input_tokens),
+            ),
+            "max_output_tokens": min(
+                budget.max_output_tokens,
+                budget.output_tokens
+                + max(0, budget.relationship_max_output_tokens - budget.relationship_output_tokens),
+            ),
+            "max_cost_usd": min(
+                budget.max_cost_usd,
+                budget.cost_estimate_usd
+                + max(
+                    0.0, budget.relationship_max_cost_usd - budget.relationship_cost_estimate_usd
+                ),
+            ),
         }
     )
 
@@ -381,6 +438,38 @@ def _merge_relationship_charge(
             + max(0.0, returned.cost_estimate_usd - original.cost_estimate_usd),
         }
     )
+
+
+def _is_prompt_safe(value: str) -> bool:
+    """A string may enter the prompt's trusted section only in bounded form.
+
+    Pass-1 clause attribution is model output over untrusted document
+    content.  Short, single-line, control-character-free strings cannot
+    smuggle instructions across the trust boundary; anything else is
+    rejected (and its inventory entry dropped and counted).
+    """
+    return (
+        bool(value)
+        and len(value) <= _MAX_PROMPT_ATTR_CHARS
+        and all(character.isprintable() for character in value)
+    )
+
+
+def _sanitize_inventory(
+    inventory: Sequence[ClauseIdentity],
+) -> tuple[tuple[ClauseIdentity, ...], RelationshipDropCounts]:
+    """Drop inventory entries whose identity strings fail the trusted-form check."""
+    sanitized: list[ClauseIdentity] = []
+    drops = RelationshipDropCounts()
+    for entry in inventory:
+        if all(
+            _is_prompt_safe(value)
+            for value in (entry.clause_id, entry.clause_type, entry.section_ref)
+        ):
+            sanitized.append(entry)
+        else:
+            drops = drops.bump(RelationshipDropReason.INVALID_CLAUSE_IDENTITY)
+    return tuple(sanitized), drops
 
 
 async def run_relationship_pass(
@@ -425,10 +514,18 @@ async def run_relationship_pass(
             budget_exhausted=True,
             budget=budget,
         )
+    sanitized_inventory, inventory_drops = _sanitize_inventory(inventory)
+    if not sanitized_inventory:
+        return RelationshipPassResult(
+            ran=False,
+            skip_reason="no_valid_clause_inventory",
+            drops=inventory_drops,
+            budget=budget,
+        )
     share_budget = _relationship_share_budget(budget)
     request = build_relationship_request(
         boundary_text=boundary_text,
-        inventory=inventory,
+        inventory=sanitized_inventory,
         budget=share_budget,
         document_id=document_id,
         tenant_id=tenant_id,
@@ -440,14 +537,15 @@ async def run_relationship_pass(
     outcome = await extraction.extract(request)
     merged = _merge_relationship_charge(original=budget, returned=outcome.budget)
     if isinstance(outcome, ExtractionSucceeded):
-        body, _wrapped, prefix_len = wrap_boundary_text(boundary_text)
+        frame = wrap_boundary_text(boundary_text)
         edges, drops = _validate_relationship_extractions(
             outcome.documents,
-            boundary_body=body,
-            prefix_len=prefix_len,
-            inventory=inventory,
+            boundary_text=boundary_text,
+            frame=frame,
+            inventory=sanitized_inventory,
             entity_corpus=entity_corpus,
             max_edges=config.max_edges_per_boundary,
+            drops=inventory_drops,
         )
         return RelationshipPassResult(ran=True, edges=edges, drops=drops, budget=merged)
     if outcome.code is ExtractionFailureCode.BUDGET_EXHAUSTED:
@@ -467,17 +565,19 @@ async def run_relationship_pass(
 def _validate_relationship_extractions(
     documents: Sequence[lx.data.AnnotatedDocument],
     *,
-    boundary_body: str,
-    prefix_len: int,
+    boundary_text: str,
+    frame: BoundaryFrame,
     inventory: Sequence[ClauseIdentity],
     entity_corpus: Sequence[str],
     max_edges: int,
+    drops: RelationshipDropCounts,
 ) -> tuple[tuple[GroundedRelationship, ...], RelationshipDropCounts]:
     """Fail-closed validation of pass-2 candidates; drops are counted."""
-    drops = RelationshipDropCounts()
     edges: list[GroundedRelationship] = []
     seen: set[tuple[str, str, str, str, int, int]] = set()
-    known_clause_ids = {entry.clause_id for entry in inventory}
+    # Retained inventory char ranges: a validated edge span must lie inside
+    # the range of the clause it names, or it is dropped (CLAUSE_SPAN_MISMATCH).
+    clause_ranges = {entry.clause_id: (entry.char_start, entry.char_end) for entry in inventory}
     corpus = " \n".join(text.casefold() for text in entity_corpus if text)
 
     for document in documents:
@@ -486,9 +586,9 @@ def _validate_relationship_extractions(
                 continue
             validated = _validated_edge(
                 extraction,
-                boundary_body=boundary_body,
-                prefix_len=prefix_len,
-                known_clause_ids=known_clause_ids,
+                boundary_text=boundary_text,
+                frame=frame,
+                clause_ranges=clause_ranges,
                 corpus=corpus,
             )
             if isinstance(validated, RelationshipDropReason):
@@ -509,20 +609,30 @@ def _validate_relationship_extractions(
 def _validated_edge(
     extraction: lx.data.Extraction,
     *,
-    boundary_body: str,
-    prefix_len: int,
-    known_clause_ids: set[str],
+    boundary_text: str,
+    frame: BoundaryFrame,
+    clause_ranges: dict[str, tuple[int, int]],
     corpus: str,
 ) -> GroundedRelationship | RelationshipDropReason:
-    """Validate one candidate against the boundary text and pass-1 identities."""
+    """Validate one candidate against the original boundary text and identities.
+
+    The provider's char interval is relative to the wrapped, delimiter-
+    neutralized text; the validated span is mapped back to ORIGINAL boundary
+    coordinates before range checks, so quotes and saved spans always cite
+    the document as written.
+    """
     interval = extraction.char_interval
     if interval is None or interval.start_pos is None or interval.end_pos is None:
         # Skip ungrounded extractions exactly as langextract_to_graph
         # does (char_interval is None) — and count the skip.
         return RelationshipDropReason.INVALID_SPAN
-    start = interval.start_pos - prefix_len
-    end = interval.end_pos - prefix_len
-    if not 0 <= start < end <= len(boundary_body):
+    body_start = interval.start_pos - frame.prefix_len
+    body_end = interval.end_pos - frame.prefix_len
+    if not 0 <= body_start < body_end <= len(frame.body):
+        return RelationshipDropReason.INVALID_SPAN
+    start = frame.to_original(body_start)
+    end = frame.to_original(body_end)
+    if not 0 <= start < end <= len(boundary_text):
         return RelationshipDropReason.INVALID_SPAN
     attributes = extraction.attributes or {}
     try:
@@ -530,8 +640,11 @@ def _validated_edge(
     except ValueError:
         return RelationshipDropReason.INVALID_TYPE
     clause_id = str(attributes.get("clause_id", "")).strip()
-    if clause_id not in known_clause_ids:
+    clause_range = clause_ranges.get(clause_id)
+    if clause_range is None:
         return RelationshipDropReason.UNKNOWN_CLAUSE
+    if not (clause_range[0] <= start and end <= clause_range[1]):
+        return RelationshipDropReason.CLAUSE_SPAN_MISMATCH
     from_entity = str(attributes.get("from_entity", "")).strip()
     to_entity = str(attributes.get("to_entity", "")).strip()
     if not (_entity_grounded(from_entity, corpus) and _entity_grounded(to_entity, corpus)):
@@ -543,7 +656,7 @@ def _validated_edge(
         clause_id=clause_id,
         char_start=start,
         char_end=end,
-        quote=boundary_body[start:end],
+        quote=boundary_text[start:end],
         confidence=_parse_confidence(attributes.get("confidence")),
     )
 

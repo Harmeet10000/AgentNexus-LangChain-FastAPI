@@ -13,6 +13,8 @@ from app.ai.llm import serialize_to_toon
 from app.features.documents.ingestion.chunking.classification import QualityWarning
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from app.features.documents.ingestion.chunking.classification import (
         ClassifiedDocument,
         PreparedChunk,
@@ -55,12 +57,68 @@ def neutralize_untrusted_delimiters(markdown: str) -> tuple[str, int]:
     ``UNTRUSTED_DOCUMENT_END`` could close the real region early, forge a new
     one, or move text outside the marked untrusted span.
     """
+    sanitized, count, _to_original = neutralize_untrusted_delimiters_with_map(markdown)
+    return sanitized, count
+
+
+def _identity_offset_map(offset: int) -> int:
+    """Offsets are unchanged when nothing was neutralized."""
+    return offset
+
+
+def neutralize_untrusted_delimiters_with_map(
+    markdown: str,
+) -> tuple[str, int, Callable[[int], int]]:
+    """Neutralize delimiter literals and return a sanitized-to-original offset map.
+
+    The visible replacement form is a different length than the removed
+    marker literals, so char offsets measured on the sanitized text drift
+    from the original document text after the first marker.  The returned
+    callable maps a sanitized offset back to the ORIGINAL coordinate so
+    downstream consumers validate and cite the document as written; an
+    offset inside a replacement maps to the start of the removed literal.
+    """
     count = markdown.count(UNTRUSTED_DOCUMENT_BEGIN) + markdown.count(UNTRUSTED_DOCUMENT_END)
     if count == 0:
-        return markdown, 0
-    sanitized = markdown.replace(UNTRUSTED_DOCUMENT_BEGIN, _NEUTRALIZED_MARKER_FORM)
-    sanitized = sanitized.replace(UNTRUSTED_DOCUMENT_END, _NEUTRALIZED_MARKER_FORM)
-    return sanitized, count
+        return markdown, 0, _identity_offset_map
+    pattern = re.compile(
+        re.escape(UNTRUSTED_DOCUMENT_BEGIN) + "|" + re.escape(UNTRUSTED_DOCUMENT_END)
+    )
+    parts: list[str] = []
+    # (sanitized_start, sanitized_len, original_start, original_len) per marker.
+    segments: list[tuple[int, int, int, int]] = []
+    cursor = 0
+    sanitized_len = 0
+    for match in pattern.finditer(markdown):
+        gap = markdown[cursor : match.start()]
+        parts.append(gap)
+        sanitized_start = sanitized_len + len(gap)
+        segments.append(
+            (
+                sanitized_start,
+                len(_NEUTRALIZED_MARKER_FORM),
+                match.start(),
+                len(match.group()),
+            )
+        )
+        parts.append(_NEUTRALIZED_MARKER_FORM)
+        sanitized_len = sanitized_start + len(_NEUTRALIZED_MARKER_FORM)
+        cursor = match.end()
+    parts.append(markdown[cursor:])
+    frozen_segments = tuple(segments)
+
+    def to_original(offset: int) -> int:
+        shift = 0
+        for san_start, san_len, orig_start, orig_len in frozen_segments:
+            if offset < san_start:
+                break
+            if offset < san_start + san_len:
+                # Inside a replacement: clamp to the removed literal's start.
+                return orig_start
+            shift += san_len - orig_len
+        return offset - shift
+
+    return "".join(parts), count, to_original
 
 
 class LegalMetadataExtraction(BaseModel):

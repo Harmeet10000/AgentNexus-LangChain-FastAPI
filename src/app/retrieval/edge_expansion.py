@@ -59,6 +59,10 @@ class LegalEdgeRecord(BaseModel):
     char_end: int | None = Field(default=None, ge=0)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     group_id: str | None = None
+    # Contract/version scoping for bundled documents: an edge citing the wrong
+    # contract is worse than no edge, so known mismatches never match.
+    contract_index: int | None = Field(default=None, ge=0)
+    document_version: int | None = Field(default=None, ge=1)
 
 
 class EdgeSeedChunk(BaseModel):
@@ -72,6 +76,8 @@ class EdgeSeedChunk(BaseModel):
     # Clause identities the chunk is known to carry (e.g. from chunk
     # metadata). Empty means only entity occurrence can match.
     clause_ids: tuple[str, ...] = ()
+    contract_index: int | None = None
+    document_version: int | None = None
 
 
 class EdgeContextBlock(BaseModel):
@@ -188,6 +194,23 @@ def expand_along_edges(
 
 def _edge_matches_seed(edge: LegalEdgeRecord, seed: EdgeSeedChunk) -> bool:
     if edge.document_id != seed.document_id:
+        return False
+    # Bundled documents: two contracts can share an entity name.  A known
+    # contract/version mismatch means the edge belongs to a different contract
+    # than the seed chunk — matching it would cite one contract's relationship
+    # under another's identity.  Unknown (None) on either side stays permissive
+    # for legacy rows.
+    if (
+        edge.contract_index is not None
+        and seed.contract_index is not None
+        and edge.contract_index != seed.contract_index
+    ):
+        return False
+    if (
+        edge.document_version is not None
+        and seed.document_version is not None
+        and edge.document_version != seed.document_version
+    ):
         return False
     if edge.clause_id and edge.clause_id in seed.clause_ids:
         return True

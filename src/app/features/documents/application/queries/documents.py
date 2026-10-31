@@ -1314,6 +1314,8 @@ async def _edge_grounding_for_reranked(
             document_id=chunk.parent_doc_id,
             content=chunk.chunk_text,
             clause_ids=_chunk_clause_ids(chunk),
+            contract_index=chunk.contract_index,
+            document_version=_chunk_document_version(chunk),
         )
         for chunk in reranked
     ]
@@ -1324,6 +1326,12 @@ async def _edge_grounding_for_reranked(
         count_tokens=default_count_tokens,
         max_blocks_per_seed=_EDGE_EXPANSION_MAX_BLOCKS_PER_SEED,
     )
+
+
+def _chunk_document_version(chunk: RetrievedChunk) -> int | None:
+    """Read the chunk's document version from server metadata, if persisted."""
+    raw = (chunk.metadata_ or {}).get("document_version")
+    return int(raw) if isinstance(raw, int) and raw >= 1 else None
 
 
 def _chunk_clause_ids(chunk: RetrievedChunk) -> tuple[str, ...]:

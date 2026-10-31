@@ -115,10 +115,13 @@ _GRAPHITI_EVENT_ERRORS = (
     TypeError,
     ValueError,
 )
+# A model-derived attribution string may enter the pass-2 prompt's trusted
+# server-derived section only in this bounded single-line form.
+_MAX_ATTRIBUTION_CHARS: Final[int] = 64
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import Any, Literal
+    from typing import Any, Final, Literal
 
     from graphiti_core.graphiti import Graphiti
     from langgraph.graph.state import CompiledStateGraph
@@ -1352,6 +1355,24 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
     )
 
 
+def _validated_attribution(raw: object) -> str | None:
+    """Validate model-derived clause attribution for the trusted prompt section.
+
+    Pass-1 ``clause_id``/``section_ref`` attributes are model output over
+    untrusted document content: a document can steer them to carry
+    instructions.  They may surface as *attribution* (the section reference)
+    but never as identity, and only in a bounded single-line, control-
+    character-free form; anything else is rejected and the caller falls back
+    to the server-issued value.
+    """
+    text = str(raw).strip() if raw is not None else ""
+    if not text or len(text) > _MAX_ATTRIBUTION_CHARS:
+        return None
+    if any(not character.isprintable() for character in text):
+        return None
+    return text
+
+
 def _extract_clause_segments(
     outcome: ExtractionSucceeded,
     *,
@@ -1362,6 +1383,12 @@ def _extract_clause_segments(
 
     Ungrounded extractions (``char_interval is None``) are skipped exactly as
     ``langextract_to_graph`` does — they can never become segments or edges.
+
+    Clause identity is issued SERVER-SIDE from the boundary coordinates and
+    extraction span, so model-derived strings never become identity and never
+    enter the pass-2 prompt's trusted section unvalidated.  The model's
+    ``clause_id``/``section_ref`` attribution is mapped onto the issued
+    identity as a format-validated section reference only.
     """
     segments: list[ClauseSegment] = []
     valid_types = {member.value: member for member in ClauseType}
@@ -1373,20 +1400,22 @@ def _extract_clause_segments(
             attributes = extraction.attributes or {}
             raw_type = str(attributes.get("clause_type") or extraction.extraction_class).casefold()
             clause_type = valid_types.get(raw_type, ClauseType.OTHER)
-            raw_id = attributes.get("clause_id") or attributes.get("clause_number")
-            clause_id = (
-                str(raw_id)
-                if raw_id
-                else hashlib.sha256(
-                    f"{document_id}:{interval.start_pos}:{interval.end_pos}:{extraction.extraction_text}".encode()
-                ).hexdigest()[:20]
+            issued_id = hashlib.sha256(
+                f"{document_id}:{contract_index}:{interval.start_pos}:{interval.end_pos}:{extraction.extraction_text}".encode()
+            ).hexdigest()[:20]
+            section_ref = (
+                _validated_attribution(attributes.get("section_ref"))
+                or _validated_attribution(
+                    attributes.get("clause_id") or attributes.get("clause_number")
+                )
+                or issued_id
             )
             segments.append(
                 ClauseSegment(
-                    clause_id=clause_id,
+                    clause_id=issued_id,
                     clause_type=clause_type,
                     text=extraction.extraction_text,
-                    section_ref=str(attributes.get("section_ref") or clause_id),
+                    section_ref=section_ref,
                     start_char=interval.start_pos,
                     end_char=interval.end_pos,
                     contract_index=contract_index,
@@ -1437,13 +1466,20 @@ def _relationship_state_from_pass(
     """Typed truth for the relationship phase given the pass and write results."""
     attempted = len(relationship_results)
     succeeded = sum(1 for result in relationship_results if getattr(result, "success", False))
+    # A provider failure returns ran=True WITH provider_error and zero edges.
+    # It must surface as a failed phase BEFORE the ran/ran=False branching —
+    # otherwise an outage persists as a successful pass with zero edges.
+    if relationship_pass.provider_error is not None:
+        return GraphRelationshipsState(
+            status=GraphRelationshipsStatus.FAILED,
+            reason=f"relationship_provider_error:{relationship_pass.provider_error}",
+            relationships_attempted=attempted,
+            relationships_succeeded=succeeded,
+            relationships_invalid_span=relationship_pass.drops.invalid_span,
+            relationships_dropped=relationship_pass.drops.total
+            - relationship_pass.drops.invalid_span,
+        )
     if not relationship_pass.ran:
-        if relationship_pass.provider_error is not None:
-            return GraphRelationshipsState(
-                status=GraphRelationshipsStatus.FAILED,
-                reason=f"relationship_provider_error:{relationship_pass.provider_error}",
-                relationships_dropped=relationship_pass.drops.total,
-            )
         if relationship_pass.budget_exhausted:
             skip_reason = RELATIONSHIP_BUDGET_EXHAUSTED_REASON
         else:

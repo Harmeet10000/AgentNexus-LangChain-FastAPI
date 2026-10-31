@@ -285,6 +285,13 @@ async def write_relationship_edge(
             "user_id": edge.user_id,
             "thread_id": edge.thread_id,
             "confidence": edge.confidence,
+            # Structured triple: the reader never re-parses prose — entity
+            # names containing periods/abbreviations broke sentence splitting.
+            "from_entity": edge.from_entity,
+            "relationship": edge.relationship,
+            "to_entity": edge.to_entity,
+            "contract_index": edge.contract_index,
+            "document_version": edge.document_version,
         }
     )
     logger.bind(
@@ -678,10 +685,10 @@ def _parse_relationship_edge(raw: Any) -> LegalEdgeRecord | None:
 
     Only episodes the producer wrote (``source_description`` typed
     ``relationship_edge``) qualify.  Identity fields come from the
-    server-written source description; the from/relationship/to triple is
-    parsed from the deterministic episode body against the closed
-    ``RelationshipType`` vocabulary — an untypeable body is dropped, never
-    guessed.
+    server-written source description, which also carries the structured
+    from/relationship/to triple; the prose body is parsed only as a fallback
+    for rows written before the structured fields existed.  An untypeable
+    edge is dropped, never guessed.
     """
     source_desc: str = getattr(raw, "source_description", "") or ""
     try:
@@ -691,15 +698,21 @@ def _parse_relationship_edge(raw: Any) -> LegalEdgeRecord | None:
     if not isinstance(meta, dict) or meta.get("type") != "relationship_edge":
         return None
     body: str = getattr(raw, "content", "") or getattr(raw, "episode_body", "") or ""
-    triple = _parse_edge_body_triple(body)
-    if triple is None:
-        return None
-    from_entity, relationship, to_entity = triple
+    structured = _structured_edge_triple(meta)
+    if structured is not None:
+        from_entity, relationship, to_entity = structured
+    else:
+        triple = _parse_edge_body_triple(body)
+        if triple is None:
+            return None
+        from_entity, relationship, to_entity = triple
     grounding = _EDGE_GROUNDING_PATTERN.search(body)
     try:
         confidence = float(meta.get("confidence"))
     except (TypeError, ValueError):
         confidence = 0.5
+    contract_index = meta.get("contract_index")
+    document_version = meta.get("document_version")
     return LegalEdgeRecord(
         edge_id=str(getattr(raw, "uuid", "")),
         document_id=str(meta.get("doc_id") or ""),
@@ -711,29 +724,50 @@ def _parse_relationship_edge(raw: Any) -> LegalEdgeRecord | None:
         char_end=int(grounding.group(2)) if grounding else None,
         confidence=max(0.0, min(confidence, 1.0)),
         group_id=getattr(raw, "group_id", None),
+        contract_index=int(contract_index) if isinstance(contract_index, int) else None,
+        document_version=(int(document_version) if isinstance(document_version, int) else None),
     )
 
 
-def _parse_edge_body_triple(body: str) -> tuple[str, str, str] | None:
-    """Split ``'{from} {relationship} {to}.'`` against the closed vocabulary.
+def _structured_edge_triple(meta: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Read the triple from structured source-description fields.
 
-    The writer emits ``LegalEdgeInput.to_episode_body()``, whose first sentence
-    is the triple followed by a period.  The relationship word is located by
-    whole-token match on the ``RelationshipType`` values (first match wins,
-    deterministic); a body with no vocabulary token, or with an empty side of
-    the triple, is not an edge this reader can type.
+    Present only on rows written after the structured fields existed; every
+    part must be a non-empty string and the relationship must be in the closed
+    vocabulary, else the structured path declines (and the caller falls back
+    to the prose parse).
     """
-    head = body.split("\n", 1)[0]
-    sentence = head.split(". ", 1)[0].strip().removesuffix(".")
-    words = sentence.split(" ")
+    parts = (meta.get("from_entity"), meta.get("relationship"), meta.get("to_entity"))
+    if not all(isinstance(part, str) and part for part in parts):
+        return None
+    from_entity, relationship, to_entity = (str(part) for part in parts)
+    if relationship not in {member.value for member in RelationshipType}:
+        return None
+    return from_entity, relationship, to_entity
+
+
+def _parse_edge_body_triple(body: str) -> tuple[str, str, str] | None:
+    """Recover ``'{from} {relationship} {to}.'`` against the closed vocabulary.
+
+    Legacy fallback for rows written before the structured triple existed in
+    ``source_description``.  The relationship word is located by whole-token
+    match over the ENTIRE first body line — never by splitting at ``". "``,
+    which truncated entity names containing abbreviations ("Acme Corp. …")
+    and silently dropped valid edges.  A line with no vocabulary token, or
+    with an empty side of the triple, is not an edge this reader can type.
+    """
+    head = body.split("\n", 1)[0].strip()
+    words = [word for word in head.split(" ") if word]
     vocabulary = {member.value for member in RelationshipType}
     for index, word in enumerate(words):
-        if word.lower() not in vocabulary:
+        token = word.lower().strip(".")
+        if token not in vocabulary:
             continue
-        from_entity = " ".join(words[:index]).strip()
-        to_entity = " ".join(words[index + 1 :]).strip()
+        from_entity = " ".join(words[:index]).strip().strip(",").removesuffix(".")
+        tail = " ".join(words[index + 1 :]).strip()
+        to_entity = tail.split(". ", 1)[0].strip().removesuffix(".") if tail else ""
         if from_entity and to_entity:
-            return from_entity, word.lower(), to_entity
+            return from_entity, token, to_entity
         return None
     return None
 

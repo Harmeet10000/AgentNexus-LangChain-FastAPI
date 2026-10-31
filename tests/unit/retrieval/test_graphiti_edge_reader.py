@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING
 import pytest
 from graphiti_core.errors import GraphitiError
 
-from app.retrieval.graphiti.client import fetch_relationship_edges
+from app.retrieval.graphiti.client import (
+    _parse_relationship_edge,
+    fetch_relationship_edges,
+)
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
 
 if TYPE_CHECKING:
@@ -269,3 +272,61 @@ async def test_relationship_word_is_matched_case_insensitively(
     )
 
     assert result[0].relationship == expected
+
+
+async def test_structured_triple_survives_abbreviated_entity_names() -> None:
+    """New rows read the triple from source_description, never prose.
+
+    'Acme Corp. obliges GlobalTech Ltd.' contains sentence punctuation; the
+    prose fallback must not be load-bearing for rows that carry the
+    structured fields.
+    """
+    body = _edge_body("Acme Corp.", "obliges", "GlobalTech Ltd.")
+    episode = _edge_episode(
+        "edge-abbrev",
+        group_id="g1",
+        body=body,
+    )
+    meta = json.loads(episode.source_description)
+    meta["from_entity"] = "Acme Corp."
+    meta["relationship"] = "obliges"
+    meta["to_entity"] = "GlobalTech Ltd."
+    episode.source_description = json.dumps(meta)
+    record = _parse_relationship_edge(episode)
+    assert record is not None
+    assert record.from_entity == "Acme Corp."
+    assert record.relationship == "obliges"
+    assert record.to_entity == "GlobalTech Ltd."
+    assert record.contract_index is None  # not asserted by legacy fixture
+
+
+async def test_structured_fields_carry_contract_and_version() -> None:
+    """contract_index/document_version ride in source_description for scoping."""
+    episode = _edge_episode("edge-scoped", group_id="g1")
+    meta = json.loads(episode.source_description)
+    meta["from_entity"] = "Acme Corp."
+    meta["relationship"] = "obliges"
+    meta["to_entity"] = "GlobalTech Ltd."
+    meta["contract_index"] = 2
+    meta["document_version"] = 3
+    episode.source_description = json.dumps(meta)
+    record = _parse_relationship_edge(episode)
+    assert record is not None
+    assert record.contract_index == 2
+    assert record.document_version == 3
+
+
+async def test_legacy_prose_rows_still_parse_despite_abbreviations() -> None:
+    """Pre-structured rows fall back to prose — the vocabulary scan spans the
+    whole first line, so 'Acme Corp. obliges GlobalTech Ltd.' parses instead
+    of being truncated at the abbreviation period."""
+    episode = _edge_episode(
+        "edge-legacy",
+        group_id="g1",
+        body=_edge_body("Acme Corp.", "obliges", "GlobalTech Ltd."),
+    )
+    record = _parse_relationship_edge(episode)
+    assert record is not None
+    assert record.relationship == "obliges"
+    assert "Corp" in record.from_entity
+    assert "GlobalTech" in record.to_entity

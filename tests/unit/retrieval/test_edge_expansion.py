@@ -24,6 +24,8 @@ def _edge(
     clause_id: str = "2.1",
     char_start: int | None = 1042,
     char_end: int | None = 1110,
+    contract_index: int | None = None,
+    document_version: int | None = None,
 ) -> LegalEdgeRecord:
     return LegalEdgeRecord(
         edge_id=edge_id,
@@ -35,6 +37,8 @@ def _edge(
         char_start=char_start,
         char_end=char_end,
         confidence=0.9,
+        contract_index=contract_index,
+        document_version=document_version,
     )
 
 
@@ -44,12 +48,16 @@ def _seed(
     document_id: str = "doc-a",
     content: str = "The Employer shall pay the monthly charge. Acme Corp signs.",
     clause_ids: tuple[str, ...] = (),
+    contract_index: int | None = None,
+    document_version: int | None = None,
 ) -> EdgeSeedChunk:
     return EdgeSeedChunk(
         chunk_id=chunk_id,
         document_id=document_id,
         content=content,
         clause_ids=clause_ids,
+        contract_index=contract_index,
+        document_version=document_version,
     )
 
 
@@ -220,3 +228,52 @@ async def test_zero_budget_and_empty_inputs_expand_nothing() -> None:
             **kwargs,
         )  # ty: ignore[invalid-argument-type]
         assert result == []
+
+
+async def test_contract_mismatch_between_edge_and_seed_never_expands() -> None:
+    """Bundled documents: contract B's edge must not expand contract A's chunk.
+
+    Two contracts can share an entity name; matching across a known
+    contract mismatch would cite one contract's relationship under the
+    other's identity.
+    """
+    edge_other_contract = _edge(contract_index=1)
+    seed_contract_0 = _seed(contract_index=0)
+    assert (
+        expand_along_edges(
+            seeds=[seed_contract_0],
+            edges=[edge_other_contract],
+            max_expansion_tokens=64,
+            count_tokens=lambda text: len(text.split()),
+        )
+        == []
+    )
+
+
+async def test_version_mismatch_between_edge_and_seed_never_expands() -> None:
+    """Stale-version edges must not expand a newer version's chunk."""
+    edge_stale = _edge(document_version=1)
+    seed_v2 = _seed(document_version=2)
+    assert (
+        expand_along_edges(
+            seeds=[seed_v2],
+            edges=[edge_stale],
+            max_expansion_tokens=64,
+            count_tokens=lambda text: len(text.split()),
+        )
+        == []
+    )
+
+
+async def test_unknown_scoping_on_either_side_stays_permissive() -> None:
+    """Legacy rows without contract/version still expand known seeds."""
+    legacy_edge = _edge()  # no contract/version
+    seed = _seed(contract_index=0, document_version=1)
+    expansions = expand_along_edges(
+        seeds=[seed],
+        edges=[legacy_edge],
+        max_expansion_tokens=64,
+        count_tokens=lambda text: len(text.split()),
+    )
+    assert len(expansions) == 1
+    assert expansions[0].blocks[0].edge_id == "edge-1"

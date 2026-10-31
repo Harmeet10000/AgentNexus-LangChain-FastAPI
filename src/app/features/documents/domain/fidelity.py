@@ -60,8 +60,9 @@ class GraphRelationshipsState(BaseModel):
     # Fail-closed span/identity validation: candidates dropped before any
     # write was attempted.  ``invalid_span`` counts edges whose char interval
     # did not resolve inside the boundary text; ``dropped`` counts every
-    # other rejection (unknown type, unknown clause, ungrounded endpoint,
-    # duplicate, over-cap).  Dropped edges are never persisted.
+    # other rejection (unknown type, unknown clause, span outside the named
+    # clause's inventory range, ungrounded endpoint, duplicate, over-cap,
+    # unsafe clause identity).  Dropped edges are never persisted.
     relationships_invalid_span: int = Field(default=0, ge=0)
     relationships_dropped: int = Field(default=0, ge=0)
 
