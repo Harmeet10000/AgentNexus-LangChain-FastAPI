@@ -105,9 +105,22 @@ def aggregate_relationship_states(
         )
     succeeded = [state for state in states if state.status is GraphRelationshipsStatus.SUCCEEDED]
     if succeeded:
+        # Partial coverage must not read as a plain success: when any other
+        # boundary was skipped or not attempted with a reason (budget
+        # exhausted, no valid inventory), the aggregate carries that reason
+        # so the persisted record shows the phase did not cover everything.
+        partial_reason = next(
+            (
+                state.reason
+                for state in states
+                if state.status is not GraphRelationshipsStatus.SUCCEEDED
+                and state.reason is not None
+            ),
+            None,
+        )
         return GraphRelationshipsState(
             status=GraphRelationshipsStatus.SUCCEEDED,
-            reason=succeeded[0].reason,
+            reason=f"partial:{partial_reason}" if partial_reason else succeeded[0].reason,
             relationships_attempted=sum(state.relationships_attempted for state in states),
             relationships_succeeded=sum(state.relationships_succeeded for state in states),
             relationships_invalid_span=sum(state.relationships_invalid_span for state in states),

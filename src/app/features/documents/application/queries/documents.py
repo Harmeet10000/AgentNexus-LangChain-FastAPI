@@ -1314,7 +1314,7 @@ async def _edge_grounding_for_reranked(
             document_id=chunk.parent_doc_id,
             content=chunk.chunk_text,
             clause_ids=_chunk_clause_ids(chunk),
-            contract_index=chunk.contract_index,
+            contract_index=_chunk_contract_index(chunk),
             document_version=_chunk_document_version(chunk),
         )
         for chunk in reranked
@@ -1332,6 +1332,16 @@ def _chunk_document_version(chunk: RetrievedChunk) -> int | None:
     """Read the chunk's document version from server metadata, if persisted."""
     raw = (chunk.metadata_ or {}).get("document_version")
     return int(raw) if isinstance(raw, int) and raw >= 1 else None
+
+
+def _chunk_contract_index(chunk: RetrievedChunk) -> int | None:
+    """Read the chunk's contract index from server metadata, if persisted.
+
+    ``RetrievedChunk.contract_index`` is never populated by ``_row_to_chunk``
+    (the value rides in metadata), so reading the field would leave every
+    seed "unknown" and disable the cross-contract matching guard.
+    """
+    return _context_contract_index(chunk.metadata_ or {})
 
 
 def _chunk_clause_ids(chunk: RetrievedChunk) -> tuple[str, ...]:
@@ -1355,41 +1365,76 @@ def _edge_citations(
     version, and contract come from the hydrated chunk row — never from the
     edge text or any model output — and the claim is authored here,
     deterministically, from the edge's grounded span.
+
+    The citation points at the passage the edge's grounded span actually
+    falls in, resolved among the hydrated rows — never at the seed chunk
+    that merely triggered the expansion (two passages can share an entity
+    name, and a relationship from one must not be cited under the other's
+    chunk and page).  An edge whose span resolves to no hydrated passage —
+    or that carries no span at all — earns no citation: the expansion text
+    still reached the generator, but there is no verified passage to point
+    at.
     """
+    rows_by_document: dict[str, list[dict[str, object]]] = {}
+    for row in rows_by_chunk_id.values():
+        rows_by_document.setdefault(str(row.get("document_id")), []).append(row)
     citations: list[LegalCitationResponse] = []
     seen: set[tuple[str, str]] = set()
     for expansion in expansions:
-        row = rows_by_chunk_id.get(expansion.seed_chunk_id)
-        # Fail closed: expansion for a chunk that did not survive hydration
-        # earns no citation.
-        if row is None:
-            continue
         for block in expansion.blocks:
-            span = (
-                f"chars {block.char_start}-{block.char_end}"
-                if block.char_start is not None and block.char_end is not None
-                else "unavailable span"
+            if block.char_start is None or block.char_end is None:
+                continue
+            supporting = _row_containing_span(
+                rows_by_document.get(expansion.document_id, ()),
+                char_start=block.char_start,
+                char_end=block.char_end,
             )
+            # Fail closed: a grounded span that resolves to no hydrated
+            # passage earns no citation.
+            if supporting is None:
+                continue
+            chunk_id = str(supporting.get("chunk_id"))
+            span = f"chars {block.char_start}-{block.char_end}"
             claim = (
                 f"Grounded by {block.relationship.upper()} edge "
                 f"'{block.from_entity}' -> '{block.to_entity}' at {span} "
                 f"(clause {block.clause_id}, edge {block.edge_id})"
             )
-            key = (expansion.seed_chunk_id, claim)
+            key = (chunk_id, claim)
             if key in seen:
                 continue
             seen.add(key)
             citations.append(
                 _citation_response(
                     Citation(
-                        chunk_id=expansion.seed_chunk_id,
-                        clause_type=str(row.get("clause_type") or "other"),
+                        chunk_id=chunk_id,
+                        clause_type=str(supporting.get("clause_type") or "other"),
                         claim=claim,
                     ),
-                    row,
+                    supporting,
                 )
             )
     return citations
+
+
+def _row_containing_span(
+    rows: Sequence[dict[str, object]],
+    *,
+    char_start: int,
+    char_end: int,
+) -> dict[str, object] | None:
+    """Find the hydrated row whose persisted source span covers the edge span."""
+    for row in rows:
+        metadata = row.get("metadata_") or {}
+        if not isinstance(metadata, dict):
+            continue
+        start = metadata.get("source_start_char")
+        end = metadata.get("source_end_char")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        if start <= char_start and char_end <= end:
+            return row
+    return None
 
 
 def _to_ranked_rows(rows: list[dict[str, object]]) -> list[RankedResultRow]:

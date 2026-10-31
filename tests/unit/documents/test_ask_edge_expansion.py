@@ -103,10 +103,26 @@ def _install_episode_source(monkeypatch: pytest.MonkeyPatch, episodes: list[Any]
 
 
 class _StubRepository:
-    """Branch + hydration doubles returning exactly one hydrated chunk."""
+    """Branch + hydration doubles returning exactly one hydrated chunk.
+
+    ``span`` / ``extra_row`` let citation-resolution tests control which
+    passage covers the edge's grounded span.
+    """
+
+    def __init__(
+        self,
+        *,
+        span: tuple[int, int] = (1000, 1200),
+        extra_row: dict[str, Any] | None = None,
+    ) -> None:
+        self.span = span
+        self.extra_row = extra_row
 
     async def bm25_search(self, **_kwargs: object) -> Success[list[dict[str, Any]]]:
-        return Success([{"chunk_id": _CHUNK_ID, "score": 2.0}])
+        results = [{"chunk_id": _CHUNK_ID, "score": 2.0}]
+        if self.extra_row is not None:
+            results.append({"chunk_id": str(self.extra_row["chunk_id"]), "score": 1.5})
+        return Success(results)
 
     async def vector_search(self, **_kwargs: object) -> Success[list[dict[str, Any]]]:
         return Success([])
@@ -117,28 +133,46 @@ class _StubRepository:
     async def fetch_chunks_by_ids(
         self, chunk_ids: list[str], **_kwargs: object
     ) -> Success[dict[str, dict[str, Any]]]:
-        if _CHUNK_ID not in chunk_ids:
-            return Success({})
-        return Success(
-            {
-                _CHUNK_ID: {
-                    "document_id": _DOC_ID,
-                    "title": "Services Agreement",
-                    "content": "The Employer shall pay the monthly charge. Acme Corp signs.",
-                    "preamble": "",
-                    "document_version": 1,
-                    "contract_index": 0,
-                    "pipeline_version": "canonical",
-                    "chunk_index": 0,
-                    "chunk_kind": "legal_contract",
-                    "clause_type": "payment",
-                    "chunk_metadata": {},
-                    "quality_warnings": [],
-                    "graphiti_verified": False,
-                    "graph_indexed_at": None,
-                }
+        rows: dict[str, dict[str, Any]] = {
+            _CHUNK_ID: {
+                "document_id": _DOC_ID,
+                "title": "Services Agreement",
+                "content": "The Employer shall pay the monthly charge. Acme Corp signs.",
+                "preamble": "",
+                "document_version": 1,
+                "contract_index": 0,
+                "pipeline_version": "canonical",
+                "chunk_index": 0,
+                "chunk_kind": "legal_contract",
+                "clause_type": "payment",
+                "chunk_metadata": {
+                    "source_start_char": self.span[0],
+                    "source_end_char": self.span[1],
+                },
+                "quality_warnings": [],
+                "graphiti_verified": False,
+                "graph_indexed_at": None,
             }
-        )
+        }
+        if self.extra_row is not None:
+            extra = dict(self.extra_row)
+            rows[str(extra["chunk_id"])] = {
+                "document_id": extra.get("document_id", _DOC_ID),
+                "title": "Services Agreement",
+                "content": str(extra.get("content", "")),
+                "preamble": "",
+                "document_version": 1,
+                "contract_index": 0,
+                "pipeline_version": "canonical",
+                "chunk_index": 1,
+                "chunk_kind": "legal_contract",
+                "clause_type": str(extra.get("clause_type", "other")),
+                "chunk_metadata": dict(extra.get("metadata", {})),
+                "quality_warnings": [],
+                "graphiti_verified": False,
+                "graph_indexed_at": None,
+            }
+        return Success({key: row for key, row in rows.items() if key in chunk_ids})
 
     async def resolve_scope_versions(
         self, *, tenant_id: str, document_ids: tuple[str, ...]
@@ -204,10 +238,14 @@ def _tenant_group(tenant_id: str, doc_id: str) -> str:
     )
 
 
-def _service(graphiti: Any, llm: _FakeStructuredLLM | None = None) -> DocumentQueryService:
+def _service(
+    graphiti: Any,
+    llm: _FakeStructuredLLM | None = None,
+    repo: _StubRepository | None = None,
+) -> DocumentQueryService:
     llm = llm or _FakeStructuredLLM()
     return DocumentQueryService(
-        _StubRepository(),  # ty: ignore[invalid-argument-type]
+        repo or _StubRepository(),  # ty: ignore[invalid-argument-type]
         lambda: llm,
         None,
         graphiti,
@@ -437,3 +475,105 @@ async def test_edge_grounding_helper_fails_closed_without_explicit_scope(
 
     assert result == []
     assert graphiti.calls == []
+
+
+async def test_edge_citation_points_at_the_span_owning_passage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A shared entity name must not re-point one contract's edge at another
+    passage: the citation resolves to the hydrated chunk whose persisted
+    source span contains the edge's grounded span, never the seed chunk."""
+    edges = [
+        _episode(
+            "edge-late",
+            group_id=_tenant_group(_TENANT_A, _DOC_ID),
+            content="Acme Corp obliges GlobalTech Ltd. Source clause: 9.1. "
+            "Citation: clause 9.1. Confidence: 0.90. Grounding: chars 2000-2050.",
+            source_description=json.dumps(
+                {
+                    "type": "relationship_edge",
+                    "doc_id": _DOC_ID,
+                    "clause_id": "9.1",
+                    "confidence": 0.9,
+                    "from_entity": "Acme Corp",
+                    "relationship": "obliges",
+                    "to_entity": "GlobalTech Ltd",
+                    "contract_index": 0,
+                    "document_version": 1,
+                }
+            ),
+        )
+    ]
+    graphiti = _install_episode_source(monkeypatch, edges)
+    # The hydrated chunk's span does NOT cover chars 2000-2050.
+    service = _service(graphiti, repo=_StubRepository(span=(0, 500)))
+
+    result = await service.ask(
+        user_id="user-1",
+        tenant_id=_TENANT_A,
+        allowed_doc_ids=[_DOC_ID],
+        payload=_payload(),
+        require_graphiti_verified=False,
+    )
+
+    assert isinstance(result, Success)
+    response = result.unwrap()
+    assert all("Grounded by" not in citation.claim for citation in response.citations)
+
+
+async def test_edge_citation_resolves_to_another_hydrated_passage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the span-owning chunk IS hydrated, the citation points there."""
+    edges = [
+        _episode(
+            "edge-late",
+            group_id=_tenant_group(_TENANT_A, _DOC_ID),
+            content="Acme Corp obliges GlobalTech Ltd. Source clause: 9.1. "
+            "Citation: clause 9.1. Confidence: 0.90. Grounding: chars 2000-2050.",
+            source_description=json.dumps(
+                {
+                    "type": "relationship_edge",
+                    "doc_id": _DOC_ID,
+                    "clause_id": "9.1",
+                    "confidence": 0.9,
+                    "from_entity": "Acme Corp",
+                    "relationship": "obliges",
+                    "to_entity": "GlobalTech Ltd",
+                    "contract_index": 0,
+                    "document_version": 1,
+                }
+            ),
+        )
+    ]
+    graphiti = _install_episode_source(monkeypatch, edges)
+    repo = _StubRepository(
+        span=(0, 500),
+        extra_row={
+            "chunk_id": "chunk-late",
+            "document_id": _DOC_ID,
+            "content": "Late clause: Acme Corp obliges GlobalTech Ltd.",
+            "clause_type": "obligation",
+            "metadata": {
+                "source_start_char": 1900,
+                "source_end_char": 2100,
+                "contract_index": 0,
+                "document_version": 1,
+            },
+        },
+    )
+    service = _service(graphiti, repo=repo)
+
+    result = await service.ask(
+        user_id="user-1",
+        tenant_id=_TENANT_A,
+        allowed_doc_ids=[_DOC_ID],
+        payload=_payload(),
+        require_graphiti_verified=False,
+    )
+
+    assert isinstance(result, Success)
+    response = result.unwrap()
+    late = [c for c in response.citations if "Grounded by" in c.claim]
+    assert len(late) == 1
+    assert late[0].chunk_id == "chunk-late"
