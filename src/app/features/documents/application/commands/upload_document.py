@@ -1315,13 +1315,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             )
             for edge in relationship_pass.edges
         ]
-        edge_spans = {
-            relationship.edge_id: (
-                relationship_pass.edges[index].char_start,
-                relationship_pass.edges[index].char_end,
-            )
-            for index, relationship in enumerate(legal_edges)
-        }
+        edge_spans = _absolute_edge_spans(boundary, relationship_pass.edges, legal_edges)
         phase_result = await _write_extracted_clause_episodes(
             segments=segments,
             relationships=legal_edges,
@@ -1402,6 +1396,32 @@ def _extract_clause_segments(
                 )
             )
     return segments
+
+
+def _absolute_edge_spans(
+    boundary: ContractBoundary,
+    grounded_edges: Sequence[GroundedRelationship],
+    legal_edges: Sequence[LegalRelationship],
+) -> dict[str, tuple[int, int]]:
+    """Map edge ids to document-absolute char spans.
+
+    Pass-2 validates spans in boundary-local coordinates (the text the model
+    actually saw), but chunk source spans — and therefore citation
+    resolution — are document-absolute.  Persisted edge spans get the
+    boundary offset added so both coordinate spaces agree; the deterministic
+    edge id keeps hashing the validated boundary-local span, which stays
+    stable per contract.
+    """
+    spans: dict[str, tuple[int, int]] = {}
+    for index, relationship in enumerate(legal_edges):
+        edge = grounded_edges[index]
+        if edge.char_start is None or edge.char_end is None:
+            continue
+        spans[relationship.edge_id] = (
+            boundary.start_char + edge.char_start,
+            boundary.start_char + edge.char_end,
+        )
+    return spans
 
 
 def _legal_relationship_from_grounded(

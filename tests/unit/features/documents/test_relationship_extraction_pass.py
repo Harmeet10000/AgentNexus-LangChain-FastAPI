@@ -925,3 +925,58 @@ def test_prompt_safe_attribution_rejects_prose_that_printability_passed() -> Non
     assert prompt_safe_attribution("x" * 33) is None
     assert prompt_safe_attribution("") is None
     assert prompt_safe_attribution(None) is None
+
+
+def test_absolute_edge_spans_add_the_boundary_offset() -> None:
+    """Edge spans persist in document-absolute coordinates.
+
+    Chunk source spans are absolute (boundary.start_char added during
+    annotation); persisted edge spans must use the same space or
+    citation resolution loses later contracts' edges.
+    """
+    from app.features.agent_saul.domain.state import Citation, LegalRelationship, RelationshipType
+    from app.features.documents.application.commands.upload_document import (
+        _absolute_edge_spans,
+    )
+    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+
+    boundary = ContractBoundary(contract_index=1, markdown="x" * 10, start_char=5000, end_char=5100)
+    grounded = [
+        GroundedRelationship(
+            from_entity="Acme Corp",
+            relationship=RelationshipType.OBLIGES,
+            to_entity="GlobalTech Ltd",
+            clause_id="2.1",
+            char_start=100,
+            char_end=150,
+            quote="obliges",
+            confidence=0.9,
+        ),
+        GroundedRelationship(
+            from_entity="Acme Corp",
+            relationship=RelationshipType.RESTRICTS,
+            to_entity="GlobalTech Ltd",
+            clause_id="3.1",
+            char_start=200,
+            char_end=240,
+            quote="restricts",
+            confidence=0.9,
+        ),
+    ]
+
+    legal = [
+        LegalRelationship(
+            edge_id=f"edge-{index}",
+            from_node=edge.from_entity,
+            relationship=edge.relationship,
+            to_node=edge.to_node if hasattr(edge, "to_node") else edge.to_entity,
+            clause_id=edge.clause_id,
+            citation=Citation(claim="test edge", source="clause 2.1", confidence=0.9),
+            contract_index=1,
+        )
+        for index, edge in enumerate(grounded)
+    ]
+
+    spans = _absolute_edge_spans(boundary, grounded, legal)
+    assert spans["edge-0"] == (5100, 5150)
+    assert spans["edge-1"] == (5200, 5240)
