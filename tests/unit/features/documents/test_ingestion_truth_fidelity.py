@@ -673,10 +673,13 @@ async def test_later_boundary_extraction_failure_keeps_earlier_states() -> None:
         document_type="generic",
     )
     assert isinstance(outcome, ExtractionFailed)
-    # Boundary 0's succeeded-with-zero-edges truth must survive boundary 1's
-    # extraction failure — the aggregate never collapses back to not_attempted.
-    assert state.status is GraphRelationshipsStatus.SUCCEEDED
-    assert state.relationships_attempted == 0
+    # Mandatory clause extraction runs for every boundary before any optional
+    # relationship work, so a later boundary's extraction failure means no
+    # relationship pass ran at all — the honest aggregate is not_attempted
+    # carrying the extraction-failure reason.
+    assert state.status is GraphRelationshipsStatus.NOT_ATTEMPTED
+    assert state.reason is not None
+    assert state.reason.startswith("knowledge_extraction_failed:")
 
 
 # ---------------------------------------------------------------------------

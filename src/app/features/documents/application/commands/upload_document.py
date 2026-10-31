@@ -1094,7 +1094,7 @@ def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> 
     )
 
 
-async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extraction pass keeps all phase locals together
+async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — one extraction pass keeps all phase locals together
     *,
     runtime: IngestionRuntime,
     job: IngestionJob,
@@ -1232,6 +1232,11 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
         )
     documents: list[object] = []
     relationship_states: list[GraphRelationshipsState] = []
+    # Phase 1 (mandatory): pass-1 clause extraction for EVERY boundary runs
+    # before any optional relationship work spends the shared budget — a
+    # relationship call for boundary 0 must never starve boundary 2's clause
+    # extraction into a failed, incomplete document.
+    extracted: list[tuple[ContractBoundary, list[ClauseSegment]]] = []
     for boundary in boundaries:
         outcome = await runtime.extraction.extract(
             ExtractionRequest(
@@ -1248,13 +1253,10 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             )
         )
         if isinstance(outcome, ExtractionFailed):
-            # Aggregate, never replace: boundaries processed before the failure
-            # already produced relationship-phase states that must survive.
             return (
                 outcome,
                 aggregate_relationship_states(
                     [
-                        *relationship_states,
                         GraphRelationshipsState(
                             status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                             reason=f"knowledge_extraction_failed:{outcome.code.value}",
@@ -1264,16 +1266,22 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             )
         budget = outcome.budget
         documents.extend(outcome.documents)
-        segments = _extract_clause_segments(
-            outcome,
-            document_id=job.document_id,
-            contract_index=boundary.contract_index,
+        extracted.append(
+            (
+                boundary,
+                _extract_clause_segments(
+                    outcome,
+                    document_id=job.document_id,
+                    contract_index=boundary.contract_index,
+                ),
+            )
         )
-        # Second pass: a different prompt over different input. Pass-1 clause
-        # identities are fed back as server-derived inventory; document text
-        # travels only inside the delimited untrusted region; every edge is
-        # span-validated and identity-validated before it can be persisted.
-        writer_ready = runtime.graph_writer is not None and runtime.idempotency is not None
+    # Phase 2 (optional): a different prompt over different input. Pass-1
+    # clause identities are fed back as server-derived inventory; document
+    # text travels only inside the delimited untrusted region; every edge is
+    # span-validated and identity-validated before it can be persisted.
+    writer_ready = runtime.graph_writer is not None and runtime.idempotency is not None
+    for boundary, segments in extracted:
         if segments and writer_ready:
             relationship_pass = await run_relationship_pass(
                 extraction=runtime.extraction,
