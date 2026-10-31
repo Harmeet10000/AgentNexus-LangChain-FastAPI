@@ -83,6 +83,9 @@ _MAX_ENTITY_CHARS: Final[int] = 256
 # steer instructions into the trusted section even in bounded form.
 _ATTRIBUTION_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_.()§\-]{1,32}")
 _DEFAULT_CONFIDENCE: Final[float] = 0.5
+# A wrapped boundary larger than this degrades the pass explicitly rather
+# than building one unbounded model prompt.
+_MAX_SINGLE_CALL_CHARS: Final[int] = 200_000
 
 _RELATIONSHIP_PROMPT_INSTRUCTION: Final[str] = (
     "Extract typed legal relationships between the parties, obligations, and "
@@ -557,6 +560,16 @@ async def run_relationship_pass(
             budget=budget,
         )
     share_budget = _relationship_share_budget(budget)
+    # The single-call design raises max_char_buffer to the wrapped length; a
+    # pathological boundary (a whole book as one "contract") must degrade the
+    # pass explicitly instead of building an unbounded prompt.
+    if len(wrap_boundary_text(boundary_text).wrapped) > _MAX_SINGLE_CALL_CHARS:
+        return RelationshipPassResult(
+            ran=False,
+            skip_reason="boundary_too_large_for_single_call",
+            drops=inventory_drops,
+            budget=budget,
+        )
     request = build_relationship_request(
         boundary_text=boundary_text,
         inventory=sanitized_inventory,

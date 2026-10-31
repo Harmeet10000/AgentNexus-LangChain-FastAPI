@@ -14,6 +14,7 @@ Design decisions:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import traceback
@@ -625,6 +626,7 @@ def _scoped_group_ids(
 
 _EPISODE_PAGE_SIZE = 64
 _MAX_EPISODE_PAGES = 8
+_EDGE_FETCH_TIMEOUT_SECONDS = 5.0
 
 
 def _is_relationship_episode_source(raw: Any) -> bool:
@@ -644,7 +646,7 @@ async def _read_episodes_by_group(
     limit: int,
     uuid_cursor: str | None = None,
 ) -> list[Any]:
-    """Read one page of the groups' episodes, newest-uuid first."""
+    """Read one page of the groups' episodes (uuid-ordered DESC, not time-ordered)."""
     return await EpisodicNode.get_by_group_ids(
         driver,
         group_ids=group_ids,
@@ -706,27 +708,42 @@ async def fetch_relationship_edges(
         # Page through the group's episodes until the edge cap is met: chunk
         # and clause episodes share these groups, so a fixed first-page limit
         # would let non-edge episodes crowd stored relationships out of the
-        # answer context on chunk-heavy documents.
+        # answer context on chunk-heavy documents.  The whole paging loop is
+        # time-bounded — this read is additive context on a synchronous ask
+        # path and must never dominate its latency.
         raw_results: list[Any] = []
         cursor: str | None = None
-        for _page in range(_MAX_EPISODE_PAGES):
-            page = await _read_episodes_by_group(
-                driver,
-                group_ids=group_ids,
-                limit=_EPISODE_PAGE_SIZE,
-                uuid_cursor=cursor,
-            )
-            raw_results.extend(page)
-            edges_seen = sum(1 for raw in raw_results if _is_relationship_episode_source(raw))
-            if edges_seen >= num_results or len(page) < _EPISODE_PAGE_SIZE:
-                break
-            cursor = str(getattr(page[-1], "uuid", "") or "")
-            if not cursor:
-                break
+        async with asyncio.timeout(_EDGE_FETCH_TIMEOUT_SECONDS):
+            for _page in range(_MAX_EPISODE_PAGES):
+                page = await _read_episodes_by_group(
+                    driver,
+                    group_ids=group_ids,
+                    limit=_EPISODE_PAGE_SIZE,
+                    uuid_cursor=cursor,
+                )
+                raw_results.extend(page)
+                edges_seen = sum(
+                    1 for raw in raw_results if _is_relationship_episode_source(raw)
+                )
+                if edges_seen >= num_results or len(page) < _EPISODE_PAGE_SIZE:
+                    break
+                cursor = str(getattr(page[-1], "uuid", "") or "")
+                if not cursor:
+                    break
+            else:
+                logger.bind(
+                    service="graphiti",
+                    pages=_MAX_EPISODE_PAGES,
+                    group_ids=group_ids,
+                ).warning("Graphiti relationship edge fetch hit the page cap")
     except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note(f"query={query[:80]}, task=relationship_edges")
         exc.add_note(traceback.format_exc())
         logger.bind(service="graphiti").exception("Graphiti relationship edge fetch failed")
+        return ()
+    except TimeoutError as exc:
+        exc.add_note(f"query={query[:80]}, seconds={_EDGE_FETCH_TIMEOUT_SECONDS}")
+        logger.bind(service="graphiti").warning("Graphiti relationship edge fetch timed out")
         return ()
     edges = [
         record for raw in raw_results if (record := _parse_relationship_edge(raw)) is not None

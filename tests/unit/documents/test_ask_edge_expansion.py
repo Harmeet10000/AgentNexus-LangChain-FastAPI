@@ -477,6 +477,7 @@ async def test_edge_grounding_helper_fails_closed_without_explicit_scope(
     assert graphiti.calls == []
 
 
+@pytest.mark.usefixtures("_wired")
 async def test_edge_citation_points_at_the_span_owning_passage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -521,6 +522,7 @@ async def test_edge_citation_points_at_the_span_owning_passage(
     assert all("Grounded by" not in citation.claim for citation in response.citations)
 
 
+@pytest.mark.usefixtures("_wired")
 async def test_edge_citation_resolves_to_another_hydrated_passage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
