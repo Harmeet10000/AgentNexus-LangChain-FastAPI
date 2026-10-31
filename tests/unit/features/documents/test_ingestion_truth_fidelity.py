@@ -8,21 +8,29 @@ unavailable states, and the zero-chunk untruthful-success detection.
 
 from __future__ import annotations
 
+import json
 import re
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import langextract as lx
 import pytest
-from returns.result import Success
+from returns.result import Failure, Success
 
-from app.extraction.langextract.service import AsyncExtractionService, ExtractionSucceeded
+from app.extraction.langextract.service import (
+    AsyncExtractionService,
+    ExtractionBudget,
+    ExtractionFailed,
+    ExtractionFailureCode,
+    ExtractionSucceeded,
+)
 from app.features.documents.api.http.dto import IngestionJob
 from app.features.documents.application.commands import upload_document as document_ingest
 from app.features.documents.application.commands.upload_document import (
     _write_extracted_clause_episodes,
     process_document_ingestion,
 )
+from app.features.documents.domain.errors import DocumentGraphWriteError
 from app.features.documents.domain.fidelity import (
     ChunkPlausibilityVerdict,
     FidelityThresholds,
@@ -33,6 +41,7 @@ from app.features.documents.domain.fidelity import (
 )
 from app.features.documents.ingestion.chunking.classification import (
     ClassifiedDocument,
+    ContractBoundary,
     ParsedDocument,
     PreparedChunk,
 )
@@ -1195,3 +1204,430 @@ async def test_provider_failure_fails_the_write_phase_for_retry() -> None:
     )
     assert result.success is False
     assert result.relationships.status is GraphRelationshipsStatus.FAILED
+
+
+# ---------------------------------------------------------------------------
+# clauses_complete checkpoint: a retry after a relationship failure runs ONLY
+# the relationship phase against the restored cumulative ledger.
+
+
+_PASS2_MARKER = "typed legal relationships"
+_RETRY_MARKDOWN = "# Terms\n\nPayment is due in thirty days.\n\nTermination requires notice."
+_PHRASE = "Payment is due in thirty days."
+_PHRASE_START = _RETRY_MARKDOWN.index(_PHRASE)
+_PHRASE_END = _PHRASE_START + len(_PHRASE)
+
+
+def _retry_boundary() -> ContractBoundary:
+    return ContractBoundary(
+        contract_index=0,
+        markdown=_RETRY_MARKDOWN,
+        start_char=0,
+        end_char=len(_RETRY_MARKDOWN),
+    )
+
+
+def _pass1_document() -> lx.data.AnnotatedDocument:
+    return lx.data.AnnotatedDocument(
+        text=_RETRY_MARKDOWN,
+        extractions=[
+            lx.data.Extraction(
+                extraction_class="payment",
+                extraction_text=_PHRASE,
+                char_interval=lx.data.CharInterval(start_pos=_PHRASE_START, end_pos=_PHRASE_END),
+                attributes={"clause_type": "payment", "section_ref": "4.1"},
+            )
+        ],
+    )
+
+
+def _pass2_document(request: Any, clause_id: str) -> lx.data.AnnotatedDocument:
+    text = str(request.text)
+    start = text.find(_PHRASE)
+    return lx.data.AnnotatedDocument(
+        text=text,
+        extractions=[
+            lx.data.Extraction(
+                extraction_class="relationship",
+                extraction_text=_PHRASE,
+                char_interval=lx.data.CharInterval(start_pos=start, end_pos=start + len(_PHRASE)),
+                attributes={
+                    "from_entity": "the Employer",
+                    "relationship": "obliges",
+                    "to_entity": "the monthly charge",
+                    "clause_id": clause_id,
+                    "confidence": "0.9",
+                },
+            )
+        ],
+    )
+
+
+class _PhaseDispatchProvider:
+    """Serves pass-1 and pass-2 differently, dispatched on the prompt marker."""
+
+    def __init__(
+        self,
+        *,
+        pass1: Any = None,
+        pass2: Any = None,
+        fail_pass2: str | None = None,
+    ) -> None:
+        self._pass1 = pass1
+        self._pass2 = pass2
+        self._fail_pass2 = fail_pass2
+        self.calls: list[Any] = []
+        self.pass1_calls = 0
+        self.pass2_calls = 0
+
+    def extract(self, request: Any) -> tuple[Any, ...]:
+        self.calls.append(request)
+        if _PASS2_MARKER in request.prompt_description:
+            self.pass2_calls += 1
+            if self._fail_pass2 is not None:
+                raise RuntimeError(self._fail_pass2)
+            assert self._pass2 is not None
+            return tuple(self._pass2(request))
+        self.pass1_calls += 1
+        if self._pass1 is None:
+            return ()
+        return tuple(self._pass1(request))
+
+
+def _extraction_runtime(repo: object, provider: object) -> SimpleNamespace:
+    return SimpleNamespace(
+        repo=repo,
+        extraction=AsyncExtractionService(provider),
+        graph_writer=_SucceedingWriter(),
+        idempotency=_Idempotency(),
+    )
+
+
+class _CheckpointStatusRepo:
+    """Repo that serves a persisted document metadata payload to fetch_status."""
+
+    def __init__(self, checkpoint_metadata: dict[str, Any] | None = None) -> None:
+        self.status_calls: list[dict[str, Any]] = []
+        self.checkpoint_metadata = checkpoint_metadata
+
+    async def update_document_status(self, **kwargs: Any) -> Success[None]:
+        self.status_calls.append(kwargs)
+        return Success(None)
+
+    async def fetch_status(self, **_kwargs: object) -> Success[dict[str, Any] | None]:
+        if self.checkpoint_metadata is None:
+            return Success(None)
+        return Success({"document_metadata": self.checkpoint_metadata})
+
+    async def upsert_chunks(self, rows: object) -> Success[None]:
+        del rows
+        return Success(None)
+
+
+async def _run_phase1(
+    runtime: object, boundary: ContractBoundary
+) -> document_ingest._Phase1Complete:
+    phase1, _state = await document_ingest._extract_document_knowledge(
+        runtime=cast("Any", runtime),
+        job=_job(),
+        boundaries=[boundary],
+        jurisdiction=None,
+        document_type="generic",
+    )
+    assert isinstance(phase1, document_ingest._Phase1Complete)
+    return phase1
+
+
+async def _run_phase2(
+    runtime: object,
+    phase1: document_ingest._Phase1Complete,
+) -> tuple[ExtractionSucceeded | ExtractionFailed, GraphRelationshipsState]:
+    return await document_ingest._run_relationship_phase(
+        runtime=cast("Any", runtime),
+        job=_job(),
+        extracted=phase1.extracted,
+        budget=phase1.budget,
+        pass1_documents=phase1.documents,
+        jurisdiction=None,
+        document_type="generic",
+    )
+
+
+async def test_relationship_failure_retry_skips_pass1_and_runs_only_phase2() -> None:
+    """The P1 fix: a retry after a relationship failure must not re-spend pass-1.
+
+    With a tight LANGEXTRACT_MAX_MODEL_CALLS, re-running pass-1 against the
+    cumulative ledger hits BUDGET_EXHAUSTED before the relationship pass can
+    be retried — even though every clause was already extracted and written.
+    """
+    boundary = _retry_boundary()
+    provider1 = _PhaseDispatchProvider(
+        pass1=lambda _request: (_pass1_document(),),
+        fail_pass2="provider down",
+    )
+    runtime1 = _extraction_runtime(_Repo(), provider1)
+    phase1 = await _run_phase1(runtime1, boundary)
+    phase1_budget = phase1.budget
+    assert phase1_budget.model_calls >= 1  # pass-1 spend is on the ledger
+    outcome1, state1 = await _run_phase2(runtime1, phase1)
+    assert isinstance(outcome1, ExtractionFailed)
+    assert outcome1.code is ExtractionFailureCode.GRAPH_WRITE_ERROR
+    assert state1.status is GraphRelationshipsStatus.FAILED
+
+    checkpoint_metadata = document_ingest._clauses_complete_checkpoint_metadata(
+        phase1,
+        document_version=1,
+    )
+
+    class _RetryRepo:
+        async def fetch_status(self, **_kwargs: object) -> Success[dict[str, Any]]:
+            return Success({"document_metadata": checkpoint_metadata})
+
+    issued_clause_id = phase1.extracted[0][1][0].clause_id
+    provider2 = _PhaseDispatchProvider(
+        pass2=lambda request: (_pass2_document(request, issued_clause_id),)
+    )
+    runtime2 = _extraction_runtime(_RetryRepo(), provider2)
+
+    # The resumed phase-1 makes ZERO provider calls: the ledger and segment
+    # inventory come entirely from the checkpoint.
+    phase2 = await _run_phase1(runtime2, boundary)
+    assert provider2.calls == []
+    assert phase2.budget.model_calls == phase1_budget.model_calls
+    _boundary2, segments2, unresolved = phase2.extracted[0]
+    assert unresolved is None
+    assert segments2[0].text == _RETRY_MARKDOWN[_PHRASE_START:_PHRASE_END]
+
+    outcome2, state2 = await _run_phase2(runtime2, phase2)
+    assert isinstance(outcome2, ExtractionSucceeded)
+    assert state2.status is GraphRelationshipsStatus.SUCCEEDED
+    # Only the relationship pass spent: exactly one new model call on top of
+    # the restored cumulative ledger, and pass-1 was never invoked.
+    assert provider2.pass1_calls == 0
+    assert provider2.pass2_calls == 1
+    assert outcome2.budget.model_calls == phase1_budget.model_calls + 1
+
+
+async def test_rebuilt_segment_text_equals_original_slice() -> None:
+    """Rebuild-by-slice fidelity: persisted spans + re-derived markdown.
+
+    The checkpoint carries coordinates only; the boundary markdown is
+    re-parsed from the raw object on every attempt, so the rebuilt segment
+    text must equal both the original slice and the original runtime text.
+    """
+    boundary = _retry_boundary()
+    provider = _PhaseDispatchProvider(pass1=lambda _request: (_pass1_document(),))
+    phase1 = await _run_phase1(_extraction_runtime(_Repo(), provider), boundary)
+    original = phase1.extracted[0][1][0]
+
+    payload = document_ingest._clause_inventory_for_checkpoint(phase1)
+    # No source text is checkpointed — the security rule.
+    assert _PHRASE not in json.dumps(payload)
+    inventories = document_ingest._decode_clause_checkpoint(payload)
+    assert inventories is not None
+    rebuilt = document_ingest._rebuild_segments_from_checkpoint(
+        boundaries=[boundary],
+        inventories=inventories,
+    )
+    _boundary, segments, unresolved = rebuilt[0]
+    assert unresolved is None
+    rebuilt_segment = segments[0]
+    assert rebuilt_segment.text == boundary.markdown[_PHRASE_START:_PHRASE_END]
+    assert rebuilt_segment.text == original.text
+    assert rebuilt_segment.clause_id == original.clause_id
+    assert rebuilt_segment.clause_type is original.clause_type
+    assert rebuilt_segment.section_ref == original.section_ref
+    assert rebuilt_segment.start_char == original.start_char
+    assert rebuilt_segment.end_char == original.end_char
+
+
+async def test_complete_checkpoint_early_return_still_wins() -> None:
+    """The complete branch keeps its early-return semantics."""
+    from types import SimpleNamespace as _Namespace
+
+    class _CompleteRepo:
+        async def fetch_status(self, **_kwargs: object) -> Success[dict[str, Any]]:
+            return Success(
+                {
+                    "document_metadata": {
+                        "knowledge_extraction": "complete",
+                        "knowledge_extraction_document_version": 1,
+                        "knowledge_extraction_classes": ["payment"],
+                        "extraction_budget": ExtractionBudget().model_dump(mode="json"),
+                        "graph_relationships": {
+                            "status": "succeeded",
+                            "reason": None,
+                            "relationships_attempted": 1,
+                            "relationships_succeeded": 1,
+                        },
+                    }
+                }
+            )
+
+    provider = _PhaseDispatchProvider(pass1=lambda _request: (_pass1_document(),))
+    runtime = _Namespace(repo=_CompleteRepo(), extraction=AsyncExtractionService(provider))
+    outcome, state = await document_ingest._extract_document_knowledge(
+        runtime=cast("Any", runtime),
+        job=_job(),
+        boundaries=[_retry_boundary()],
+        jurisdiction=None,
+        document_type="generic",
+    )
+    assert isinstance(outcome, ExtractionSucceeded)
+    assert state.status is GraphRelationshipsStatus.SUCCEEDED
+    # No provider call: the complete checkpoint is terminal.
+    assert provider.calls == []
+
+
+async def test_unresolvable_checkpoint_spans_degrade_explicitly() -> None:
+    """Spans outside the re-derived markdown degrade, never crash or fabricate."""
+    checkpoint_metadata = {
+        "knowledge_extraction": "clauses_complete",
+        "knowledge_extraction_document_version": 1,
+        "extraction_budget": ExtractionBudget().model_dump(mode="json"),
+        "knowledge_extraction_clauses": [
+            {
+                "contract_index": 0,
+                "clauses": [
+                    {
+                        "clause_id": "a" * 20,
+                        "clause_type": "payment",
+                        "section_ref": "4.1",
+                        "start_char": 5000,
+                        "end_char": 5030,
+                    }
+                ],
+            }
+        ],
+    }
+
+    class _RetryRepo:
+        async def fetch_status(self, **_kwargs: object) -> Success[dict[str, Any]]:
+            return Success({"document_metadata": checkpoint_metadata})
+
+    provider = _PhaseDispatchProvider(pass2=lambda request: (_pass2_document(request, "a" * 20),))
+    runtime = _extraction_runtime(_RetryRepo(), provider)
+    phase1 = await _run_phase1(runtime, _retry_boundary())
+    # Pass-1 was skipped entirely despite the degraded inventory.
+    assert provider.calls == []
+    _boundary, segments, unresolved = phase1.extracted[0]
+    assert segments == []
+    assert unresolved == "checkpoint_segment_spans_unresolved"
+
+    outcome, state = await _run_phase2(runtime, phase1)
+    # The degraded boundary's relationship pass is skipped explicitly.
+    assert provider.calls == []
+    assert outcome.budget.model_calls == 0
+    assert state.status is GraphRelationshipsStatus.NOT_ATTEMPTED
+    assert state.reason == "checkpoint_segment_spans_unresolved"
+
+
+async def test_invalid_clauses_checkpoint_inventory_falls_back_to_pass1() -> None:
+    """An unusable inventory cannot silently skip re-extraction."""
+    checkpoint_metadata = {
+        "knowledge_extraction": "clauses_complete",
+        "knowledge_extraction_document_version": 1,
+        "extraction_budget": ExtractionBudget().model_dump(mode="json"),
+        "knowledge_extraction_clauses": "garbage",
+    }
+
+    class _RetryRepo:
+        async def fetch_status(self, **_kwargs: object) -> Success[dict[str, Any]]:
+            return Success({"document_metadata": checkpoint_metadata})
+
+    provider = _PhaseDispatchProvider(pass1=lambda _request: (_pass1_document(),))
+    phase1 = await _run_phase1(_extraction_runtime(_RetryRepo(), provider), _retry_boundary())
+    # Pass-1 ran again: the checkpoint could not be decoded, so the honest
+    # recovery is a fresh (idempotent) extraction, not a degraded document.
+    assert provider.pass1_calls == 1
+    assert phase1.extracted[0][1][0].text == _PHRASE
+
+
+async def test_relationship_failure_persists_clauses_complete_checkpoint_for_retry(
+    monkeypatch: Any,
+) -> None:
+    """End-to-end: attempt 1 checkpoints clauses_complete; attempt 2 skips pass-1."""
+    repo1 = _CheckpointStatusRepo()
+    provider1 = _PhaseDispatchProvider(
+        pass1=lambda _request: (_pass1_document(),),
+        fail_pass2="provider down",
+    )
+
+    async def parse_document(**_kwargs: object) -> ParsedDocument:
+        return ParsedDocument(title="Fixture", markdown=_RETRY_MARKDOWN, page_count=1)
+
+    async def segment_chunks(**_kwargs: object) -> tuple[list[PreparedChunk], list[object]]:
+        return [PreparedChunk(chunk_index=0, chunk_kind="generic", content=_PHRASE)], []
+
+    async def embed_chunks(**kwargs: object) -> list[dict[str, object]]:
+        del kwargs
+        return [{"id": "10000000-0000-0000-0000-000000000001", "chunk_index": 0}]
+
+    monkeypatch.setattr(document_ingest, "parse_document", parse_document)
+    monkeypatch.setattr(
+        document_ingest,
+        "classify_document",
+        lambda **_kwargs: ClassifiedDocument(document_kind="generic"),
+    )
+    monkeypatch.setattr(document_ingest, "segment_chunks", segment_chunks)
+    monkeypatch.setattr(document_ingest, "_embed_chunks", embed_chunks)
+
+    runtime1 = SimpleNamespace(
+        object_store=_ObjectStore(),
+        repo=repo1,
+        graphiti=None,
+        llm=object(),
+        extraction=AsyncExtractionService(provider1),
+        graph_writer=_SucceedingWriter(),
+        idempotency=_Idempotency(),
+    )
+    result1 = await process_document_ingestion(job=_job(), runtime=cast("Any", runtime1))
+    assert isinstance(result1, Failure)
+    assert isinstance(result1.failure(), DocumentGraphWriteError)
+
+    checkpoint_calls = [
+        call
+        for call in repo1.status_calls
+        if call.get("metadata_", {}).get("knowledge_extraction") == "clauses_complete"
+    ]
+    assert len(checkpoint_calls) == 2  # the pre-phase write AND the terminal write
+    checkpoint_metadata = cast("dict[str, Any]", checkpoint_calls[-1]["metadata_"])
+    # The checkpoint carries the span inventory and never source text.
+    serialized = json.dumps(checkpoint_metadata)
+    assert _PHRASE not in serialized
+    assert "Termination requires notice." not in serialized
+    clauses = checkpoint_metadata["knowledge_extraction_clauses"]
+    assert clauses[0]["contract_index"] == 0
+    assert clauses[0]["clauses"][0]["start_char"] == _PHRASE_START
+    assert clauses[0]["clauses"][0]["end_char"] == _PHRASE_END
+    # No status write downgraded the checkpoint to "incomplete": the retry
+    # must land in the clauses_complete reuse branch.
+    assert all(
+        call.get("metadata_", {}).get("knowledge_extraction") != "incomplete"
+        for call in repo1.status_calls
+    )
+
+    issued_clause_id = clauses[0]["clauses"][0]["clause_id"]
+    provider2 = _PhaseDispatchProvider(
+        pass2=lambda request: (_pass2_document(request, issued_clause_id),)
+    )
+    repo2 = _CheckpointStatusRepo(checkpoint_metadata)
+    runtime2 = SimpleNamespace(
+        object_store=_ObjectStore(),
+        repo=repo2,
+        graphiti=None,
+        llm=object(),
+        extraction=AsyncExtractionService(provider2),
+        graph_writer=_SucceedingWriter(),
+        idempotency=_Idempotency(),
+    )
+    result2 = await process_document_ingestion(job=_job(), runtime=cast("Any", runtime2))
+    payload = result2.unwrap()
+    assert payload["graph_relationships_status"] == "succeeded"
+    assert provider2.pass1_calls == 0
+    assert provider2.pass2_calls == 1
+    # The retry's terminal checkpoint is the complete one.
+    assert any(
+        call.get("metadata_", {}).get("knowledge_extraction") == "complete"
+        for call in repo2.status_calls
+    )

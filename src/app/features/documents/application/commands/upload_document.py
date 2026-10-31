@@ -6,11 +6,12 @@ import hashlib
 import traceback
 from asyncio import TimeoutError as AsyncTimeoutError
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 from uuid import uuid4
 
 from graphiti_core.errors import GraphitiError
 from neo4j.exceptions import Neo4jError
+from pydantic import BaseModel, Field
 from returns.result import Failure, Success
 from sqlalchemy import func, select
 
@@ -116,6 +117,166 @@ _GRAPHITI_EVENT_ERRORS = (
     TypeError,
     ValueError,
 )
+
+# Intermediate extraction checkpoint: pass-1 clauses are extracted and their
+# episode writes are durable, but the optional relationship phase has not (or
+# not successfully) run.  A retry resuming from this marker re-runs ONLY the
+# relationship phase against the restored cumulative ledger instead of
+# re-spending pass-1 model calls it has already paid for.
+_CLAUSES_COMPLETE = "clauses_complete"
+# Per-boundary degrade reason when a checkpointed span no longer resolves
+# inside the re-derived boundary markdown (document changed under the same
+# version — should be impossible): the relationship pass is skipped
+# explicitly rather than crashing or fabricating text.
+_SPANS_UNRESOLVED_REASON = "checkpoint_segment_spans_unresolved"
+
+
+class _CheckpointClauseInventory(BaseModel):
+    """One checkpointed clause: server identity plus boundary-local coordinates.
+
+    Source text is deliberately absent — persisting it in a checkpoint is a
+    security rule.  The boundary markdown is re-derived from the raw object on
+    every attempt, so the validated spans are sufficient to rebuild each
+    segment's text at resume time.
+    """
+
+    clause_id: str
+    clause_type: str
+    section_ref: str
+    start_char: int
+    end_char: int
+
+
+class _CheckpointContractClauses(BaseModel):
+    """Per-contract clause inventory as persisted in the clauses_complete checkpoint."""
+
+    contract_index: int
+    clauses: list[_CheckpointClauseInventory] = Field(default_factory=list)
+
+
+class _Phase1Complete(NamedTuple):
+    """Phase-1 (mandatory clause extraction) completion payload.
+
+    Returned by ``_extract_document_knowledge`` before the optional
+    relationship phase so the caller can persist the ``clauses_complete``
+    checkpoint and, on a later attempt, resume phase 2 without re-running
+    pass-1.  ``extracted`` carries one entry per boundary: the boundary, its
+    runtime segments (text rebuilt from re-derived markdown when resumed from
+    a checkpoint), and a per-boundary degrade reason (``None`` when the
+    boundary resolved normally).  ``inventories`` is the decoded checkpoint
+    inventory on a resumed attempt — the authoritative span source for
+    rewriting the checkpoint — and ``None`` on a fresh attempt.
+    """
+
+    extracted: list[tuple[ContractBoundary, list[ClauseSegment], str | None]]
+    budget: ExtractionBudget
+    documents: list[object]
+    inventories: list[_CheckpointContractClauses] | None = None
+
+
+def _clause_inventory_for_checkpoint(
+    phase1: _Phase1Complete,
+) -> list[dict[str, object]]:
+    """Checkpoint-safe clause inventory: coordinates only, never segment text.
+
+    A resumed attempt re-persists the DECODED checkpoint inventory so a
+    degraded boundary (spans unresolved) keeps its original persisted spans
+    instead of silently downgrading to an empty clause list.
+    """
+    if phase1.inventories is not None:
+        return [entry.model_dump(mode="json") for entry in phase1.inventories]
+    return [
+        {
+            "contract_index": boundary.contract_index,
+            "clauses": [
+                {
+                    "clause_id": segment.clause_id,
+                    "clause_type": segment.clause_type.value,
+                    "section_ref": segment.section_ref,
+                    "start_char": segment.start_char,
+                    "end_char": segment.end_char,
+                }
+                for segment in segments
+            ],
+        }
+        for boundary, segments, _unresolved in phase1.extracted
+    ]
+
+
+def _clauses_complete_checkpoint_metadata(
+    phase1: _Phase1Complete,
+    *,
+    document_version: int,
+) -> dict[str, object]:
+    """Build the clauses_complete extraction-checkpoint metadata payload."""
+    return {
+        "knowledge_extraction": _CLAUSES_COMPLETE,
+        "knowledge_extraction_clauses": _clause_inventory_for_checkpoint(phase1),
+        "extraction_budget": phase1.budget.model_dump(mode="json"),
+        "knowledge_extraction_document_version": document_version,
+    }
+
+
+def _decode_clause_checkpoint(raw: object) -> list[_CheckpointContractClauses] | None:
+    """Decode a persisted clause inventory, or None when it is unusable."""
+    if not isinstance(raw, list):
+        return None
+    try:
+        return [_CheckpointContractClauses.model_validate(entry) for entry in raw]
+    except ValueError:
+        return None
+
+
+def _rebuild_segments_from_checkpoint(
+    *,
+    boundaries: list[ContractBoundary],
+    inventories: list[_CheckpointContractClauses],
+) -> list[tuple[ContractBoundary, list[ClauseSegment], str | None]]:
+    """Rebuild runtime segments by slicing re-derived boundary markdown.
+
+    The persisted spans are the validated ground truth; the boundary markdown
+    is re-parsed from the raw object on every attempt, so text is never
+    checkpointed.  A boundary whose markdown no longer contains its spans
+    degrades that boundary's relationship pass (``checkpoint_segment_spans_
+    unresolved``) instead of crashing or fabricating text.
+    """
+    inventory_by_index = {entry.contract_index: entry for entry in inventories}
+    valid_types = {member.value: member for member in ClauseType}
+    rebuilt: list[tuple[ContractBoundary, list[ClauseSegment], str | None]] = []
+    for boundary in boundaries:
+        entry = inventory_by_index.get(boundary.contract_index)
+        if entry is None:
+            rebuilt.append((boundary, [], _SPANS_UNRESOLVED_REASON))
+            continue
+        segments: list[ClauseSegment] = []
+        resolved = True
+        for clause in entry.clauses:
+            clause_type = valid_types.get(clause.clause_type)
+            if (
+                clause_type is None
+                or clause.start_char < 0
+                or clause.end_char < clause.start_char
+                or clause.end_char > len(boundary.markdown)
+            ):
+                resolved = False
+                break
+            segments.append(
+                ClauseSegment(
+                    clause_id=clause.clause_id,
+                    clause_type=clause_type,
+                    section_ref=clause.section_ref,
+                    start_char=clause.start_char,
+                    end_char=clause.end_char,
+                    text=boundary.markdown[clause.start_char : clause.end_char],
+                    contract_index=boundary.contract_index,
+                )
+            )
+        if not resolved:
+            rebuilt.append((boundary, [], _SPANS_UNRESOLVED_REASON))
+            continue
+        rebuilt.append((boundary, segments, None))
+    return rebuilt
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -436,71 +597,148 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             ],
         )
     )
-    extraction_outcome, relationship_state = await _extract_document_knowledge(
+    extraction_jurisdiction = (
+        legal.metadata.jurisdiction
+        if legal.metadata
+        else (classified.jurisdiction if len(boundaries) == 1 else None)
+    )
+    phase1_outcome, phase1_state = await _extract_document_knowledge(
         runtime=runtime,
         job=job,
         boundaries=boundaries,
         boundary_ambiguous=boundary_result.ambiguous,
-        jurisdiction=(
-            legal.metadata.jurisdiction
-            if legal.metadata
-            else (classified.jurisdiction if len(boundaries) == 1 else None)
-        ),
+        jurisdiction=extraction_jurisdiction,
         document_type=classified.document_kind,
     )
-    status_result = await runtime.repo.update_document_status(
-        document_id=job.document_id,
-        status="failed" if _is_graph_write_failure(extraction_outcome) else "parsed",
-        title=parsed.title,
-        document_kind=classified.document_kind,
-        jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
-        contract_type=(
-            legal.metadata.contract_type
-            if legal.metadata
-            else (classified.contract_type if len(boundaries) == 1 else None)
+    # Shared classification/legal metadata persisted by every status write in
+    # this block (the writer shallow-merges metadata keys per call).
+    classification_metadata: dict[str, object] = {
+        "content_type": job.content_type,
+        "filename": job.filename,
+        **classified.metadata_,
+        **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
+        **(
+            {
+                "contracts": [
+                    {
+                        "contract_index": boundary.contract_index,
+                        **(
+                            preparation.metadata.model_dump(exclude_none=True)
+                            if preparation.metadata
+                            else {}
+                        ),
+                    }
+                    for boundary, preparation in legal_preparations
+                ]
+            }
+            if len(boundaries) > 1
+            else {}
         ),
-        parties=[
-            *(
-                legal.metadata.parties
-                if legal.metadata
-                else (classified.parties if len(boundaries) == 1 else [])
-            )
-        ],
-        metadata_={
-            "content_type": job.content_type,
-            "filename": job.filename,
-            **classified.metadata_,
-            **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
-            **(
-                {
-                    "contracts": [
-                        {
-                            "contract_index": boundary.contract_index,
-                            **(
-                                preparation.metadata.model_dump(exclude_none=True)
-                                if preparation.metadata
-                                else {}
-                            ),
-                        }
-                        for boundary, preparation in legal_preparations
-                    ]
-                }
-                if len(boundaries) > 1
-                else {}
-            ),
-            **_extraction_metadata(
-                extraction_outcome,
-                document_version=job.document_version,
-            ),
-            # The relationship-phase truth is persisted as soon as it is known,
-            # so a crash during chunking still leaves the record truthful.
-            "graph_relationships": relationship_state.model_dump_for_metadata(),
-        },
-        structural_tree=parsed.structural_tree,
-        extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
+    }
+    resolved_contract_type = (
+        legal.metadata.contract_type
+        if legal.metadata
+        else (classified.contract_type if len(boundaries) == 1 else None)
     )
-    if isinstance(status_result, Failure):
-        return Failure(status_result.failure())
+    resolved_parties: list[object] = [
+        *(
+            legal.metadata.parties
+            if legal.metadata
+            else (classified.parties if len(boundaries) == 1 else [])
+        )
+    ]
+    phase1_inventory: list[dict[str, object]] | None = None
+    if isinstance(phase1_outcome, _Phase1Complete):
+        # Phase 1 (mandatory clause extraction) just completed.  Persist the
+        # clauses_complete checkpoint — mirroring how the complete checkpoint
+        # is written — BEFORE the optional relationship phase runs: a
+        # relationship/provider failure must retry ONLY phase 2 against the
+        # restored cumulative ledger, never re-run the already-paid pass-1
+        # extraction into a tight budget.  The relationship truth is not known
+        # yet and is deliberately absent here; the post-phase write below
+        # persists it as soon as it exists.
+        phase1_inventory = _clause_inventory_for_checkpoint(phase1_outcome)
+        status_result = await runtime.repo.update_document_status(
+            document_id=job.document_id,
+            status="parsed",
+            title=parsed.title,
+            document_kind=classified.document_kind,
+            jurisdiction=(
+                legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction
+            ),
+            contract_type=resolved_contract_type,
+            parties=resolved_parties,
+            metadata_={
+                **classification_metadata,
+                **_clauses_complete_checkpoint_metadata(
+                    phase1_outcome,
+                    document_version=job.document_version,
+                ),
+            },
+            structural_tree=parsed.structural_tree,
+            extraction_incomplete=False,
+        )
+        if isinstance(status_result, Failure):
+            return Failure(status_result.failure())
+        extraction_outcome, relationship_state = await _run_relationship_phase(
+            runtime=runtime,
+            job=job,
+            extracted=phase1_outcome.extracted,
+            budget=phase1_outcome.budget,
+            pass1_documents=phase1_outcome.documents,
+            jurisdiction=extraction_jurisdiction,
+            document_type=classified.document_kind,
+        )
+        # Post-relationship truth: the terminal extraction checkpoint
+        # (complete — or clauses_complete carrying the phase-2-end ledger when
+        # the optional phase failed, so the retry lands in the reuse branch)
+        # plus the typed relationship state.
+        final_result = await runtime.repo.update_document_status(
+            document_id=job.document_id,
+            status="failed" if isinstance(extraction_outcome, ExtractionFailed) else "parsed",
+            metadata_={
+                **classification_metadata,
+                **_extraction_metadata(
+                    extraction_outcome,
+                    document_version=job.document_version,
+                    clause_checkpoint=phase1_inventory,
+                ),
+                # The relationship-phase truth is persisted as soon as it is
+                # known, so a crash during chunking still leaves the record
+                # truthful.
+                "graph_relationships": relationship_state.model_dump_for_metadata(),
+            },
+            extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
+        )
+        if isinstance(final_result, Failure):
+            return Failure(final_result.failure())
+    else:
+        extraction_outcome, relationship_state = phase1_outcome, phase1_state
+        status_result = await runtime.repo.update_document_status(
+            document_id=job.document_id,
+            status="failed" if _is_graph_write_failure(extraction_outcome) else "parsed",
+            title=parsed.title,
+            document_kind=classified.document_kind,
+            jurisdiction=(
+                legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction
+            ),
+            contract_type=resolved_contract_type,
+            parties=resolved_parties,
+            metadata_={
+                **classification_metadata,
+                **_extraction_metadata(
+                    extraction_outcome,
+                    document_version=job.document_version,
+                ),
+                # The relationship-phase truth is persisted as soon as it is known,
+                # so a crash during chunking still leaves the record truthful.
+                "graph_relationships": relationship_state.model_dump_for_metadata(),
+            },
+            structural_tree=parsed.structural_tree,
+            extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
+        )
+        if isinstance(status_result, Failure):
+            return Failure(status_result.failure())
     if isinstance(extraction_outcome, ExtractionFailed) and _is_graph_write_failure(
         extraction_outcome
     ):
@@ -1056,20 +1294,42 @@ def _extraction_metadata(
     outcome: ExtractionSucceeded | ExtractionFailed,
     *,
     document_version: int | None = None,
+    clause_checkpoint: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     if isinstance(outcome, ExtractionFailed):
-        metadata: dict[str, object] = {
+        if (
+            clause_checkpoint is not None
+            and outcome.code is ExtractionFailureCode.GRAPH_WRITE_ERROR
+        ):
+            # Phase 1 completed and is checkpointed; only the optional
+            # relationship phase failed.  The retry must land in the
+            # clauses_complete reuse branch (phase 2 only, cumulative
+            # ledger), so this terminal metadata keeps the checkpoint marker
+            # and the clause inventory instead of downgrading to
+            # "incomplete" — which would force a full pass-1 re-spend.
+            metadata: dict[str, object] = {
+                "knowledge_extraction": _CLAUSES_COMPLETE,
+                "knowledge_extraction_failure": str(outcome.code),
+                "knowledge_extraction_message": outcome.message,
+                "knowledge_extraction_clauses": clause_checkpoint,
+            }
+            if outcome.budget is not None:
+                metadata["extraction_budget"] = outcome.budget.model_dump(mode="json")
+            if document_version is not None:
+                metadata["knowledge_extraction_document_version"] = document_version
+            return metadata
+        failure_metadata: dict[str, object] = {
             "knowledge_extraction": "incomplete",
             "knowledge_extraction_failure": str(outcome.code),
             "knowledge_extraction_message": outcome.message,
         }
         if outcome.budget_dimension is not None:
-            metadata["extraction_budget_dimension"] = str(outcome.budget_dimension)
+            failure_metadata["extraction_budget_dimension"] = str(outcome.budget_dimension)
         if outcome.budget is not None:
-            metadata["extraction_budget"] = outcome.budget.model_dump(mode="json")
+            failure_metadata["extraction_budget"] = outcome.budget.model_dump(mode="json")
         if document_version is not None:
-            metadata["knowledge_extraction_document_version"] = document_version
-        return metadata
+            failure_metadata["knowledge_extraction_document_version"] = document_version
+        return failure_metadata
     classes = list(outcome.extraction_classes) or sorted(
         {
             extraction.extraction_class
@@ -1094,7 +1354,7 @@ def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> 
     )
 
 
-async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — one extraction pass keeps all phase locals together
+async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extraction pass keeps all phase locals together
     *,
     runtime: IngestionRuntime,
     job: IngestionJob,
@@ -1102,13 +1362,23 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — on
     boundary_ambiguous: bool = False,
     jurisdiction: str | None,
     document_type: str,
-) -> tuple[ExtractionSucceeded | ExtractionFailed, GraphRelationshipsState]:
-    """Run pass-1 knowledge extraction plus the graph-write phase.
+) -> tuple[ExtractionSucceeded | ExtractionFailed | _Phase1Complete, GraphRelationshipsState]:
+    """Run pass-1 knowledge extraction, stopping before the optional phase 2.
 
-    Returns the extraction outcome together with the typed aggregate
+    Returns the pass-1 outcome together with the typed aggregate
     relationship-phase state, so callers can persist "not attempted" /
     "skipped (not implemented)" / "succeeded" / "failed" as distinct truths
     instead of an ``all([])`` success.
+
+    Terminal outcomes (``ExtractionSucceeded`` from a complete checkpoint,
+    ``ExtractionFailed``) are final.  A fresh phase-1 completion returns
+    ``_Phase1Complete`` so the caller can persist the ``clauses_complete``
+    checkpoint BEFORE spending the optional relationship phase — a retry
+    after a relationship failure resumes at phase 2 against the restored
+    cumulative ledger instead of re-running (and re-paying for) pass-1 into
+    a tight budget.  A ``clauses_complete`` checkpoint on the same document
+    version skips pass-1 entirely and returns ``_Phase1Complete`` with
+    segments rebuilt from the persisted spans.
     """
     if boundary_ambiguous:
         return (
@@ -1212,6 +1482,43 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — on
                         ),
                         restored_relationships,
                     )
+                if (
+                    isinstance(raw_metadata, dict)
+                    and raw_metadata.get("knowledge_extraction") == _CLAUSES_COMPLETE
+                    and same_checkpoint_version
+                ):
+                    inventories = _decode_clause_checkpoint(
+                        raw_metadata.get("knowledge_extraction_clauses")
+                    )
+                    if inventories is None:
+                        logger.bind(document_id=job.document_id).warning(
+                            "document_clauses_checkpoint_inventory_invalid"
+                        )
+                    else:
+                        # Phase 1 completed on a previous attempt: its clause
+                        # writes are durable and the persisted ledger already
+                        # carries the pass-1 spend.  Skip pass-1 ENTIRELY — no
+                        # provider call, no budget charge — and resume at the
+                        # optional relationship phase over segments rebuilt by
+                        # slicing the re-derived boundary markdown at the
+                        # persisted spans.  The retry still gets a fresh
+                        # wall-clock window over the cumulative ledger.
+                        budget = budget.model_copy(update={"started_at": datetime.now(tz=UTC)})
+                        return (
+                            _Phase1Complete(
+                                extracted=_rebuild_segments_from_checkpoint(
+                                    boundaries=boundaries,
+                                    inventories=inventories,
+                                ),
+                                budget=budget,
+                                documents=[],
+                                inventories=inventories,
+                            ),
+                            GraphRelationshipsState(
+                                status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                                reason="relationship_phase_resumed_from_checkpoint",
+                            ),
+                        )
     # A retry starts a fresh wall-clock window, but its ledger is cumulative.
     # Keeping this transition here (once per ingestion attempt, before the
     # contract loop) prevents a multi-contract document from resetting timing
@@ -1231,12 +1538,11 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — on
             ),
         )
     documents: list[object] = []
-    relationship_states: list[GraphRelationshipsState] = []
     # Phase 1 (mandatory): pass-1 clause extraction for EVERY boundary runs
     # before any optional relationship work spends the shared budget — a
     # relationship call for boundary 0 must never starve boundary 2's clause
     # extraction into a failed, incomplete document.
-    extracted: list[tuple[ContractBoundary, list[ClauseSegment]]] = []
+    extracted: list[tuple[ContractBoundary, list[ClauseSegment], str | None]] = []
     for boundary in boundaries:
         outcome = await runtime.extraction.extract(
             ExtractionRequest(
@@ -1271,7 +1577,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — on
             document_id=job.document_id,
             contract_index=boundary.contract_index,
         )
-        extracted.append((boundary, segments))
+        extracted.append((boundary, segments, None))
         # Clause writes happen per boundary, immediately after their mandatory
         # extraction: a later boundary's extraction failure must not withhold
         # earlier boundaries' already-extracted clauses from the graph.
@@ -1310,15 +1616,59 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — on
                     ]
                 ),
             )
-    # Phase 2 (optional): a different prompt over different input. Pass-1
-    # clause identities are fed back as server-derived inventory; document
-    # text travels only inside the delimited untrusted region; every edge is
-    # span-validated and identity-validated before it can be persisted.  The
-    # clause episode writes re-run against the idempotency guard (cache hits,
-    # no new spend) so the combined phase result — clauses AND edges — stays
-    # the single retry-decision surface.
+    # Phase 1 is complete: every boundary is extracted and its clause writes
+    # succeeded.  Hand the phase-1 payload back so the caller can persist the
+    # clauses_complete checkpoint BEFORE the optional relationship phase — a
+    # relationship/provider failure must retry only phase 2 against the
+    # cumulative ledger, never re-run the already-paid pass-1 extraction.
+    return (
+        _Phase1Complete(
+            extracted=extracted,
+            budget=budget,
+            documents=documents,
+        ),
+        aggregate_relationship_states([]),
+    )
+
+
+async def _run_relationship_phase(
+    *,
+    runtime: IngestionRuntime,
+    job: IngestionJob,
+    extracted: list[tuple[ContractBoundary, list[ClauseSegment], str | None]],
+    budget: ExtractionBudget,
+    pass1_documents: Sequence[object],
+    jurisdiction: str | None,
+    document_type: str,
+) -> tuple[ExtractionSucceeded | ExtractionFailed, GraphRelationshipsState]:
+    """Run the optional per-boundary relationship pass plus the combined write.
+
+    Extracted from the former phase-2 tail so its retry-decision surface is
+    unchanged: the clause episode writes re-run against the idempotency guard
+    (cache hits, no new spend) and the combined phase result — clauses AND
+    edges — stays the single retry decision.
+    """
+    settings = get_settings()
+    relationship_config = relationship_pass_config_from_settings(settings)
     writer_ready = runtime.graph_writer is not None and runtime.idempotency is not None
-    for boundary, segments in extracted:
+    relationship_states: list[GraphRelationshipsState] = []
+    for boundary, segments, unresolved_reason in extracted:
+        if unresolved_reason is not None:
+            # The checkpointed spans no longer resolve inside the re-derived
+            # boundary markdown; degrade this boundary's relationship pass
+            # explicitly instead of fabricating text or crashing.
+            relationship_pass = RelationshipPassResult(
+                ran=False,
+                skip_reason=unresolved_reason,
+                budget=budget,
+            )
+            relationship_states.append(
+                _relationship_state_from_pass(
+                    relationship_pass=relationship_pass,
+                    relationship_results=(),
+                )
+            )
+            continue
         if segments and writer_ready:
             relationship_pass = await run_relationship_pass(
                 extraction=runtime.extraction,
@@ -1387,7 +1737,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — on
                 aggregate_relationship_states(relationship_states),
             )
     return (
-        ExtractionSucceeded(documents=tuple(documents), budget=budget),
+        ExtractionSucceeded(documents=tuple(pass1_documents), budget=budget),
         aggregate_relationship_states(relationship_states),
     )
 
