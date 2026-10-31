@@ -1,7 +1,7 @@
 # PLAN — Agent Saul Tool Set (todo 242)
 
 **Date:** 2026-10-27 · **Owner:** Harmeet · **Status:** D0 implemented; D1–D4 sequenced
-**Companion:** `PLAN-bulletproof-ingestion.md` (pipeline) · this file (agent capability)
+**Companion:** `openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md` (pipeline) · this file (agent capability)
 **Inputs:** user interview (2026-10-27) + verified inventory + `openspec/specs/agent-tool-registry/`
 + harden change Phase 6 + `.github/skills/langchain-langgraph/references/03` and `12`.
 
@@ -59,7 +59,7 @@ the tool body via `trusted_tool_context` — never in what is bound or selected.
 The current six tools are all *point* lookups. The capability that changes what Saul can
 *do* (not just how fast) is **aggregation across documents** — obligations, conflicts,
 party webs. Every one of those is a graph-edge query. Portfolio tools are therefore
-**gated on todo 136** (relationship extraction, `PLAN-bulletproof-ingestion.md` Phase D).
+**gated on todo 136** (relationship extraction, `openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md` Phase D).
 No portfolio tool ships before edges exist — a traversal tool over an edgeless graph
 returns empty successes and teaches the model to answer from nothing.
 
@@ -278,5 +278,6 @@ deliberately NOT a tool.**
 5. **Transcript/events:** qna emits the answer through the existing WS event
    vocabulary; citations carry evidence handles per the citation contract.
 
-See `PLAN-bulletproof-ingestion.md` (retired below) for the step-6 decision matrix
+See `openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md` (retired
+2026-10-31, archived) for the step-6 decision matrix
 and the completion audit that motivated mounting over extraction.

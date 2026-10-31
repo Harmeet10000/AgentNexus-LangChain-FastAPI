@@ -1,6 +1,8 @@
 # PLAN — Bulletproof Ingestion
 
 > **RETIRED 2026-10-31 — delivered with recorded residue.**
+> Archived from `PLAN-bulletproof-ingestion.md` (repo root) on 2026-10-31; the
+> archive directory is the established home for retired work records.
 >
 > Completion audit (2026-10-31, main @ bf9441f+): Phases A–D ≈ 90% blended — the
 > north star ("the pipeline never lies, never loses data silently") is delivered:
@@ -10,16 +12,20 @@
 > drifted from runtime truth; the audit below is the authoritative record, and
 > the residues now live where they will be executed:
 >
-> - **Phase E (quarantine ledger + state key-set seatbelt test)** → open item; the
+> - **Phase E (quarantine ledger + state key-set seatbelt test)** → OpenSpec
+>   change `openspec/changes/ingestion-truthfulness-residue/`; the
 >   one ungated silent-drop edge is `legacy_service.py:57-66` vs
 >   `ingestion/workflow.py:49-67`.
 > - **Phase F / step 6 (retrieval unification)** → DECIDED: mount the graph
->   (approach C). Spec being written as an OpenSpec change (HTTP cutover +
->   Agent Saul `qna` engine exposure); decision matrix appended below.
+>   (approach C). OpenSpec change `openspec/changes/mount-retrieval-graph/`
+>   (HTTP cutover + Agent Saul `qna` engine exposure); decision matrix appended
+>   below.
 > - **G1** recall-gate in CI (corpus at 105/150–300) · **G4** graphiti as a fused
->   branch (registration point: `documents.py:126-128`) · **G5/G6/G7** untouched —
+>   branch (registration point: `documents.py:126-128`) → OpenSpec change
+>   `openspec/changes/retrieval-measurement-gate/`. **G5/G6/G7** untouched —
 >   tracked on issue #107.
-> - **Deferred re-ingestion preconditions** 3–5 still gate any re-ingest exposure.
+> - **Deferred re-ingestion preconditions** 3–5 still gate any re-ingest
+>   exposure → OpenSpec change `openspec/changes/re-ingestion-readiness/`.
 >
 > The step-6 decision matrix and the full audit tables below are kept as the
 > normative record for the OpenSpec change.

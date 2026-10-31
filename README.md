@@ -148,9 +148,11 @@ validation; the evidence-handle service; the Saul orchestration graph with HITL 
 grounding gate; the evaluation corpus and its CI gates (64 release-tier cases; 41
 await human SME adjudication — the corpus is designated *candidate*, not gold, until
 adjudication completes). What is pending: SME adjudication of judgment-dependent
-labels, typed relationship edges in Graphiti (see
-[PLAN-bulletproof-ingestion.md](PLAN-bulletproof-ingestion.md) Phase D), retrieval
-unification and the portfolio tool layer (see [PLAN-agent-tools.md](PLAN-agent-tools.md)).
+labels (typed relationship edges landed with the retired plan's Phase D — the
+[archived plan](openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md)
+carries the completion audit), retrieval unification
+([mount-retrieval-graph](openspec/changes/mount-retrieval-graph/proposal.md)) and the
+portfolio tool layer (see [PLAN-agent-tools.md](PLAN-agent-tools.md)).
 
 ## Security model
 
@@ -272,8 +274,9 @@ import-linter contracts, per-feature disposition — is recorded in
 - [`docs/diagrams/`](docs/diagrams/) — architecture SVGs (this README embeds them)
 - [`docs/server-smoke-2026-10-28.md`](docs/server-smoke-2026-10-28.md) — latest
   end-to-end server verification, with ranked open defects
-- [`PLAN-bulletproof-ingestion.md`](PLAN-bulletproof-ingestion.md) — ingestion
-  hardening plan (north star: the pipeline never lies)
+- [`openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md`](openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md) — retired
+  ingestion-hardening plan (north star: the pipeline never lies; delivered 2026-10-31,
+  residues tracked in `openspec/changes/`)
 - [`PLAN-agent-tools.md`](PLAN-agent-tools.md) — agent tool-set plan (tiny
   projection, big catalog, authority at the executor)
 - [`evals/ADJUDICATION-RUNBOOK.md`](evals/ADJUDICATION-RUNBOOK.md) — how the legal

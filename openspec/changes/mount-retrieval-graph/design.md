@@ -2,7 +2,7 @@
 
 ## Context
 
-Decision D6 in `PLAN-agent-tools.md` ("the compiled retrieval graph as the qna engine (decided 2026-10-31)") supersedes the retired `PLAN-bulletproof-ingestion.md` step-6 sequencing: mount the compiled graph (approach C) as the single served retrieval implementation and Agent Saul's `qna` engine. The D→E path (extract a shared core, then a measured cutover) is abandoned; a parity suite is the safety net instead of a pre-evaluation. The retired plan's step-6 decision matrix and its recorded parity gaps are the risk register for this change.
+Decision D6 in `PLAN-agent-tools.md` ("the compiled retrieval graph as the qna engine (decided 2026-10-31)") supersedes the retired `openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md` step-6 sequencing: mount the compiled graph (approach C) as the single served retrieval implementation and Agent Saul's `qna` engine. The D→E path (extract a shared core, then a measured cutover) is abandoned; a parity suite is the safety net instead of a pre-evaluation. The retired plan's step-6 decision matrix and its recorded parity gaps are the risk register for this change.
 
 Current state (verified on disk, 2026-10-31):
 
@@ -87,7 +87,7 @@ Each node emits a span attributed to its stage (plan, retrieve, fusion, rerank, 
 4. Wire `make_qna_node` to the engine (behind the parity gate being green).
 5. Retarget `/search/ask` + `/legal/ask` to the graph-served service path.
 6. Delete the inline `ask`/`_ask` bodies; correct `legacy_ingest_dependencies.py` docstring prose.
-7. Update `PLAN-bulletproof-ingestion.md`'s retirement header (step 6 → DONE) and note it on issue #107 if a CLI is available.
+7. Update `openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md`'s retirement header (step 6 → DONE) and note it on issue #107 if a CLI is available.
 
 Rollback: the router retarget is a single wiring change — reverting step 5 restores the (still present until step 6) inline path. After step 6, rollback is a revert commit, not a runtime flag; the parity suite is what makes step 6 safe.
 

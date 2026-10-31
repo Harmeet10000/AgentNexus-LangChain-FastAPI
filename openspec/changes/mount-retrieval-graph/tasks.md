@@ -37,5 +37,5 @@
 
 ## 6. Docs — retired-plan residue and tracking
 
-- [ ] 6.1 Update `PLAN-bulletproof-ingestion.md`'s retirement header: mark step 6 (retrieval unification) DONE with the cutover decision and the surviving residue pointers (G4/G5/G6/G7 remain on issue #107; Phase E quarantine ledger is its own item); verify the header matches the shipped state.
+- [ ] 6.1 Update `openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md`'s retirement header: mark step 6 (retrieval unification) DONE with the cutover decision and the surviving residue pointers (G4/G5/G6/G7 remain on issue #107; Phase E quarantine ledger is its own item); verify the header matches the shipped state.
 - [ ] 6.2 If the `gh` CLI is authenticated, add a comment to issue #107 noting step 6 is delivered by this change and pointing at the change directory; otherwise record the intended note in the change directory so the next session can post it; verify the issue comment exists or the recorded note does.
