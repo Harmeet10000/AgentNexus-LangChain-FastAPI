@@ -1093,3 +1093,65 @@ def test_status_response_returns_none_for_absent_or_invalid_metadata() -> None:
     assert _relationship_state_from_metadata({}) is None
     assert _fidelity_metrics_from_metadata({"fidelity": "garbage"}) is None
     assert _relationship_state_from_metadata({"graph_relationships": {"status": 1}}) is None
+
+
+async def test_failed_edge_write_fails_the_write_phase() -> None:
+    """A graph outage failing an edge write must fail the phase.
+
+    Clause-only success would leave a complete checkpoint that hides
+    permanently-missing relationships; deterministic edge ids make the
+    retry's rewrites idempotent.
+    """
+    import langextract as lx
+
+    from app.extraction.langextract.relationships import RelationshipPassResult
+    from app.features.agent_saul.domain.state import Citation, LegalRelationship, RelationshipType
+
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due.",
+        char_interval=lx.data.CharInterval(start_pos=0, end_pos=15),
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
+    )
+    segments = document_ingest._extract_clause_segments(outcome, document_id="doc-1")
+    edges = [
+        LegalRelationship(
+            edge_id="edge-1",
+            from_node="Acme Corp",
+            relationship=RelationshipType.OBLIGES,
+            to_node="GlobalTech Ltd",
+            clause_id="2.1",
+            citation=Citation(claim="test", source="clause 2.1", confidence=0.9),
+            contract_index=0,
+        )
+    ]
+
+    class _ClauseOkEdgeFailsWriter:
+        async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
+            del clause_text, metadata
+            return "episode-1"
+
+        async def write_relationship_edge(self, edge: object) -> str:
+            del edge
+            message = "graph down"
+            raise RuntimeError(message)
+
+    result = await _write_extracted_clause_episodes(
+        segments=segments,
+        relationships=edges,
+        edge_spans={},
+        relationship_pass=RelationshipPassResult(
+            ran=True,
+            budget=ExtractionSucceeded(documents=()).budget,
+        ),
+        graph_writer=_ClauseOkEdgeFailsWriter(),
+        idempotency=_Idempotency(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
+    )
+    assert result.success is False
+    assert result.relationships.status is GraphRelationshipsStatus.FAILED

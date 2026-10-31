@@ -1606,8 +1606,13 @@ async def _write_extracted_clause_episodes(
         log.warning("graph_relationships_skipped", reason=relationships_state.reason)
     else:
         log.info("graph_relationships_written")
+    # Edge writes join the retry decision: a temporary graph outage that
+    # fails an edge write must not leave a complete checkpoint that hides
+    # permanently-missing relationships — deterministic edge ids make the
+    # retry's rewrites idempotent.
     return GraphWritePhaseResult(
-        success=all(result.success for result in clause_results),
+        success=all(result.success for result in clause_results)
+        and all(result.success for result in relationship_results),
         clause_writes_attempted=len(clause_results),
         clause_writes_succeeded=sum(1 for result in clause_results if result.success),
         relationships=relationships_state,
