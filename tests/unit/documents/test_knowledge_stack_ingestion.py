@@ -252,9 +252,10 @@ async def test_graph_write_failure_marks_document_failed_before_chunk_storage(
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), DocumentGraphWriteError)
     assert result.failure().retryable is True
-    # Two provider invocations: pass-1 clauses plus the pass-2 relationship
-    # prompt (the writer failure happens after both). Chunking never runs.
-    assert events == ["extract", "extract"]
+    # One provider invocation: mandatory clause writes run immediately after
+    # pass-1, so the clause-write failure aborts before the optional
+    # relationship pass can spend any budget. Chunking never runs.
+    assert events == ["extract"]
     assert repo.status_calls[0]["status"] == "failed"
     assert repo.status_calls[0]["extraction_incomplete"] is True
     assert repo.transaction_checkpoints == 0

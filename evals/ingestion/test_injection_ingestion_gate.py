@@ -389,11 +389,15 @@ class _HermeticContractLLM(FakeListChatModel):
 
 
 class _GraphWriter:
-    """Minimal clause-episode writer so the real graphiti writer path executes."""
+    """Minimal clause + edge writer so the real graphiti writer path executes."""
 
     async def write_clause_episode(self, clause_text: str, metadata: object) -> str:
         del clause_text, metadata
         return "episode-1"
+
+    async def write_relationship_edge(self, edge: object) -> str:
+        del edge
+        return "edge-1"
 
 
 class _RecordingGraphWriter:

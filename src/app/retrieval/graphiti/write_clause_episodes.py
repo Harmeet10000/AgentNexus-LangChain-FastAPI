@@ -295,6 +295,7 @@ async def _write_single_relationship_edge(
             )
 
         edge_input = LegalEdgeInput(
+            edge_id=relationship.edge_id,
             from_entity=relationship.from_node,
             relationship=relationship.relationship.value,
             to_entity=relationship.to_node,

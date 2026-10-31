@@ -1266,20 +1266,57 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — on
             )
         budget = outcome.budget
         documents.extend(outcome.documents)
-        extracted.append(
-            (
-                boundary,
-                _extract_clause_segments(
-                    outcome,
-                    document_id=job.document_id,
-                    contract_index=boundary.contract_index,
+        segments = _extract_clause_segments(
+            outcome,
+            document_id=job.document_id,
+            contract_index=boundary.contract_index,
+        )
+        extracted.append((boundary, segments))
+        # Clause writes happen per boundary, immediately after their mandatory
+        # extraction: a later boundary's extraction failure must not withhold
+        # earlier boundaries' already-extracted clauses from the graph.
+        write_phase = await _write_extracted_clause_episodes(
+            segments=segments,
+            relationships=[],
+            edge_spans={},
+            relationship_pass=RelationshipPassResult(
+                ran=False,
+                skip_reason="relationship_pass_deferred_to_phase2",
+                budget=budget,
+            ),
+            graph_writer=runtime.graph_writer,
+            idempotency=runtime.idempotency,
+            document_id=job.document_id,
+            tenant_id=job.tenant_id,
+            document_version=job.document_version,
+            contract_index=boundary.contract_index,
+            user_id=job.user_id,
+            jurisdiction=jurisdiction,
+            document_type=document_type,
+        )
+        if not write_phase.success:
+            return (
+                ExtractionFailed(
+                    code=ExtractionFailureCode.GRAPH_WRITE_ERROR,
+                    message="One or more extracted clauses could not be persisted to Graphiti",
+                    budget=budget,
+                ),
+                aggregate_relationship_states(
+                    [
+                        GraphRelationshipsState(
+                            status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                            reason="clause_write_failed_before_relationship_pass",
+                        ),
+                    ]
                 ),
             )
-        )
     # Phase 2 (optional): a different prompt over different input. Pass-1
     # clause identities are fed back as server-derived inventory; document
     # text travels only inside the delimited untrusted region; every edge is
-    # span-validated and identity-validated before it can be persisted.
+    # span-validated and identity-validated before it can be persisted.  The
+    # clause episode writes re-run against the idempotency guard (cache hits,
+    # no new spend) so the combined phase result — clauses AND edges — stays
+    # the single retry-decision surface.
     writer_ready = runtime.graph_writer is not None and runtime.idempotency is not None
     for boundary, segments in extracted:
         if segments and writer_ready:

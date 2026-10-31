@@ -235,6 +235,10 @@ class LegalEdgeInput(BaseModel):
     # so every persisted edge resolves back to a verifiable span.
     char_start: int | None = None
     char_end: int | None = None
+    # Deterministic producer edge id (hashes the validated span).  Part of
+    # the stored episode identity so two distinct spans of one relationship
+    # within a clause persist as two episodes instead of overwriting.
+    edge_id: str | None = None
 
     def to_episode_body(self) -> str:
         body = (

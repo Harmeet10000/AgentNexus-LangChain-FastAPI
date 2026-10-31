@@ -276,6 +276,7 @@ async def write_relationship_edge(
     episode_name = (
         f"edge:{edge.tenant_id}:{edge.doc_id}:v{edge.document_version}:c{edge.contract_index}:"
         f"{edge.clause_id}:{edge.from_entity}:{edge.relationship}:{edge.to_entity}"
+        f":{edge.edge_id or ''}"
     )
     episode_uuid = str(uuid5(NAMESPACE_URL, f"agentnexus:{episode_name}"))
     source_description = json.dumps(
@@ -286,6 +287,7 @@ async def write_relationship_edge(
             "user_id": edge.user_id,
             "thread_id": edge.thread_id,
             "confidence": edge.confidence,
+            "edge_id": edge.edge_id,
             # Structured triple: the reader never re-parses prose — entity
             # names containing periods/abbreviations broke sentence splitting.
             "from_entity": edge.from_entity,
