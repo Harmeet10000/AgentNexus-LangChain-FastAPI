@@ -32,7 +32,7 @@ from app.features.auth.api.http.dependencies import (
     get_account_store,
 )
 from app.features.auth.api.websocket.security import WebSocketSecurityViolation
-from app.features.documents.api.http.dependencies import DocumentAuthorizationDep
+from app.features.documents.api.http.dependencies import DocumentAuthorizationWsDep
 from app.observability.logging import logger
 from app.utils import ErrorCode, ValidationException
 
@@ -44,7 +44,7 @@ async def saul_ws_endpoint(  # noqa: PLR0917
     deps: AgentSaulDepsWsAnnotated,
     security_context: AgentSaulWebSocketSecurityContextAnnotated,
     authorization: WebSocketAuthorizationContext,
-    document_authorization: DocumentAuthorizationDep,
+    document_authorization: DocumentAuthorizationWsDep,
     account_store: Annotated[AuthAccountStore, Depends(get_account_store)],
     tenant_membership_service: TenantMembershipServiceDep,
 ) -> None:

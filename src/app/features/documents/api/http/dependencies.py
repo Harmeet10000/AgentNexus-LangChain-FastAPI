@@ -3,7 +3,7 @@
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, cast
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket
 from langchain_core.language_models import BaseChatModel
 from redis.asyncio import Redis
 from returns.result import Failure
@@ -14,6 +14,7 @@ from app.connections import get_postgres_db, get_redis
 from app.features.auth.api.http.dependencies import (
     AuthorizationContext,
     CurrentAuthorizationContext,
+    WebSocketAuthorizationContext,
 )
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
@@ -90,6 +91,14 @@ async def get_current_user_id(context: CurrentAuthorizationContext) -> str:
     return context.user_id
 
 
+async def _tenant_document_ids(repo: DocumentRepository, tenant_id: str) -> tuple[str, ...]:
+    result = await repo.list_document_ids_for_tenant(tenant_id=tenant_id)
+    if isinstance(result, Failure):
+        message = "Unable to resolve tenant document capability"
+        raise InfrastructureException(message)
+    return result.unwrap()
+
+
 async def get_document_authorization(
     context: CurrentAuthorizationContext,
     repo: Annotated[DocumentRepository, Depends(get_document_repository)],
@@ -99,15 +108,39 @@ async def get_document_authorization(
     The request's document IDs are only filters.  The capability itself comes
     from a tenant-scoped SQL query, so forged IDs can never widen authority.
     """
-    result = await repo.list_document_ids_for_tenant(tenant_id=context.tenant_id)
-    if isinstance(result, Failure):
-        message = "Unable to resolve tenant document capability"
-        raise InfrastructureException(message)
     thread_id = context.thread_id or f"http:{context.session_id or context.user_id}"
-    return replace(context.for_thread(thread_id), allowed_doc_ids=result.unwrap())
+    return replace(
+        context.for_thread(thread_id),
+        allowed_doc_ids=await _tenant_document_ids(repo, context.tenant_id),
+    )
+
+
+async def get_document_authorization_ws(
+    websocket: WebSocket,
+    context: WebSocketAuthorizationContext,
+    repo: Annotated[DocumentRepository, Depends(get_document_repository)],
+) -> AuthorizationContext:
+    """WebSocket twin of ``get_document_authorization``.
+
+    Derives the same server capability, but only through WebSocket-safe
+    dependencies: the HTTP authorization context is unreachable from a WS
+    handshake because HTTPBearer and ``Request`` cannot execute in a
+    WebSocket dependency graph.
+    """
+    thread_id = (
+        str(websocket.path_params.get("thread_id") or "")
+        or f"ws:{context.session_id or context.user_id}"
+    )
+    return replace(
+        context.for_thread(thread_id),
+        allowed_doc_ids=await _tenant_document_ids(repo, context.tenant_id),
+    )
 
 
 DocumentCommandServiceDep = Annotated[DocumentCommandService, Depends(get_document_command_service)]
 DocumentQueryServiceDep = Annotated[DocumentQueryService, Depends(get_document_query_service)]
 UserIdDep = Annotated[str, Depends(get_current_user_id)]
 DocumentAuthorizationDep = Annotated[AuthorizationContext, Depends(get_document_authorization)]
+DocumentAuthorizationWsDep = Annotated[
+    AuthorizationContext, Depends(get_document_authorization_ws)
+]
