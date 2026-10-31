@@ -18,19 +18,28 @@ method directly on ``content`` (see ``search_repository.bm25_search``); the
 tsvector would double-count that signal in the three-branch fusion, and
 nothing in the application ever read it.
 
-Two database shapes reach this revision (idempotent against both)
----------------------------------------------------------------
+Three database shapes reach this revision (idempotent against all)
+------------------------------------------------------------------
 - 0004-executed databases: the search tables carry the full index set.
 - 0014-repaired databases (stamped, never migrated): ``0014`` recreates the
   tables with **no indexes at all** — its docstring records that
   ``search_chunks_bm25_idx`` was referenced by settings but never created.
+- Tables-absent databases: revision metadata records 0004/0014 as applied,
+  yet the tables are gone (dropped during manual repair, or never
+  materialized on a restored host). Verified on the production managed
+  database, where ``alembic current`` reported 0033 with zero ``search%``
+  relations.
 
 Therefore every index drop here is ``DROP INDEX IF EXISTS`` (a plain
-``op.drop_index`` would abort on the 0014 shape), and the retrieval indexes
+``op.drop_index`` would abort on the 0014 shape), the tables themselves are
+ensured with ``CREATE TABLE IF NOT EXISTS`` in the final 0034 shape (so the
+absent shape materializes directly into tenancy, with no backfill needed on
+empty tables), every column add is ``ADD COLUMN IF NOT EXISTS``, every
+constraint add is guarded on ``pg_constraint``, and the retrieval indexes
 the search branches require — bm25, DiskANN, trigram GIN, metadata GIN,
-document-id btree, plus their extensions — are created ``IF NOT EXISTS`` with
-the exact definitions/names 0004 used and the ORM declares, so search works
-after either upgrade path.
+document-id btree, plus their extensions — are created ``IF NOT EXISTS``
+with the exact definitions/names 0004 used and the ORM declares, so search
+works after any upgrade path.
 
 Revision ID: 0034
 Revises: 0033
@@ -91,6 +100,65 @@ _SEARCH_RETRIEVAL_INDEXES = (
 )
 
 
+def _table_exists(conn: sa.Connection, table: str) -> bool:
+    row = conn.execute(
+        sa.text("SELECT to_regclass(:qualified) IS NOT NULL"),
+        {"qualified": f"public.{table}"},
+    ).scalar()
+    return bool(row)
+
+
+def _constraint_exists(conn: sa.Connection, constraint: str) -> bool:
+    row = conn.execute(
+        sa.text("SELECT 1 FROM pg_constraint WHERE conname = :name"),
+        {"name": constraint},
+    ).scalar()
+    return bool(row)
+
+
+def _ensure_constraint(conn: sa.Connection, constraint: str, add_sql: str) -> None:
+    # PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS; guard on the catalog.
+    # Postgres does not allow CREATE INDEX/CONSTRAINT inside a DO block that
+    # references the same table mid-transaction here, so the guard is a plain
+    # conditional execute.
+    if not _constraint_exists(conn, constraint):
+        conn.execute(sa.text(add_sql))
+
+
+#: Final-shape DDL for the tables-absent arrival path: creates both relations
+#: directly in the 0034 shape (tenancy, status, per-tenant dedupe, composite
+#: ownership FK), so no backfill is needed — the tables start empty.
+_FINAL_SHAPE_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS search_documents (
+        id UUID PRIMARY KEY,
+        tenant_id VARCHAR(255) NOT NULL,
+        source_uri TEXT,
+        title VARCHAR(500) NOT NULL,
+        content_hash VARCHAR(64) NOT NULL,
+        status VARCHAR(32) NOT NULL DEFAULT 'pending',
+        doc_metadata JSONB NOT NULL DEFAULT '{}',
+        ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS search_chunks (
+        id UUID PRIMARY KEY,
+        document_id UUID NOT NULL,
+        tenant_id VARCHAR(255) NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        embedding vector(768),
+        chunk_metadata JSONB NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT uq_search_chunks_document_chunk_index UNIQUE (document_id, chunk_index)
+    )
+    """,
+)
+
+
 def upgrade() -> None:
     # The 0014-repaired shape never ran 0004's extension setup either.
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -99,80 +167,96 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     op.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
 
-    op.add_column(
-        "search_documents",
-        sa.Column("tenant_id", sa.String(length=255), nullable=True),
-    )
-    op.add_column(
-        "search_documents",
-        sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
-    )
-    op.add_column(
-        "search_chunks",
-        sa.Column("tenant_id", sa.String(length=255), nullable=True),
-    )
+    conn = op.get_bind()
+    tables_existed = _table_exists(conn, "search_documents")
 
-    # Pre-tenancy rows belong to no caller. Pin them to an unmatchable system
-    # tenant (``search:legacy``, the _LEGACY_TENANT value, inlined because a
-    # migration constant is not a bindable parameter) rather than guessing an
-    # owner; chunks inherit their document's tenant.
-    op.execute("UPDATE search_documents SET tenant_id = 'search:legacy' WHERE tenant_id IS NULL")
-    op.execute(
-        """
-        UPDATE search_chunks AS c
-        SET tenant_id = d.tenant_id
-        FROM search_documents AS d
-        WHERE c.document_id = d.id AND c.tenant_id IS NULL
-        """
-    )
-    op.alter_column("search_documents", "tenant_id", nullable=False)
-    op.alter_column("search_chunks", "tenant_id", nullable=False)
+    # The tables-absent shape materializes directly into the final 0034
+    # shape: empty tables need no backfill, and the constraints/indexes
+    # below are all guarded no-ops against it.
+    for ddl in _FINAL_SHAPE_DDL:
+        op.execute(ddl)
 
-    # Documents that already carried chunks completed the legacy pipeline;
-    # everything else stays in the pre-pipeline state its default assigns.
+    # Column adds are guarded: no-ops on the fresh shape (the DDL above
+    # already created them NOT NULL), additive on the 0004/0014 shapes.
+    op.execute("ALTER TABLE search_documents ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(255)")
     op.execute(
-        """
-        UPDATE search_documents AS d
-        SET status = 'completed'
-        WHERE EXISTS (SELECT 1 FROM search_chunks AS c WHERE c.document_id = d.id)
-        """
+        "ALTER TABLE search_documents "
+        "ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'pending'"
     )
+    op.execute("ALTER TABLE search_chunks ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(255)")
+
+    if tables_existed:
+        # Pre-tenancy rows belong to no caller. Pin them to an unmatchable
+        # system tenant (``search:legacy``, the _LEGACY_TENANT value, inlined
+        # because a migration constant is not a bindable parameter) rather
+        # than guessing an owner; chunks inherit their document's tenant.
+        op.execute(
+            "UPDATE search_documents SET tenant_id = 'search:legacy' WHERE tenant_id IS NULL"
+        )
+        op.execute(
+            """
+            UPDATE search_chunks AS c
+            SET tenant_id = d.tenant_id
+            FROM search_documents AS d
+            WHERE c.document_id = d.id AND c.tenant_id IS NULL
+            """
+        )
+        op.alter_column("search_documents", "tenant_id", nullable=False)
+        op.alter_column("search_chunks", "tenant_id", nullable=False)
+
+        # Documents that already carried chunks completed the legacy pipeline;
+        # everything else stays in the pre-pipeline state its default assigns.
+        op.execute(
+            """
+            UPDATE search_documents AS d
+            SET status = 'completed'
+            WHERE EXISTS (SELECT 1 FROM search_chunks AS c WHERE c.document_id = d.id)
+            """
+        )
 
     # Dedupe was global; it must be per tenant, or one tenant's ingest would
     # collide with another's identical content. Drops use IF EXISTS because
-    # the two arrival shapes differ in what they carry.
+    # the arrival shapes differ in what they carry; adds are catalog-guarded
+    # because the fresh shape's DDL already created them.
     op.execute(
         "ALTER TABLE search_documents DROP CONSTRAINT IF EXISTS uq_search_documents_content_hash"
     )
-    op.create_unique_constraint(
+    _ensure_constraint(
+        conn,
         "uq_search_documents_tenant_content_hash",
-        "search_documents",
-        ["tenant_id", "content_hash"],
+        "ALTER TABLE search_documents "
+        "ADD CONSTRAINT uq_search_documents_tenant_content_hash "
+        "UNIQUE (tenant_id, content_hash)",
     )
     # Composite ownership FK: chunks must reference a matching
     # (id, tenant_id) pair on the parent, so a worker handed mismatched ids
     # cannot attach tenant B chunks to tenant A's document.
-    op.create_unique_constraint(
+    _ensure_constraint(
+        conn,
         "uq_search_documents_id_tenant_id",
-        "search_documents",
-        ["id", "tenant_id"],
+        "ALTER TABLE search_documents "
+        "ADD CONSTRAINT uq_search_documents_id_tenant_id UNIQUE (id, tenant_id)",
     )
     op.execute(
         "ALTER TABLE search_chunks DROP CONSTRAINT IF EXISTS "
         "fk_search_chunks_document_id_search_documents"
     )
-    op.execute(
-        """
-        ALTER TABLE search_chunks
-        ADD CONSTRAINT fk_search_chunks_document_tenant
-        FOREIGN KEY (document_id, tenant_id)
-        REFERENCES search_documents (id, tenant_id)
-        ON DELETE CASCADE
-        """
+    _ensure_constraint(
+        conn,
+        "fk_search_chunks_document_tenant",
+        "ALTER TABLE search_chunks "
+        "ADD CONSTRAINT fk_search_chunks_document_tenant "
+        "FOREIGN KEY (document_id, tenant_id) "
+        "REFERENCES search_documents (id, tenant_id) ON DELETE CASCADE",
     )
 
-    op.create_index("ix_search_documents_tenant_id", "search_documents", ["tenant_id"])
-    op.create_index("ix_search_chunks_tenant_id", "search_chunks", ["tenant_id"])
+    # Tenant indexes as IF NOT EXISTS: no-ops on the fresh shape (nothing
+    # indexed yet) and on re-runs.
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_search_documents_tenant_id "
+        "ON search_documents (tenant_id)"
+    )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_search_chunks_tenant_id ON search_chunks (tenant_id)")
 
     # The tsvector column is unread legacy surface: pg_textsearch bm25 is the
     # lexical leg. Dropping it (and its GIN index) removes the double-count

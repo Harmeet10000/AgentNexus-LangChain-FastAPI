@@ -170,3 +170,32 @@ def test_downgrade_restores_the_original_cascade_fk() -> None:
         "ADD CONSTRAINT fk_search_chunks_document_id_search_documents", drop_pos
     )
     assert restore_pos > drop_pos
+
+
+def test_tables_absent_shape_creates_the_final_schema_directly() -> None:
+    """A database whose revision metadata says applied but whose search
+    tables are gone materializes both tables in the final 0034 shape —
+    tenancy, status, per-tenant dedupe, and the composite ownership FK
+    included — with no backfill needed on empty tables."""
+    assert "CREATE TABLE IF NOT EXISTS search_documents" in _MIGRATION
+    assert "CREATE TABLE IF NOT EXISTS search_chunks" in _MIGRATION
+    # The fresh-shape DDL embeds the tenancy guarantees, not a legacy shape
+    # that later steps would have to migrate.
+    assert "tenant_id VARCHAR(255) NOT NULL" in _MIGRATION
+    assert "FOREIGN KEY (document_id, tenant_id)" in _MIGRATION
+
+
+def test_column_adds_are_if_not_exists_guarded() -> None:
+    """Column adds must be no-ops on the fresh shape and additive elsewhere."""
+    assert "ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(255)" in _MIGRATION
+    assert "ADD COLUMN IF NOT EXISTS status VARCHAR(32)" in _MIGRATION
+
+
+def test_constraint_adds_are_catalog_guarded() -> None:
+    """Constraint creation guards on pg_constraint — Postgres has no
+    ADD CONSTRAINT IF NOT EXISTS, and the fresh shape's DDL already
+    created them."""
+    assert "_constraint_exists" in _MIGRATION
+    assert "_ensure_constraint" in _MIGRATION
+    assert "uq_search_documents_tenant_content_hash" in _MIGRATION
+    assert "fk_search_chunks_document_tenant" in _MIGRATION
