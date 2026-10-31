@@ -1155,3 +1155,43 @@ async def test_failed_edge_write_fails_the_write_phase() -> None:
     )
     assert result.success is False
     assert result.relationships.status is GraphRelationshipsStatus.FAILED
+
+
+async def test_provider_failure_fails_the_write_phase_for_retry() -> None:
+    """A relationship provider outage must not complete the checkpoint.
+
+    The write results are empty when the provider fails; only the FAILED
+    relationship state carries the truth, so the phase success must consult
+    it — otherwise later attempts skip the missing edges forever.
+    """
+    import langextract as lx
+
+    from app.extraction.langextract.relationships import RelationshipPassResult
+
+    extraction = lx.data.Extraction(
+        extraction_class="payment",
+        extraction_text="Payment is due.",
+        char_interval=lx.data.CharInterval(start_pos=0, end_pos=15),
+    )
+    outcome = ExtractionSucceeded(
+        documents=(lx.data.AnnotatedDocument(text="Payment is due.", extractions=[extraction]),)
+    )
+    segments = document_ingest._extract_clause_segments(outcome, document_id="doc-1")
+    result = await _write_extracted_clause_episodes(
+        segments=segments,
+        relationships=[],
+        edge_spans={},
+        relationship_pass=RelationshipPassResult(
+            ran=True,
+            provider_error="provider_unavailable",
+            budget=ExtractionSucceeded(documents=()).budget,
+        ),
+        graph_writer=_SucceedingWriter(),
+        idempotency=_Idempotency(),
+        document_id="doc-1",
+        user_id="tenant-1",
+        jurisdiction="India",
+        document_type="contract",
+    )
+    assert result.success is False
+    assert result.relationships.status is GraphRelationshipsStatus.FAILED
