@@ -62,6 +62,7 @@ from app.features.documents.retrieval.graph import (
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 from app.retrieval.edge_expansion import (
+    EdgeContextBlock,
     EdgeExpansion,
     EdgeSeedChunk,
     expand_along_edges,
@@ -983,6 +984,7 @@ class DocumentQueryService:
                 return Failure(fused_result.failure())
             fused, lookup = fused_result.unwrap()
             rows = lookup_to_rows(fused, lookup)
+            rows_by_chunk_id = {str(row["chunk_id"]): row for row in rows}
             retrieved_chunks = [_row_to_chunk(row) for row in rows]
             reranked = await get_shared_reranker().rerank(
                 plan.rewritten_query, retrieved_chunks, limit=5
@@ -1006,22 +1008,18 @@ class DocumentQueryService:
                         contract_index=payload.contract_index,
                         reranked=reranked,
                     )
+                    resolved_edges = _resolved_edge_blocks(edge_expansions, rows_by_chunk_id)
                     answer = await _generate_answer(
                         generator_llm=generator_llm,
                         query=plan.rewritten_query,
                         reranked=reranked,
-                        grounding_edges=[
-                            block.text
-                            for expansion in edge_expansions
-                            for block in expansion.blocks
-                        ],
+                        grounding_edges=[block.text for block, _ in resolved_edges],
                     )
                 break
 
         evidence_policy: EvidencePolicy = (
             "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
         )
-        rows_by_chunk_id = {str(row["chunk_id"]): row for row in rows}
         result_document_ids = {str(row["document_id"]) for row in rows}
         graph_document_ids = {
             str(row["document_id"]) for row in rows if bool(row.get("graphiti_verified", False))
@@ -1030,7 +1028,7 @@ class DocumentQueryService:
             _citation_response(citation, rows_by_chunk_id.get(citation.chunk_id))
             for citation in answer.citations
         ]
-        citations.extend(_edge_citations(edge_expansions, rows_by_chunk_id))
+        citations.extend(_edge_citations(resolved_edges))
         response = UnifiedAskResponse(
             answer=answer.answer,
             citations=citations,
@@ -1355,9 +1353,33 @@ def _chunk_clause_ids(chunk: RetrievedChunk) -> tuple[str, ...]:
     return ()
 
 
-def _edge_citations(
+def _resolved_edge_blocks(
     expansions: Sequence[EdgeExpansion],
     rows_by_chunk_id: Mapping[str, dict[str, object]],
+) -> list[tuple[EdgeContextBlock, dict[str, object]]]:
+    """Keep only expansion blocks whose grounded span resolves to a hydrated
+    passage — the same resolution the citations use, so the generator never
+    sees a relationship it could not cite against a retrieved chunk."""
+    rows_by_document: dict[str, list[dict[str, object]]] = {}
+    for row in rows_by_chunk_id.values():
+        rows_by_document.setdefault(str(row.get("document_id")), []).append(row)
+    resolved: list[tuple[EdgeContextBlock, dict[str, object]]] = []
+    for expansion in expansions:
+        for block in expansion.blocks:
+            if block.char_start is None or block.char_end is None:
+                continue
+            supporting = _row_containing_span(
+                rows_by_document.get(expansion.document_id, ()),
+                char_start=block.char_start,
+                char_end=block.char_end,
+            )
+            if supporting is not None:
+                resolved.append((block, supporting))
+    return resolved
+
+
+def _edge_citations(
+    resolved: Sequence[tuple[EdgeContextBlock, dict[str, object]]],
 ) -> list[LegalCitationResponse]:
     """Server-derived citations for edge-grounded expansion blocks.
 
@@ -1375,45 +1397,30 @@ def _edge_citations(
     still reached the generator, but there is no verified passage to point
     at.
     """
-    rows_by_document: dict[str, list[dict[str, object]]] = {}
-    for row in rows_by_chunk_id.values():
-        rows_by_document.setdefault(str(row.get("document_id")), []).append(row)
     citations: list[LegalCitationResponse] = []
     seen: set[tuple[str, str]] = set()
-    for expansion in expansions:
-        for block in expansion.blocks:
-            if block.char_start is None or block.char_end is None:
-                continue
-            supporting = _row_containing_span(
-                rows_by_document.get(expansion.document_id, ()),
-                char_start=block.char_start,
-                char_end=block.char_end,
+    for block, supporting in resolved:
+        chunk_id = str(supporting.get("chunk_id"))
+        span = f"chars {block.char_start}-{block.char_end}"
+        claim = (
+            f"Grounded by {block.relationship.upper()} edge "
+            f"'{block.from_entity}' -> '{block.to_entity}' at {span} "
+            f"(clause {block.clause_id}, edge {block.edge_id})"
+        )
+        key = (chunk_id, claim)
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            _citation_response(
+                Citation(
+                    chunk_id=chunk_id,
+                    clause_type=str(supporting.get("clause_type") or "other"),
+                    claim=claim,
+                ),
+                supporting,
             )
-            # Fail closed: a grounded span that resolves to no hydrated
-            # passage earns no citation.
-            if supporting is None:
-                continue
-            chunk_id = str(supporting.get("chunk_id"))
-            span = f"chars {block.char_start}-{block.char_end}"
-            claim = (
-                f"Grounded by {block.relationship.upper()} edge "
-                f"'{block.from_entity}' -> '{block.to_entity}' at {span} "
-                f"(clause {block.clause_id}, edge {block.edge_id})"
-            )
-            key = (chunk_id, claim)
-            if key in seen:
-                continue
-            seen.add(key)
-            citations.append(
-                _citation_response(
-                    Citation(
-                        chunk_id=chunk_id,
-                        clause_type=str(supporting.get("clause_type") or "other"),
-                        claim=claim,
-                    ),
-                    supporting,
-                )
-            )
+        )
     return citations
 
 
