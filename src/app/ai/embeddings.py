@@ -1,4 +1,4 @@
-"""The one embedding path: one client per process, one cache, task type on both sides.
+"""The one embedding path: one client per process, one cache, task role on both sides.
 
 Six paths existed before this module. Four of them are named by task B1; two are not:
 
@@ -36,6 +36,16 @@ vector and normalised the value it returned, so a cache miss produced a width-co
 and a cache hit produced the raw one. That only diverges when the provider returns an unexpected
 width — but that is exactly the condition A3's guard exists for, and the two paths disagreeing
 made it depend on cache warmth.
+
+**The task role has two provider surfaces, and they are not interchangeable.** The
+``gemini-embedding-001`` generation takes ``task_type`` as a request field. The
+``gemini-embedding-2`` generation accepts the field, answers 200, and silently ignores it —
+verified here as bit-identical vectors for ``RETRIEVAL_QUERY``, ``RETRIEVAL_DOCUMENT``, and
+unset. Its contract is an instruction prefix in the text (``task: search result | query: ...``
+for queries, ``title: none | text: ...`` for documents). Sending ``task_type`` and no prefix is
+therefore the *silent* failure this module was built to prevent: no error, no log line, just
+the two roles sharing one projection again. ``_provider_input`` selects the surface by model
+family, and the cache key digests the resulting payload rather than the caller's string.
 """
 
 from __future__ import annotations
@@ -60,9 +70,11 @@ if TYPE_CHECKING:
 class EmbeddingTaskType(StrEnum):
     """Which side of the asymmetry a caller is on.
 
-    The values are the provider's own task-type strings. They are spelled here once so no
-    caller repeats a string literal the provider validates server-side — a typo in one
-    would surface as a provider error at ingestion time rather than a name error at import.
+    On the ``gemini-embedding-001`` generation these values are the provider's own task-type
+    strings. On ``gemini-embedding-2`` they select the instruction template, because that
+    generation ignores the field. Either way the role is spelled once here rather than as a
+    literal at each call site, so a typo is a name error at import rather than a silent
+    symmetry regression at ingestion time.
     """
 
     QUERY = "RETRIEVAL_QUERY"
@@ -81,7 +93,22 @@ DOCUMENT_BATCH_SIZE = 100
 #: Cache namespace. Deliberately distinct from the two prefixes it replaces, so entries written
 #: by the text-only keying are orphaned rather than read back under the new contract. They
 #: expire on their own within `CACHE_TTL_SECONDS`; nothing needs to delete them.
-_CACHE_NAMESPACE = "embedding:v1"
+#:
+#: Bumped to ``v2`` with the instruction-prompt contract below: vectors cached from the
+#: unprefixed text are the *same model at the same width* as the prefixed ones, so the key
+#: material alone would not separate them — and mixing the two spaces is silent.
+_CACHE_NAMESPACE = "embedding:v2"
+
+#: Marker for the model family that puts the task in the text instead of in ``task_type``.
+#: Substring rather than a set of ids: ``gemini-embedding-2``, its ``-preview`` predecessor,
+#: and any ``models/``-prefixed spelling are one contract with one mechanism.
+_V2_MODEL_MARKER = "gemini-embedding-2"
+
+#: Google's documented asymmetric-retrieval templates. Only the query side names a task; the
+#: document side is a title-plus-text frame. We never carry titles, so ``title: none`` is the
+#: honest document form rather than a placeholder.
+_QUERY_INSTRUCTION = "task: search result | query: {content}"
+_DOCUMENT_INSTRUCTION = "title: none | text: {content}"
 
 
 @lru_cache(maxsize=1)
@@ -135,8 +162,45 @@ def _require_task_type(task_type: EmbeddingTaskType | str) -> EmbeddingTaskType:
         ) from exc
 
 
+def _uses_instruction_prompts(model: str) -> bool:
+    """Whether this model expects the task in the text rather than in ``task_type``.
+
+    ``gemini-embedding-001`` honours ``task_type``. The ``gemini-embedding-2`` family does
+    not: it silently ignores the field and produces identical vectors for both roles, so the
+    asymmetry the enum exists for would be lost with no error. Google's contract for that
+    family is an instruction prefix, documented per use case.
+    """
+    return _V2_MODEL_MARKER in model
+
+
+def _provider_input(text: str, task_type: EmbeddingTaskType, model: str) -> str:
+    """Return the exact string the provider must embed for this role.
+
+    For ``task_type`` models this is the caller's text unchanged. For instruction-prompt
+    models it is the documented asymmetric-retrieval template — deliberately not a generic
+    "Represent this..." string, because the family was trained on these exact frames.
+
+    Raises:
+        ValidationException: a task type was added to the enum without a v2 template, so the
+            alternative is silently embedding the query side as a document.
+    """
+    if not _uses_instruction_prompts(model):
+        return text
+    if task_type is EmbeddingTaskType.QUERY:
+        return _QUERY_INSTRUCTION.format(content=text)
+    if task_type is EmbeddingTaskType.DOCUMENT:
+        return _DOCUMENT_INSTRUCTION.format(content=text)
+    msg = f"No instruction template for task type {task_type.value!r} on {model}"
+    raise ValidationException(detail=msg, data={"model": model, "task_type": task_type.value})
+
+
 def _cache_key(text: str, *, model: str, task_type: EmbeddingTaskType, dimension: int) -> str:
-    """Digest the text together with everything that changes what the vector means.
+    """Digest the payload together with everything that changes what the vector means.
+
+    The ``text`` argument is the provider payload (``_provider_input``), not necessarily the
+    caller's string: for instruction-prompt models the role lives in the text, so keying the
+    raw string would let one role serve the other. The ``task_type`` remains in the material
+    as well — it costs nothing and keeps keys stable if a model family changes surfaces.
 
     The NUL separators are not decoration. Concatenating the parts unseparated would let two
     different triples produce one digest — a model named ``ab`` with task ``c`` and a model
@@ -178,6 +242,10 @@ async def embed_text(
     one-element batch: a batch of one costs the same request and returns a nested result the
     caller has to unwrap, and B1 asks for a single-text form that is genuinely one.
 
+    The text handed to the provider is ``_provider_input``'s answer, not necessarily the
+    caller's string: instruction-prompt models need the role in the payload, and the cache
+    key digests that exact payload so the two spaces can never be read for one another.
+
     Args:
         text: The string to embed.
         task_type: Which side of the query/document asymmetry this call is on. Required.
@@ -190,9 +258,11 @@ async def embed_text(
     resolved: EmbeddingTaskType = _require_task_type(task_type)
     client: GoogleGenerativeAIEmbeddings = get_embedding_client()
     settings = get_settings()
+    model: str = settings.GEMINI_EMBEDDING_MODEL
+    provider_text: str = _provider_input(text, resolved, model)
     key: str = _cache_key(
-        text,
-        model=settings.GEMINI_EMBEDDING_MODEL,
+        provider_text,
+        model=model,
         task_type=resolved,
         dimension=settings.EMBEDDING_DIMENSION,
     )
@@ -206,9 +276,12 @@ async def embed_text(
             # written by something else into a warning rather than a wrong-width vector.
             return normalize_embedding(from_json_float_list(_decode_cached(cached)))
 
-    vector: list[float] = normalize_embedding(
-        await client.aembed_query(text, task_type=resolved.value)
-    )
+    if _uses_instruction_prompts(model):
+        vector: list[float] = normalize_embedding(await client.aembed_query(provider_text))
+    else:
+        vector = normalize_embedding(
+            await client.aembed_query(provider_text, task_type=resolved.value)
+        )
     if redis is not None:
         await redis.setex(key, CACHE_TTL_SECONDS, to_float_list_str(vector))
     return vector
@@ -240,14 +313,16 @@ async def embed_texts(
 
     client: GoogleGenerativeAIEmbeddings = get_embedding_client()
     settings = get_settings()
+    model: str = settings.GEMINI_EMBEDDING_MODEL
+    provider_texts: list[str] = [_provider_input(text, resolved, model) for text in texts]
     keys: list[str] = [
         _cache_key(
-            text,
-            model=settings.GEMINI_EMBEDDING_MODEL,
+            provider_text,
+            model=model,
             task_type=resolved,
             dimension=settings.EMBEDDING_DIMENSION,
         )
-        for text in texts
+        for provider_text in provider_texts
     ]
 
     results: dict[int, list[float]] = {}
@@ -259,11 +334,18 @@ async def embed_texts(
 
     missing: list[int] = [index for index in range(len(texts)) if index not in results]
     if missing:
-        fresh: list[list[float]] = await client.aembed_documents(
-            [texts[index] for index in missing],
-            task_type=resolved.value,
-            batch_size=DOCUMENT_BATCH_SIZE,
-        )
+        provider_batch: list[str] = [provider_texts[index] for index in missing]
+        if _uses_instruction_prompts(model):
+            fresh: list[list[float]] = await client.aembed_documents(
+                provider_batch,
+                batch_size=DOCUMENT_BATCH_SIZE,
+            )
+        else:
+            fresh = await client.aembed_documents(
+                provider_batch,
+                task_type=resolved.value,
+                batch_size=DOCUMENT_BATCH_SIZE,
+            )
         if len(fresh) != len(missing):
             # Without this the `zip` below would pair vectors with the wrong texts from the
             # first gap onward, and every vector after it would be silently misattributed —

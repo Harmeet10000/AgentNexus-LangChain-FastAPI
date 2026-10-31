@@ -27,6 +27,7 @@ would have caught that, and it is the reason the two tasks are one commit.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -111,6 +112,43 @@ def _cold_client_cache():
 def spy(monkeypatch) -> type[_ClientSpy]:
     monkeypatch.setattr(embeddings_module, "GoogleGenerativeAIEmbeddings", _ClientSpy)
     return _ClientSpy
+
+
+def _settings_for(model: str) -> SimpleNamespace:
+    """A settings stand-in that differs only in the embedding model.
+
+    ``Settings`` is frozen, so the model family cannot be switched by assignment; the module
+    reads ``get_settings()`` per call, which makes replacing that accessor the seam.
+    """
+    base = get_settings()
+    return SimpleNamespace(
+        GEMINI_EMBEDDING_MODEL=model,
+        GEMINI_API_KEY=base.GEMINI_API_KEY,
+        EMBEDDING_DIMENSION=base.EMBEDDING_DIMENSION,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _task_type_model(monkeypatch) -> None:
+    """Run the original B1/B2 assertions on the generation that still takes ``task_type``.
+
+    Their subject is the task-type plumbing, not the v2 instruction format; defaulting the
+    file to v1 keeps each test about one provider contract.
+    """
+    monkeypatch.setattr(
+        embeddings_module,
+        "get_settings",
+        lambda: _settings_for("gemini-embedding-001"),
+    )
+
+
+@pytest.fixture
+def v2_model(monkeypatch) -> None:
+    monkeypatch.setattr(
+        embeddings_module,
+        "get_settings",
+        lambda: _settings_for("gemini-embedding-2-preview"),
+    )
 
 
 @pytest.fixture
@@ -247,6 +285,40 @@ async def test_a_valid_task_type_string_is_coerced(spy) -> None:
 
 
 # ---------------------------------------------------------------------------
+# gemini-embedding-2 — the task lives in the text, not in task_type
+# ---------------------------------------------------------------------------
+
+
+async def test_v2_query_carries_the_documented_instruction_prefix(spy, v2_model) -> None:
+    """``task_type`` is accepted-and-ignored by this generation; the prefix is the contract."""
+    await embed_text(_TEXT, task_type=EmbeddingTaskType.QUERY)
+
+    client = get_embedding_client()
+    assert client.query_calls == [(f"task: search result | query: {_TEXT}", None)]
+
+
+async def test_v2_document_uses_the_documented_title_text_frame(spy, v2_model) -> None:
+    await embed_texts([_TEXT], task_type=EmbeddingTaskType.DOCUMENT)
+
+    client = get_embedding_client()
+    assert client.document_calls[0][0] == [f"title: none | text: {_TEXT}"]
+    assert client.document_calls[0][1] is None, "v2 ignores task_type; sending it hides the bug"
+
+
+async def test_v2_query_and_document_use_different_payloads_and_cache_entries(
+    spy, v2_model, shared_store
+) -> None:
+    redis = _client(shared_store)
+
+    await embed_text(_TEXT, task_type=EmbeddingTaskType.QUERY, redis=redis)
+    await embed_text(_TEXT, task_type=EmbeddingTaskType.DOCUMENT, redis=redis)
+
+    client = get_embedding_client()
+    assert client.query_calls[0][0] != client.query_calls[1][0]
+    assert len(await redis.keys("embedding:v2:*")) == 2
+
+
+# ---------------------------------------------------------------------------
 # B2 — one cache, keyed by everything that changes what the vector means
 # ---------------------------------------------------------------------------
 
@@ -265,7 +337,7 @@ async def test_query_and_document_vectors_for_one_text_occupy_distinct_cache_ent
     await embed_text(_TEXT, task_type=EmbeddingTaskType.QUERY, redis=redis)
     await embed_text(_TEXT, task_type=EmbeddingTaskType.DOCUMENT, redis=redis)
 
-    keys = sorted(await redis.keys("embedding:v1:*"))
+    keys = sorted(await redis.keys("embedding:v2:*"))
     assert len(keys) == 2, "one text embedded two ways must not share a cache entry"
 
     client = get_embedding_client()
@@ -343,7 +415,7 @@ async def test_the_vector_is_normalised_before_it_is_written_not_only_on_return(
 
     on_miss = await embed_text(_TEXT, task_type=EmbeddingTaskType.QUERY, redis=redis)
 
-    key = next(iter(await redis.keys("embedding:v1:*")))
+    key = next(iter(await redis.keys("embedding:v2:*")))
     stored = from_json_float_list(str(await redis.get(key)))
     assert len(stored) == _DIMENSION, "the raw provider width was written to the cache"
 
@@ -462,5 +534,5 @@ def test_the_namespace_is_distinct_from_the_prefixes_it_replaces() -> None:
     """
     key = _cache_key(_TEXT, model="m", task_type=EmbeddingTaskType.QUERY, dimension=768)
 
-    assert key.startswith("embedding:v1:")
+    assert key.startswith("embedding:v2:")
     assert not key.startswith(("kb:embedding:", "documents:embedding:"))
