@@ -501,125 +501,6 @@ how do i use ontology in OKF
 The Intuition: You look at operating system primitives and concurrency control. You leverage Copy-On-Write (COW) semantics, Hard Links in Linux filesystems, or Write-Ahead Logs (WALs) with MVCC (Multi-Version Concurrency Control). You realize that a "snapshot" isn't a physical copy of files; it's a frozen point-in-time logical view created by redirecting pointer mutations to a new delta file while the background thread safely flushes the immutable parts to disk.
 
 
-src/app/
-├── api/                                  # composition/root transport registration
-│   └── v1/
-│       ├── router.py
-│       └── dependencies.py               # only API-wide dependencies
-├── config/
-├── connections/                          # client construction/access, no feature policy
-├── lifecycle/
-├── middleware/
-├── features/
-│   ├── auth/
-│   │   ├── api/
-│   │   │   ├── http/
-│   │   │   │   ├── router.py
-│   │   │   │   ├── dependencies.py
-│   │   │   │   └── dto.py
-│   │   │   └── websocket/
-│   │   │       └── security.py
-│   │   ├── application/
-│   │   │   ├── commands/                  # register, login, revoke, reset
-│   │   │   ├── queries/                   # current user, sessions
-│   │   │   └── ports/                     # only real substitution seams
-│   │   ├── domain/
-│   │   │   ├── errors.py
-│   │   │   ├── user.py
-│   │   │   ├── session.py
-│   │   │   └── policies.py
-│   │   └── adapters/
-│   │       ├── persistence/
-│   │       │   └── mongodb/
-│   │       │       ├── user_repository.py
-│   │       │       └── refresh_token_repository.py
-│   │       └── identity/
-│   │           └── jwt/
-│   │               ├── codec.py
-│   │               └── password_hashing.py
-│   ├── documents/
-│   │   ├── api/
-│   │   │   └── http/
-│   │   │       ├── router.py
-│   │   │       ├── dependencies.py
-│   │   │       └── dto.py
-│   │   ├── application/
-│   │   │   ├── commands/
-│   │   │   │   ├── upload_document.py
-│   │   │   │   └── reindex_document.py
-│   │   │   ├── queries/
-│   │   │   │   ├── search_documents.py
-│   │   │   │   └── answer_from_documents.py
-│   │   │   └── ports/
-│   │   ├── domain/
-│   │   │   ├── errors.py
-│   │   │   ├── document.py
-│   │   │   ├── chunk.py
-│   │   │   └── retrieval_policy.py
-│   │   ├── ingestion/
-│   │   │   ├── workflow.py
-│   │   │   ├── parsing/
-│   │   │   ├── extraction/
-│   │   │   ├── chunking/
-│   │   │   ├── enrichment/
-│   │   │   └── adapters/
-│   │   │       ├── docling/
-│   │   │       ├── langextract/
-│   │   │       └── graphiti/
-│   │   ├── retrieval/
-│   │   │   ├── workflow.py
-│   │   │   ├── candidates/
-│   │   │   │   ├── vector.py
-│   │   │   │   ├── bm25.py
-│   │   │   │   └── trigram.py
-│   │   │   ├── fusion/
-│   │   │   │   └── reciprocal_rank_fusion.py
-│   │   │   ├── reranking/
-│   │   │   └── adapters/
-│   │   │       ├── postgres/
-│   │   │       │   ├── vector_search.py
-│   │   │       │   └── bm25_search.py
-│   │   │       └── embeddings/
-│   │   └── persistence/
-│   │       └── postgres/
-│   │           ├── document_repository.py
-│   │           └── chunk_repository.py
-│   ├── ingestion/                         # only if independently owned after audit
-│   │   └── ...                            # otherwise fold workflow into documents/
-│   ├── agent_saul/
-│   │   ├── api/
-│   │   │   ├── http/
-│   │   │   └── websocket/
-│   │   ├── application/
-│   │   │   ├── sessions/
-│   │   │   └── runs/
-│   │   ├── domain/
-│   │   └── adapters/
-│   └── billing/
-│       ├── credits/
-│       ├── invoices/
-│       ├── payments/
-│       └── subscriptions/
-├── shared/
-│   ├── result/
-│   ├── observability/
-│   └── rate_limit/
-│       ├── application/
-│       └── adapters/
-│           └── redis/
-└── examples/
-tests/
-├── unit/features/documents/
-│   ├── ingestion/
-│   └── retrieval/
-├── integration/features/documents/
-│   ├── adapters/postgres/
-│   └── workflows/
-├── integration/workflows/                # cross-feature flows
-├── contract/adapters/                     # shared adapter contracts, if needed
-└── lifecycle/
-
-
 8/10 security person who knows 10/10 shit about browsers is more danerous than a 10/10 security person who knows 6/10 about browsers
 Previously, high-level hacking required deep historical knowledge and expertise. Now, because models can be forced into loops of iterative testing, individuals can effectively "bang their head against the wall" until they find vulnerabilities. They note that even benign inquiries can lead to dangerous outcomes if the model provides deep insights into obscure sub-dependencies.
 
@@ -643,8 +524,8 @@ bit packing, texture atlasting, delta encoding, deduplication
 # Upgrades
 1. Wont do it - DSPy shifts you from writing prompts to compiling them. Instead of manually guessing the best words for your LAWYER_SYSTEM_PROMPT, you define the input/output signature, give DSPy a few examples of good and bad answers, and it algorithmically finds the optimal prompt.    ABANDONED
 2. add celery for offloading ingestion to a queue.   DONE
-3. make ingestion pipeline inspired from uber   
-4. add pageindex for vectorless RAG, markitdown
+3. make ingestion pipeline inspired from uber    DONE
+4. add pageindex for vectorless RAG, markitdown  ABANDONED
 5. (after writing code) When using AsyncPostgresSaver (or any checkpointer) for persistence, LangGraph serializes and saves the entire state blob at the end of every single node execution (super-step). If your messages array contains large document extractions or base64 PDFs, your state blob will rapidly swell to megabytes. Multiplied by 1000s of concurrent sessions, your PostgreSQL database will choke on I/O operations, and your latency will spike from 500ms to 5 seconds per step just writing to the DB.
 
     The Insider Solution: The "Pointer State" Pattern.

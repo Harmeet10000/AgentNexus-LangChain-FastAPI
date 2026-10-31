@@ -14,7 +14,9 @@ Design decisions:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import traceback
 from asyncio import TimeoutError as AsyncTimeoutError
 from datetime import UTC, datetime
@@ -22,10 +24,15 @@ from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid5
 
 from graphiti_core.errors import GraphitiError
-from graphiti_core.nodes import EpisodeType
+from graphiti_core.nodes import EpisodeType, EpisodicNode
 from neo4j.exceptions import Neo4jError
 
+# The closed relationship vocabulary is owned by the pass-2 producer. Reads
+# parse persisted edge episodes against the same enum so an episode whose
+# relationship is not in the vocabulary fails closed (dropped, never typed).
+from app.features.agent_saul.domain.state import RelationshipType
 from app.observability.logging import logger
+from app.retrieval.edge_expansion import LegalEdgeRecord
 
 from .grouping import (
     GraphitiDocumentScope,
@@ -35,6 +42,8 @@ from .grouping import (
 from .schemas import GraphitiAvailability, GraphitiSearchOutcome, GraphitiSearchResult
 
 _GRAPHITI_TRANSPORT_ERRORS = (GraphitiError, Neo4jError, AsyncTimeoutError, OSError)
+# Trailing "Grounding: chars a-b." written by LegalEdgeInput.to_episode_body().
+_EDGE_GROUNDING_PATTERN = re.compile(r"Grounding: chars (\d+)-(\d+)\.$")
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -73,6 +82,28 @@ class BoundGraphitiService:
 
     async def write_relationship_edge(self, edge: LegalEdgeInput) -> str:
         return await write_relationship_edge(self._graphiti, edge)
+
+    async def fetch_relationship_edges(
+        self,
+        query: str,
+        *,
+        allowed_doc_ids: tuple[str, ...] = (),
+        tenant_id: str | None = None,
+        contract_index: int | None = None,
+        document_versions: Sequence[tuple[str, int, str | None]] = (),
+        document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+        num_results: int = 32,
+    ) -> tuple[LegalEdgeRecord, ...]:
+        return await fetch_relationship_edges(
+            self._graphiti,
+            query,
+            allowed_doc_ids=allowed_doc_ids,
+            tenant_id=tenant_id,
+            contract_index=contract_index,
+            document_versions=document_versions,
+            document_contracts=document_contracts,
+            num_results=num_results,
+        )
 
     async def search_for_risk_context(
         self,
@@ -245,6 +276,7 @@ async def write_relationship_edge(
     episode_name = (
         f"edge:{edge.tenant_id}:{edge.doc_id}:v{edge.document_version}:c{edge.contract_index}:"
         f"{edge.clause_id}:{edge.from_entity}:{edge.relationship}:{edge.to_entity}"
+        f":{edge.edge_id or ''}"
     )
     episode_uuid = str(uuid5(NAMESPACE_URL, f"agentnexus:{episode_name}"))
     source_description = json.dumps(
@@ -255,6 +287,14 @@ async def write_relationship_edge(
             "user_id": edge.user_id,
             "thread_id": edge.thread_id,
             "confidence": edge.confidence,
+            "edge_id": edge.edge_id,
+            # Structured triple: the reader never re-parses prose — entity
+            # names containing periods/abbreviations broke sentence splitting.
+            "from_entity": edge.from_entity,
+            "relationship": edge.relationship,
+            "to_entity": edge.to_entity,
+            "contract_index": edge.contract_index,
+            "document_version": edge.document_version,
         }
     )
     logger.bind(
@@ -535,7 +575,7 @@ def _scoped_group_ids(
     *,
     tenant_id: str | None,
     contract_index: int | None,
-    document_versions: Sequence[tuple[str, int]],
+    document_versions: Sequence[tuple[str, int]] | Sequence[tuple[str, int, str | None]],
     document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
 ) -> list[str]:
     """Build exact authorized tenant/document/version/contract partitions.
@@ -579,6 +619,230 @@ def _scoped_group_ids(
             )
         )
     return fanout_graphiti_group_ids(scopes)
+
+
+# ---------------------------------------------------------------------------
+# READ: typed relationship edges (first retrieval consumer)
+# ---------------------------------------------------------------------------
+
+
+_EPISODE_PAGE_SIZE = 64
+_MAX_EPISODE_PAGES = 8
+_EDGE_FETCH_TIMEOUT_SECONDS = 5.0
+
+
+def _is_relationship_episode_source(raw: Any) -> bool:
+    """Cheap structural pre-check: the producer typed this episode as an edge."""
+    source_desc: str = getattr(raw, "source_description", "") or ""
+    try:
+        meta = json.loads(source_desc)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(meta, dict) and meta.get("type") == "relationship_edge"
+
+
+async def _read_episodes_by_group(
+    driver: Any,
+    *,
+    group_ids: list[str],
+    limit: int,
+    uuid_cursor: str | None = None,
+) -> list[Any]:
+    """Read one page of the groups' episodes (uuid-ordered DESC, not time-ordered)."""
+    return await EpisodicNode.get_by_group_ids(
+        driver,
+        group_ids=group_ids,
+        limit=limit,
+        uuid_cursor=uuid_cursor,
+    )
+
+
+async def fetch_relationship_edges(
+    graphiti: Graphiti,
+    query: str,
+    *,
+    allowed_doc_ids: tuple[str, ...] = (),
+    tenant_id: str | None = None,
+    contract_index: int | None = None,
+    document_versions: Sequence[tuple[str, int, str | None]] = (),
+    document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
+    num_results: int = 32,
+) -> tuple[LegalEdgeRecord, ...]:
+    """Read typed relationship edges scoped to the authorized graph partitions.
+
+    Same authorization scaffold as ``search_for_risk_context``: an empty
+    allowlist is a fail-closed boundary, a scope without resolvable groups
+    reads nothing, and every returned record was persisted by the pass-2
+    producer (``source_description`` ``type == "relationship_edge"``).  The
+    read is identity-scoped, not query-ranked: ``Graphiti.search`` returns
+    ``EntityEdge`` facts (no episode body or source description), so the
+    producer's own episodes are read directly by server-derived group.
+    Expansion matching is entity/clause-based, so query relevance is not
+    load-bearing here.  A transport failure degrades to an empty tuple —
+    expansion is additive and must never turn a healthy ask into a failed
+    one.
+    """
+    if not allowed_doc_ids:
+        return ()
+    group_ids = _scoped_group_ids(
+        allowed_doc_ids,
+        tenant_id=tenant_id,
+        contract_index=contract_index,
+        document_versions=document_versions,
+        document_contracts=document_contracts,
+    )
+    if not group_ids:
+        return ()
+
+    logger.bind(
+        service="graphiti",
+        query=query[:80],
+        group_ids=group_ids,
+    ).info("Fetching typed relationship edges")
+
+    # graphiti-core stores the connection as ``driver`` (set in __init__);
+    # reading the constructor parameter name instead returns None on the
+    # real client and the fetch silently exits before any episode read.
+    driver = getattr(graphiti, "driver", None)
+    if driver is None:
+        return ()
+    try:
+        # Page through the group's episodes until the edge cap is met: chunk
+        # and clause episodes share these groups, so a fixed first-page limit
+        # would let non-edge episodes crowd stored relationships out of the
+        # answer context on chunk-heavy documents.  The whole paging loop is
+        # time-bounded — this read is additive context on a synchronous ask
+        # path and must never dominate its latency.
+        raw_results: list[Any] = []
+        cursor: str | None = None
+        async with asyncio.timeout(_EDGE_FETCH_TIMEOUT_SECONDS):
+            for _page in range(_MAX_EPISODE_PAGES):
+                page = await _read_episodes_by_group(
+                    driver,
+                    group_ids=group_ids,
+                    limit=_EPISODE_PAGE_SIZE,
+                    uuid_cursor=cursor,
+                )
+                raw_results.extend(page)
+                edges_seen = sum(
+                    1 for raw in raw_results if _is_relationship_episode_source(raw)
+                )
+                if edges_seen >= num_results or len(page) < _EPISODE_PAGE_SIZE:
+                    break
+                cursor = str(getattr(page[-1], "uuid", "") or "")
+                if not cursor:
+                    break
+            else:
+                logger.bind(
+                    service="graphiti",
+                    pages=_MAX_EPISODE_PAGES,
+                    group_ids=group_ids,
+                ).warning("Graphiti relationship edge fetch hit the page cap")
+    except _GRAPHITI_TRANSPORT_ERRORS as exc:
+        exc.add_note(f"query={query[:80]}, task=relationship_edges")
+        exc.add_note(traceback.format_exc())
+        logger.bind(service="graphiti").exception("Graphiti relationship edge fetch failed")
+        return ()
+    except TimeoutError as exc:
+        exc.add_note(f"query={query[:80]}, seconds={_EDGE_FETCH_TIMEOUT_SECONDS}")
+        logger.bind(service="graphiti").warning("Graphiti relationship edge fetch timed out")
+        return ()
+    edges = [
+        record for raw in raw_results if (record := _parse_relationship_edge(raw)) is not None
+    ][:num_results]
+    return tuple(edges)
+
+
+def _parse_relationship_edge(raw: Any) -> LegalEdgeRecord | None:
+    """Convert one raw episode into a ``LegalEdgeRecord``, or drop it.
+
+    Only episodes the producer wrote (``source_description`` typed
+    ``relationship_edge``) qualify.  Identity fields come from the
+    server-written source description, which also carries the structured
+    from/relationship/to triple; the prose body is parsed only as a fallback
+    for rows written before the structured fields existed.  An untypeable
+    edge is dropped, never guessed.
+    """
+    source_desc: str = getattr(raw, "source_description", "") or ""
+    try:
+        meta = json.loads(source_desc)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(meta, dict) or meta.get("type") != "relationship_edge":
+        return None
+    body: str = getattr(raw, "content", "") or getattr(raw, "episode_body", "") or ""
+    structured = _structured_edge_triple(meta)
+    if structured is not None:
+        from_entity, relationship, to_entity = structured
+    else:
+        triple = _parse_edge_body_triple(body)
+        if triple is None:
+            return None
+        from_entity, relationship, to_entity = triple
+    grounding = _EDGE_GROUNDING_PATTERN.search(body)
+    try:
+        confidence = float(meta.get("confidence"))
+    except (TypeError, ValueError):
+        confidence = 0.5
+    contract_index = meta.get("contract_index")
+    document_version = meta.get("document_version")
+    return LegalEdgeRecord(
+        edge_id=str(getattr(raw, "uuid", "")),
+        document_id=str(meta.get("doc_id") or ""),
+        from_entity=from_entity,
+        relationship=relationship,
+        to_entity=to_entity,
+        clause_id=str(meta.get("clause_id") or ""),
+        char_start=int(grounding.group(1)) if grounding else None,
+        char_end=int(grounding.group(2)) if grounding else None,
+        confidence=max(0.0, min(confidence, 1.0)),
+        group_id=getattr(raw, "group_id", None),
+        contract_index=int(contract_index) if isinstance(contract_index, int) else None,
+        document_version=(int(document_version) if isinstance(document_version, int) else None),
+    )
+
+
+def _structured_edge_triple(meta: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Read the triple from structured source-description fields.
+
+    Present only on rows written after the structured fields existed; every
+    part must be a non-empty string and the relationship must be in the closed
+    vocabulary, else the structured path declines (and the caller falls back
+    to the prose parse).
+    """
+    parts = (meta.get("from_entity"), meta.get("relationship"), meta.get("to_entity"))
+    if not all(isinstance(part, str) and part for part in parts):
+        return None
+    from_entity, relationship, to_entity = (str(part) for part in parts)
+    if relationship not in {member.value for member in RelationshipType}:
+        return None
+    return from_entity, relationship, to_entity
+
+
+def _parse_edge_body_triple(body: str) -> tuple[str, str, str] | None:
+    """Recover ``'{from} {relationship} {to}.'`` against the closed vocabulary.
+
+    Legacy fallback for rows written before the structured triple existed in
+    ``source_description``.  The relationship word is located by whole-token
+    match over the ENTIRE first body line — never by splitting at ``". "``,
+    which truncated entity names containing abbreviations ("Acme Corp. …")
+    and silently dropped valid edges.  A line with no vocabulary token, or
+    with an empty side of the triple, is not an edge this reader can type.
+    """
+    head = body.split("\n", 1)[0].strip()
+    words = [word for word in head.split(" ") if word]
+    vocabulary = {member.value for member in RelationshipType}
+    for index, word in enumerate(words):
+        token = word.lower().strip(".")
+        if token not in vocabulary:
+            continue
+        from_entity = " ".join(words[:index]).strip().strip(",").removesuffix(".")
+        tail = " ".join(words[index + 1 :]).strip()
+        to_entity = tail.split(". ", 1)[0].strip().removesuffix(".") if tail else ""
+        if from_entity and to_entity:
+            return from_entity, token, to_entity
+        return None
+    return None
 
 
 # ---------------------------------------------------------------------------

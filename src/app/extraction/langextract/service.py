@@ -39,6 +39,19 @@ class ExtractionBudget(BaseModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     cost_estimate_usd: float = Field(default=0.0, ge=0)
+    # The second-pass relationship extraction spends from its own bounded
+    # share of this ledger (model calls + tokens + cost).  The share maxima
+    # bound what that pass may spend in total; the share counters are
+    # cumulative like the rest of the ledger, and the whole model is
+    # checkpointed, so a retry cannot mint a fresh share.
+    relationship_max_model_calls: int = Field(default=8, ge=0)
+    relationship_max_input_tokens: int = Field(default=50_000, ge=0)
+    relationship_max_output_tokens: int = Field(default=25_000, ge=0)
+    relationship_max_cost_usd: float = Field(default=2.5, ge=0)
+    relationship_model_calls: int = Field(default=0, ge=0)
+    relationship_input_tokens: int = Field(default=0, ge=0)
+    relationship_output_tokens: int = Field(default=0, ge=0)
+    relationship_cost_estimate_usd: float = Field(default=0.0, ge=0)
     started_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     contracts_started: tuple[int, ...] = ()
 

@@ -292,6 +292,15 @@ class Settings(BaseSettings):
     LANGEXTRACT_MAX_INPUT_TOKENS: int = Field(default=200_000, ge=0)
     LANGEXTRACT_MAX_OUTPUT_TOKENS: int = Field(default=100_000, ge=0)
     LANGEXTRACT_MAX_COST_USD: float = Field(default=10.0, ge=0)
+    # Pass-2 relationship extraction shares: a dedicated bounded sub-pool so
+    # the second pass can never be raided by future passes (defaults mirror
+    # the typed fallbacks in extraction.langextract.relationships).
+    LANGEXTRACT_RELATIONSHIP_PASS_ENABLED: bool = Field(default=True)
+    LANGEXTRACT_RELATIONSHIP_MAX_MODEL_CALLS: int = Field(default=8, ge=0)
+    LANGEXTRACT_RELATIONSHIP_MAX_INPUT_TOKENS: int = Field(default=50_000, ge=0)
+    LANGEXTRACT_RELATIONSHIP_MAX_OUTPUT_TOKENS: int = Field(default=25_000, ge=0)
+    LANGEXTRACT_RELATIONSHIP_MAX_COST_USD: float = Field(default=2.5, ge=0)
+    LANGEXTRACT_RELATIONSHIP_MAX_EDGES_PER_BOUNDARY: int = Field(default=32, ge=1)
     # Conservative configurable estimate for Gemini 3.5 Flash-Lite. Token and
     # call caps remain the primary guard when provider pricing changes.
     LANGEXTRACT_COST_PER_1K_TOKENS_USD: float = Field(default=0.0001, ge=0)

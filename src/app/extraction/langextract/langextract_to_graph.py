@@ -83,8 +83,9 @@ async def ingest_extractions_to_graph(
             # Merge node
             await graph_writer.merge_node(node_label, node_props)
 
-            # Extract relationships from attributes or multi-pass LangExtract
-            # (Better: Do a dedicated relationship extraction pass in LangExtract prompt)
+            # Relationships are extracted by the dedicated second pass
+            # (see app.extraction.langextract.relationships) and written
+            # through the canonical Graphiti writer's sequential phase-2.
 
             ingested += 1
 
@@ -93,7 +94,12 @@ async def ingest_extractions_to_graph(
 
 #     Best Practice Prompt Strategy for Graphs:
 
-# TODO: Design a multi-pass LangExtract prompting strategy to first extract entities/attributes, then feed those back in a second pass to extract typed relationships with grounding. This will yield a richer, more accurate graph compared to a single-pass approach.  # noqa: FIX002
+# The multi-pass strategy below is now implemented: pass 1 extracts entities +
+# attributes (the ingestion knowledge prompt); the dedicated second pass
+# (`app.extraction.langextract.relationships`) feeds the pass-1 clause
+# identities back as a server-derived inventory and extracts typed
+# relationships grounded in char intervals of the boundary text, validated
+# fail-closed before the edges reach the canonical Graphiti writer.
 # Run two passes with LangExtract:
 # Entity + attribute extraction (what you already have).
 # Dedicated relationship extraction pass, where you feed back the entities and ask for typed relationships with grounding.

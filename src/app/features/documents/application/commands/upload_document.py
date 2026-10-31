@@ -6,11 +6,12 @@ import hashlib
 import traceback
 from asyncio import TimeoutError as AsyncTimeoutError
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 from uuid import uuid4
 
 from graphiti_core.errors import GraphitiError
 from neo4j.exceptions import Neo4jError
+from pydantic import BaseModel, Field
 from returns.result import Failure, Success
 from sqlalchemy import func, select
 
@@ -18,6 +19,17 @@ from app.ai.embeddings import EmbeddingTaskType, embed_texts
 from app.config import get_settings
 from app.events import with_outbox, with_terminal_outbox
 from app.extraction.langextract.langextract_to_graph import GraphIngestionContext
+from app.extraction.langextract.relationships import (
+    RELATIONSHIP_BUDGET_EXHAUSTED_REASON,
+    RELATIONSHIP_CONFIG_DISABLED_REASON,
+    ClauseIdentity,
+    GroundedRelationship,
+    RelationshipPassResult,
+    prompt_safe_attribution,
+    relationship_edge_id,
+    relationship_pass_config_from_settings,
+    run_relationship_pass,
+)
 from app.extraction.langextract.service import (
     ExtractionBudget,
     ExtractionFailed,
@@ -25,7 +37,12 @@ from app.extraction.langextract.service import (
     ExtractionRequest,
     ExtractionSucceeded,
 )
-from app.features.agent_saul.domain.state import ClauseSegment, ClauseType
+from app.features.agent_saul.domain.state import (
+    Citation,
+    ClauseSegment,
+    ClauseType,
+    LegalRelationship,
+)
 from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
@@ -101,7 +118,172 @@ _GRAPHITI_EVENT_ERRORS = (
     ValueError,
 )
 
+# Intermediate extraction checkpoint: pass-1 clauses are extracted and their
+# episode writes are durable, but the optional relationship phase has not (or
+# not successfully) run.  A retry resuming from this marker re-runs ONLY the
+# relationship phase against the restored cumulative ledger instead of
+# re-spending pass-1 model calls it has already paid for.
+_CLAUSES_COMPLETE = "clauses_complete"
+# Per-boundary degrade reason when a checkpointed span no longer resolves
+# inside the re-derived boundary markdown (document changed under the same
+# version — should be impossible): the relationship pass is skipped
+# explicitly rather than crashing or fabricating text.
+_SPANS_UNRESOLVED_REASON = "checkpoint_segment_spans_unresolved"
+
+
+class _CheckpointClauseInventory(BaseModel):
+    """One checkpointed clause: server identity plus boundary-local coordinates.
+
+    Source text is deliberately absent — persisting it in a checkpoint is a
+    security rule.  The boundary markdown is re-derived from the raw object on
+    every attempt, so the validated spans are sufficient to rebuild each
+    segment's text at resume time.
+    """
+
+    clause_id: str
+    clause_type: str
+    section_ref: str
+    start_char: int
+    end_char: int
+
+
+class _CheckpointContractClauses(BaseModel):
+    """Per-contract clause inventory as persisted in the clauses_complete checkpoint."""
+
+    contract_index: int
+    clauses: list[_CheckpointClauseInventory] = Field(default_factory=list)
+
+
+class _Phase1Complete(NamedTuple):
+    """Phase-1 (mandatory clause extraction) completion payload.
+
+    Returned by ``_extract_document_knowledge`` before the optional
+    relationship phase so the caller can persist the ``clauses_complete``
+    checkpoint and, on a later attempt, resume phase 2 without re-running
+    pass-1.  ``extracted`` carries one entry per boundary: the boundary, its
+    runtime segments (text rebuilt from re-derived markdown when resumed from
+    a checkpoint), and a per-boundary degrade reason (``None`` when the
+    boundary resolved normally).  ``inventories`` is the decoded checkpoint
+    inventory on a resumed attempt — the authoritative span source for
+    rewriting the checkpoint — and ``None`` on a fresh attempt.
+    """
+
+    extracted: list[tuple[ContractBoundary, list[ClauseSegment], str | None]]
+    budget: ExtractionBudget
+    documents: list[object]
+    inventories: list[_CheckpointContractClauses] | None = None
+    # Extracted class names ride the checkpoint so a resumed attempt's final
+    # metadata keeps them instead of saving an empty list.
+    extraction_classes: tuple[str, ...] = ()
+
+
+def _clause_inventory_for_checkpoint(
+    phase1: _Phase1Complete,
+) -> list[dict[str, object]]:
+    """Checkpoint-safe clause inventory: coordinates only, never segment text.
+
+    A resumed attempt re-persists the DECODED checkpoint inventory so a
+    degraded boundary (spans unresolved) keeps its original persisted spans
+    instead of silently downgrading to an empty clause list.
+    """
+    if phase1.inventories is not None:
+        return [entry.model_dump(mode="json") for entry in phase1.inventories]
+    return [
+        {
+            "contract_index": boundary.contract_index,
+            "clauses": [
+                {
+                    "clause_id": segment.clause_id,
+                    "clause_type": segment.clause_type.value,
+                    "section_ref": segment.section_ref,
+                    "start_char": segment.start_char,
+                    "end_char": segment.end_char,
+                }
+                for segment in segments
+            ],
+        }
+        for boundary, segments, _unresolved in phase1.extracted
+    ]
+
+
+def _clauses_complete_checkpoint_metadata(
+    phase1: _Phase1Complete,
+    *,
+    document_version: int,
+) -> dict[str, object]:
+    """Build the clauses_complete extraction-checkpoint metadata payload."""
+    return {
+        "knowledge_extraction": _CLAUSES_COMPLETE,
+        "knowledge_extraction_clauses": _clause_inventory_for_checkpoint(phase1),
+        "knowledge_extraction_classes": list(phase1.extraction_classes),
+        "extraction_budget": phase1.budget.model_dump(mode="json"),
+        "knowledge_extraction_document_version": document_version,
+    }
+
+
+def _decode_clause_checkpoint(raw: object) -> list[_CheckpointContractClauses] | None:
+    """Decode a persisted clause inventory, or None when it is unusable."""
+    if not isinstance(raw, list):
+        return None
+    try:
+        return [_CheckpointContractClauses.model_validate(entry) for entry in raw]
+    except ValueError:
+        return None
+
+
+def _rebuild_segments_from_checkpoint(
+    *,
+    boundaries: list[ContractBoundary],
+    inventories: list[_CheckpointContractClauses],
+) -> list[tuple[ContractBoundary, list[ClauseSegment], str | None]]:
+    """Rebuild runtime segments by slicing re-derived boundary markdown.
+
+    The persisted spans are the validated ground truth; the boundary markdown
+    is re-parsed from the raw object on every attempt, so text is never
+    checkpointed.  A boundary whose markdown no longer contains its spans
+    degrades that boundary's relationship pass (``checkpoint_segment_spans_
+    unresolved``) instead of crashing or fabricating text.
+    """
+    inventory_by_index = {entry.contract_index: entry for entry in inventories}
+    valid_types = {member.value: member for member in ClauseType}
+    rebuilt: list[tuple[ContractBoundary, list[ClauseSegment], str | None]] = []
+    for boundary in boundaries:
+        entry = inventory_by_index.get(boundary.contract_index)
+        if entry is None:
+            rebuilt.append((boundary, [], _SPANS_UNRESOLVED_REASON))
+            continue
+        segments: list[ClauseSegment] = []
+        resolved = True
+        for clause in entry.clauses:
+            clause_type = valid_types.get(clause.clause_type)
+            if (
+                clause_type is None
+                or clause.start_char < 0
+                or clause.end_char < clause.start_char
+                or clause.end_char > len(boundary.markdown)
+            ):
+                resolved = False
+                break
+            segments.append(
+                ClauseSegment(
+                    clause_id=clause.clause_id,
+                    clause_type=clause_type,
+                    section_ref=clause.section_ref,
+                    start_char=clause.start_char,
+                    end_char=clause.end_char,
+                    text=boundary.markdown[clause.start_char : clause.end_char],
+                    contract_index=boundary.contract_index,
+                )
+            )
+        if not resolved:
+            rebuilt.append((boundary, [], _SPANS_UNRESOLVED_REASON))
+            continue
+        rebuilt.append((boundary, segments, None))
+    return rebuilt
+
+
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from typing import Any, Literal
 
     from graphiti_core.graphiti import Graphiti
@@ -419,71 +601,149 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             ],
         )
     )
-    extraction_outcome, relationship_state = await _extract_document_knowledge(
+    extraction_jurisdiction = (
+        legal.metadata.jurisdiction
+        if legal.metadata
+        else (classified.jurisdiction if len(boundaries) == 1 else None)
+    )
+    phase1_outcome, phase1_state = await _extract_document_knowledge(
         runtime=runtime,
         job=job,
         boundaries=boundaries,
         boundary_ambiguous=boundary_result.ambiguous,
-        jurisdiction=(
-            legal.metadata.jurisdiction
-            if legal.metadata
-            else (classified.jurisdiction if len(boundaries) == 1 else None)
-        ),
+        jurisdiction=extraction_jurisdiction,
         document_type=classified.document_kind,
     )
-    status_result = await runtime.repo.update_document_status(
-        document_id=job.document_id,
-        status="failed" if _is_graph_write_failure(extraction_outcome) else "parsed",
-        title=parsed.title,
-        document_kind=classified.document_kind,
-        jurisdiction=(legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction),
-        contract_type=(
-            legal.metadata.contract_type
-            if legal.metadata
-            else (classified.contract_type if len(boundaries) == 1 else None)
+    # Shared classification/legal metadata persisted by every status write in
+    # this block (the writer shallow-merges metadata keys per call).
+    classification_metadata: dict[str, object] = {
+        "content_type": job.content_type,
+        "filename": job.filename,
+        **classified.metadata_,
+        **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
+        **(
+            {
+                "contracts": [
+                    {
+                        "contract_index": boundary.contract_index,
+                        **(
+                            preparation.metadata.model_dump(exclude_none=True)
+                            if preparation.metadata
+                            else {}
+                        ),
+                    }
+                    for boundary, preparation in legal_preparations
+                ]
+            }
+            if len(boundaries) > 1
+            else {}
         ),
-        parties=[
-            *(
-                legal.metadata.parties
-                if legal.metadata
-                else (classified.parties if len(boundaries) == 1 else [])
-            )
-        ],
-        metadata_={
-            "content_type": job.content_type,
-            "filename": job.filename,
-            **classified.metadata_,
-            **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
-            **(
-                {
-                    "contracts": [
-                        {
-                            "contract_index": boundary.contract_index,
-                            **(
-                                preparation.metadata.model_dump(exclude_none=True)
-                                if preparation.metadata
-                                else {}
-                            ),
-                        }
-                        for boundary, preparation in legal_preparations
-                    ]
-                }
-                if len(boundaries) > 1
-                else {}
-            ),
-            **_extraction_metadata(
-                extraction_outcome,
-                document_version=job.document_version,
-            ),
-            # The relationship-phase truth is persisted as soon as it is known,
-            # so a crash during chunking still leaves the record truthful.
-            "graph_relationships": relationship_state.model_dump_for_metadata(),
-        },
-        structural_tree=parsed.structural_tree,
-        extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
+    }
+    resolved_contract_type = (
+        legal.metadata.contract_type
+        if legal.metadata
+        else (classified.contract_type if len(boundaries) == 1 else None)
     )
-    if isinstance(status_result, Failure):
-        return Failure(status_result.failure())
+    resolved_parties: list[object] = [
+        *(
+            legal.metadata.parties
+            if legal.metadata
+            else (classified.parties if len(boundaries) == 1 else [])
+        )
+    ]
+    phase1_inventory: list[dict[str, object]] | None = None
+    if isinstance(phase1_outcome, _Phase1Complete):
+        # Phase 1 (mandatory clause extraction) just completed.  Persist the
+        # clauses_complete checkpoint — mirroring how the complete checkpoint
+        # is written — BEFORE the optional relationship phase runs: a
+        # relationship/provider failure must retry ONLY phase 2 against the
+        # restored cumulative ledger, never re-run the already-paid pass-1
+        # extraction into a tight budget.  The relationship truth is not known
+        # yet and is deliberately absent here; the post-phase write below
+        # persists it as soon as it exists.
+        phase1_inventory = _clause_inventory_for_checkpoint(phase1_outcome)
+        status_result = await runtime.repo.update_document_status(
+            document_id=job.document_id,
+            status="parsed",
+            title=parsed.title,
+            document_kind=classified.document_kind,
+            jurisdiction=(
+                legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction
+            ),
+            contract_type=resolved_contract_type,
+            parties=resolved_parties,
+            metadata_={
+                **classification_metadata,
+                **_clauses_complete_checkpoint_metadata(
+                    phase1_outcome,
+                    document_version=job.document_version,
+                ),
+            },
+            structural_tree=parsed.structural_tree,
+            extraction_incomplete=False,
+        )
+        if isinstance(status_result, Failure):
+            return Failure(status_result.failure())
+        extraction_outcome, relationship_state = await _run_relationship_phase(
+            runtime=runtime,
+            job=job,
+            extracted=phase1_outcome.extracted,
+            budget=phase1_outcome.budget,
+            pass1_documents=phase1_outcome.documents,
+            extraction_classes=phase1_outcome.extraction_classes,
+            jurisdiction=extraction_jurisdiction,
+            document_type=classified.document_kind,
+        )
+        # Post-relationship truth: the terminal extraction checkpoint
+        # (complete — or clauses_complete carrying the phase-2-end ledger when
+        # the optional phase failed, so the retry lands in the reuse branch)
+        # plus the typed relationship state.
+        final_result = await runtime.repo.update_document_status(
+            document_id=job.document_id,
+            status="failed" if isinstance(extraction_outcome, ExtractionFailed) else "parsed",
+            metadata_={
+                **classification_metadata,
+                **_extraction_metadata(
+                    extraction_outcome,
+                    document_version=job.document_version,
+                    clause_checkpoint=phase1_inventory,
+                ),
+                # The relationship-phase truth is persisted as soon as it is
+                # known, so a crash during chunking still leaves the record
+                # truthful.
+                "graph_relationships": relationship_state.model_dump_for_metadata(),
+            },
+            extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
+        )
+        if isinstance(final_result, Failure):
+            return Failure(final_result.failure())
+    else:
+        extraction_outcome, relationship_state = phase1_outcome, phase1_state
+        status_result = await runtime.repo.update_document_status(
+            document_id=job.document_id,
+            status="failed" if _is_graph_write_failure(extraction_outcome) else "parsed",
+            title=parsed.title,
+            document_kind=classified.document_kind,
+            jurisdiction=(
+                legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction
+            ),
+            contract_type=resolved_contract_type,
+            parties=resolved_parties,
+            metadata_={
+                **classification_metadata,
+                **_extraction_metadata(
+                    extraction_outcome,
+                    document_version=job.document_version,
+                ),
+                # The relationship-phase truth is persisted as soon as it is known,
+                # so a crash during chunking still leaves the record truthful.
+                "graph_relationships": relationship_state.model_dump_for_metadata(),
+            },
+            structural_tree=parsed.structural_tree,
+            extraction_incomplete=isinstance(extraction_outcome, ExtractionFailed),
+        )
+        if isinstance(status_result, Failure):
+            return Failure(status_result.failure())
     if isinstance(extraction_outcome, ExtractionFailed) and _is_graph_write_failure(
         extraction_outcome
     ):
@@ -1039,20 +1299,42 @@ def _extraction_metadata(
     outcome: ExtractionSucceeded | ExtractionFailed,
     *,
     document_version: int | None = None,
+    clause_checkpoint: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     if isinstance(outcome, ExtractionFailed):
-        metadata: dict[str, object] = {
+        if (
+            clause_checkpoint is not None
+            and outcome.code is ExtractionFailureCode.GRAPH_WRITE_ERROR
+        ):
+            # Phase 1 completed and is checkpointed; only the optional
+            # relationship phase failed.  The retry must land in the
+            # clauses_complete reuse branch (phase 2 only, cumulative
+            # ledger), so this terminal metadata keeps the checkpoint marker
+            # and the clause inventory instead of downgrading to
+            # "incomplete" — which would force a full pass-1 re-spend.
+            metadata: dict[str, object] = {
+                "knowledge_extraction": _CLAUSES_COMPLETE,
+                "knowledge_extraction_failure": str(outcome.code),
+                "knowledge_extraction_message": outcome.message,
+                "knowledge_extraction_clauses": clause_checkpoint,
+            }
+            if outcome.budget is not None:
+                metadata["extraction_budget"] = outcome.budget.model_dump(mode="json")
+            if document_version is not None:
+                metadata["knowledge_extraction_document_version"] = document_version
+            return metadata
+        failure_metadata: dict[str, object] = {
             "knowledge_extraction": "incomplete",
             "knowledge_extraction_failure": str(outcome.code),
             "knowledge_extraction_message": outcome.message,
         }
         if outcome.budget_dimension is not None:
-            metadata["extraction_budget_dimension"] = str(outcome.budget_dimension)
+            failure_metadata["extraction_budget_dimension"] = str(outcome.budget_dimension)
         if outcome.budget is not None:
-            metadata["extraction_budget"] = outcome.budget.model_dump(mode="json")
+            failure_metadata["extraction_budget"] = outcome.budget.model_dump(mode="json")
         if document_version is not None:
-            metadata["knowledge_extraction_document_version"] = document_version
-        return metadata
+            failure_metadata["knowledge_extraction_document_version"] = document_version
+        return failure_metadata
     classes = list(outcome.extraction_classes) or sorted(
         {
             extraction.extraction_class
@@ -1077,7 +1359,7 @@ def _is_graph_write_failure(outcome: ExtractionSucceeded | ExtractionFailed) -> 
     )
 
 
-async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extraction pass keeps all phase locals together
+async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914, PLR0915 — one extraction pass keeps all phase locals together
     *,
     runtime: IngestionRuntime,
     job: IngestionJob,
@@ -1085,13 +1367,23 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
     boundary_ambiguous: bool = False,
     jurisdiction: str | None,
     document_type: str,
-) -> tuple[ExtractionSucceeded | ExtractionFailed, GraphRelationshipsState]:
-    """Run pass-1 knowledge extraction plus the graph-write phase.
+) -> tuple[ExtractionSucceeded | ExtractionFailed | _Phase1Complete, GraphRelationshipsState]:
+    """Run pass-1 knowledge extraction, stopping before the optional phase 2.
 
-    Returns the extraction outcome together with the typed aggregate
+    Returns the pass-1 outcome together with the typed aggregate
     relationship-phase state, so callers can persist "not attempted" /
     "skipped (not implemented)" / "succeeded" / "failed" as distinct truths
     instead of an ``all([])`` success.
+
+    Terminal outcomes (``ExtractionSucceeded`` from a complete checkpoint,
+    ``ExtractionFailed``) are final.  A fresh phase-1 completion returns
+    ``_Phase1Complete`` so the caller can persist the ``clauses_complete``
+    checkpoint BEFORE spending the optional relationship phase — a retry
+    after a relationship failure resumes at phase 2 against the restored
+    cumulative ledger instead of re-running (and re-paying for) pass-1 into
+    a tight budget.  A ``clauses_complete`` checkpoint on the same document
+    version skips pass-1 entirely and returns ``_Phase1Complete`` with
+    segments rebuilt from the persisted spans.
     """
     if boundary_ambiguous:
         return (
@@ -1105,6 +1397,7 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             ),
         )
     settings = get_settings()
+    relationship_config = relationship_pass_config_from_settings(settings)
     budget = ExtractionBudget(
         max_contracts=settings.LANGEXTRACT_MAX_CONTRACTS,
         max_model_calls=settings.LANGEXTRACT_MAX_MODEL_CALLS,
@@ -1113,6 +1406,10 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
         max_cost_usd=settings.LANGEXTRACT_MAX_COST_USD,
         cost_per_1k_tokens_usd=settings.LANGEXTRACT_COST_PER_1K_TOKENS_USD,
         wall_clock_seconds=settings.LANGEXTRACT_WALL_CLOCK_SECONDS,
+        relationship_max_model_calls=relationship_config.max_model_calls,
+        relationship_max_input_tokens=relationship_config.max_input_tokens,
+        relationship_max_output_tokens=relationship_config.max_output_tokens,
+        relationship_max_cost_usd=relationship_config.max_cost_usd,
     )
     # Rehydrate the checkpointed ledger before a Celery retry.  A retry must
     # not receive a fresh model-call/token budget merely because the worker
@@ -1190,6 +1487,50 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
                         ),
                         restored_relationships,
                     )
+                if (
+                    isinstance(raw_metadata, dict)
+                    and raw_metadata.get("knowledge_extraction") == _CLAUSES_COMPLETE
+                    and same_checkpoint_version
+                ):
+                    inventories = _decode_clause_checkpoint(
+                        raw_metadata.get("knowledge_extraction_clauses")
+                    )
+                    if inventories is None:
+                        logger.bind(document_id=job.document_id).warning(
+                            "document_clauses_checkpoint_inventory_invalid"
+                        )
+                    else:
+                        # Phase 1 completed on a previous attempt: its clause
+                        # writes are durable and the persisted ledger already
+                        # carries the pass-1 spend.  Skip pass-1 ENTIRELY — no
+                        # provider call, no budget charge — and resume at the
+                        # optional relationship phase over segments rebuilt by
+                        # slicing the re-derived boundary markdown at the
+                        # persisted spans.  The retry still gets a fresh
+                        # wall-clock window over the cumulative ledger.
+                        raw_classes = raw_metadata.get("knowledge_extraction_classes", ())
+                        classes = (
+                            [value for value in raw_classes if isinstance(value, str)]
+                            if isinstance(raw_classes, list)
+                            else []
+                        )
+                        budget = budget.model_copy(update={"started_at": datetime.now(tz=UTC)})
+                        return (
+                            _Phase1Complete(
+                                extracted=_rebuild_segments_from_checkpoint(
+                                    boundaries=boundaries,
+                                    inventories=inventories,
+                                ),
+                                budget=budget,
+                                documents=[],
+                                inventories=inventories,
+                                extraction_classes=tuple(classes),
+                            ),
+                            GraphRelationshipsState(
+                                status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                                reason="relationship_phase_resumed_from_checkpoint",
+                            ),
+                        )
     # A retry starts a fresh wall-clock window, but its ledger is cumulative.
     # Keeping this transition here (once per ingestion attempt, before the
     # contract loop) prevents a multi-contract document from resetting timing
@@ -1209,7 +1550,12 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             ),
         )
     documents: list[object] = []
-    relationship_states: list[GraphRelationshipsState] = []
+    classes: list[str] = []
+    # Phase 1 (mandatory): pass-1 clause extraction for EVERY boundary runs
+    # before any optional relationship work spends the shared budget — a
+    # relationship call for boundary 0 must never starve boundary 2's clause
+    # extraction into a failed, incomplete document.
+    extracted: list[tuple[ContractBoundary, list[ClauseSegment], str | None]] = []
     for boundary in boundaries:
         outcome = await runtime.extraction.extract(
             ExtractionRequest(
@@ -1226,13 +1572,10 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             )
         )
         if isinstance(outcome, ExtractionFailed):
-            # Aggregate, never replace: boundaries processed before the failure
-            # already produced relationship-phase states that must survive.
             return (
                 outcome,
                 aggregate_relationship_states(
                     [
-                        *relationship_states,
                         GraphRelationshipsState(
                             status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                             reason=f"knowledge_extraction_failed:{outcome.code.value}",
@@ -1242,8 +1585,161 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
             )
         budget = outcome.budget
         documents.extend(outcome.documents)
+        for extracted_class in outcome.extraction_classes or sorted(
+            {
+                extraction.extraction_class
+                for document in outcome.documents
+                for extraction in document.extractions
+            }
+        ):
+            if extracted_class not in classes:
+                classes.append(extracted_class)
+        segments = _extract_clause_segments(
+            outcome,
+            document_id=job.document_id,
+            contract_index=boundary.contract_index,
+        )
+        extracted.append((boundary, segments, None))
+        # Clause writes happen per boundary, immediately after their mandatory
+        # extraction: a later boundary's extraction failure must not withhold
+        # earlier boundaries' already-extracted clauses from the graph.
+        write_phase = await _write_extracted_clause_episodes(
+            segments=segments,
+            relationships=[],
+            edge_spans={},
+            relationship_pass=RelationshipPassResult(
+                ran=False,
+                skip_reason="relationship_pass_deferred_to_phase2",
+                budget=budget,
+            ),
+            graph_writer=runtime.graph_writer,
+            idempotency=runtime.idempotency,
+            document_id=job.document_id,
+            tenant_id=job.tenant_id,
+            document_version=job.document_version,
+            contract_index=boundary.contract_index,
+            user_id=job.user_id,
+            jurisdiction=jurisdiction,
+            document_type=document_type,
+        )
+        if not write_phase.success:
+            return (
+                ExtractionFailed(
+                    code=ExtractionFailureCode.GRAPH_WRITE_ERROR,
+                    message="One or more extracted clauses could not be persisted to Graphiti",
+                    budget=budget,
+                ),
+                aggregate_relationship_states(
+                    [
+                        GraphRelationshipsState(
+                            status=GraphRelationshipsStatus.NOT_ATTEMPTED,
+                            reason="clause_write_failed_before_relationship_pass",
+                        ),
+                    ]
+                ),
+            )
+    # Phase 1 is complete: every boundary is extracted and its clause writes
+    # succeeded.  Hand the phase-1 payload back so the caller can persist the
+    # clauses_complete checkpoint BEFORE the optional relationship phase — a
+    # relationship/provider failure must retry only phase 2 against the
+    # cumulative ledger, never re-run the already-paid pass-1 extraction.
+    return (
+        _Phase1Complete(
+            extracted=extracted,
+            budget=budget,
+            documents=documents,
+            extraction_classes=tuple(classes),
+        ),
+        aggregate_relationship_states([]),
+    )
+
+
+async def _run_relationship_phase(
+    *,
+    runtime: IngestionRuntime,
+    job: IngestionJob,
+    extracted: list[tuple[ContractBoundary, list[ClauseSegment], str | None]],
+    budget: ExtractionBudget,
+    pass1_documents: Sequence[object],
+    extraction_classes: Sequence[str] = (),
+    jurisdiction: str | None = None,
+    document_type: str = "generic",
+) -> tuple[ExtractionSucceeded | ExtractionFailed, GraphRelationshipsState]:
+    """Run the optional per-boundary relationship pass plus the combined write.
+
+    Extracted from the former phase-2 tail so its retry-decision surface is
+    unchanged: the clause episode writes re-run against the idempotency guard
+    (cache hits, no new spend) and the combined phase result — clauses AND
+    edges — stays the single retry decision.
+    """
+    settings = get_settings()
+    relationship_config = relationship_pass_config_from_settings(settings)
+    writer_ready = runtime.graph_writer is not None and runtime.idempotency is not None
+    relationship_states: list[GraphRelationshipsState] = []
+    for boundary, segments, unresolved_reason in extracted:
+        if unresolved_reason is not None:
+            # The checkpointed spans no longer resolve inside the re-derived
+            # boundary markdown; degrade this boundary's relationship pass
+            # explicitly instead of fabricating text or crashing.
+            relationship_pass = RelationshipPassResult(
+                ran=False,
+                skip_reason=unresolved_reason,
+                budget=budget,
+            )
+            relationship_states.append(
+                _relationship_state_from_pass(
+                    relationship_pass=relationship_pass,
+                    relationship_results=(),
+                )
+            )
+            continue
+        if segments and writer_ready:
+            relationship_pass = await run_relationship_pass(
+                extraction=runtime.extraction,
+                boundary_text=boundary.markdown,
+                inventory=[
+                    ClauseIdentity(
+                        clause_id=segment.clause_id,
+                        clause_type=segment.clause_type.value,
+                        section_ref=segment.section_ref,
+                        char_start=segment.start_char,
+                        char_end=segment.end_char,
+                    )
+                    for segment in segments
+                ],
+                entity_corpus=[segment.text for segment in segments],
+                budget=budget,
+                config=relationship_config,
+                document_id=job.document_id,
+                tenant_id=job.tenant_id,
+                document_version=job.document_version,
+                contract_index=boundary.contract_index,
+                max_char_buffer=settings.LANGEXTRACT_MAX_CHAR_BUFFER,
+                max_workers=settings.LANGEXTRACT_MAX_WORKERS,
+            )
+        else:
+            relationship_pass = RelationshipPassResult(
+                ran=False,
+                skip_reason=(
+                    "no_clause_segments_extracted" if not segments else "graph_writer_unconfigured"
+                ),
+                budget=budget,
+            )
+        budget = relationship_pass.budget
+        legal_edges = [
+            _legal_relationship_from_grounded(
+                edge,
+                document_id=job.document_id,
+                contract_index=boundary.contract_index,
+            )
+            for edge in relationship_pass.edges
+        ]
+        edge_spans = _absolute_edge_spans(boundary, relationship_pass.edges, legal_edges)
         phase_result = await _write_extracted_clause_episodes(
-            outcome=outcome,
+            segments=segments,
+            relationships=legal_edges,
+            edge_spans=edge_spans,
+            relationship_pass=relationship_pass,
             graph_writer=runtime.graph_writer,
             idempotency=runtime.idempotency,
             document_id=job.document_id,
@@ -1265,14 +1761,182 @@ async def _extract_document_knowledge(  # noqa: PLR0912, PLR0914 — one extract
                 aggregate_relationship_states(relationship_states),
             )
     return (
-        ExtractionSucceeded(documents=tuple(documents), budget=budget),
+        ExtractionSucceeded(
+            documents=tuple(pass1_documents),
+            budget=budget,
+            extraction_classes=tuple(extraction_classes),
+        ),
         aggregate_relationship_states(relationship_states),
+    )
+
+
+def _extract_clause_segments(
+    outcome: ExtractionSucceeded,
+    *,
+    document_id: str,
+    contract_index: int = 0,
+) -> list[ClauseSegment]:
+    """Map grounded pass-1 clause extractions into canonical clause segments.
+
+    Ungrounded extractions (``char_interval is None``) are skipped exactly as
+    ``langextract_to_graph`` does — they can never become segments or edges.
+
+    Clause identity is issued SERVER-SIDE from the boundary coordinates and
+    extraction span, so model-derived strings never become identity and never
+    enter the pass-2 prompt's trusted section unvalidated.  The model's
+    ``clause_id``/``section_ref`` attribution is mapped onto the issued
+    identity as a format-validated section reference only.
+    """
+    segments: list[ClauseSegment] = []
+    valid_types = {member.value: member for member in ClauseType}
+    for document in outcome.documents:
+        for extraction in document.extractions:
+            interval = extraction.char_interval
+            if interval is None or interval.start_pos is None or interval.end_pos is None:
+                continue
+            attributes = extraction.attributes or {}
+            raw_type = str(attributes.get("clause_type") or extraction.extraction_class).casefold()
+            clause_type = valid_types.get(raw_type, ClauseType.OTHER)
+            issued_id = hashlib.sha256(
+                f"{document_id}:{contract_index}:{interval.start_pos}:{interval.end_pos}:{extraction.extraction_text}".encode()
+            ).hexdigest()[:20]
+            section_ref = (
+                prompt_safe_attribution(attributes.get("section_ref"))
+                or prompt_safe_attribution(
+                    attributes.get("clause_id") or attributes.get("clause_number")
+                )
+                or issued_id
+            )
+            segments.append(
+                ClauseSegment(
+                    clause_id=issued_id,
+                    clause_type=clause_type,
+                    text=extraction.extraction_text,
+                    section_ref=section_ref,
+                    start_char=interval.start_pos,
+                    end_char=interval.end_pos,
+                    contract_index=contract_index,
+                )
+            )
+    return segments
+
+
+def _absolute_edge_spans(
+    boundary: ContractBoundary,
+    grounded_edges: Sequence[GroundedRelationship],
+    legal_edges: Sequence[LegalRelationship],
+) -> dict[str, tuple[int, int]]:
+    """Map edge ids to document-absolute char spans.
+
+    Pass-2 validates spans in boundary-local coordinates (the text the model
+    actually saw), but chunk source spans — and therefore citation
+    resolution — are document-absolute.  Persisted edge spans get the
+    boundary offset added so both coordinate spaces agree; the deterministic
+    edge id keeps hashing the validated boundary-local span, which stays
+    stable per contract.
+    """
+    spans: dict[str, tuple[int, int]] = {}
+    for index, relationship in enumerate(legal_edges):
+        edge = grounded_edges[index]
+        if edge.char_start is None or edge.char_end is None:
+            continue
+        spans[relationship.edge_id] = (
+            boundary.start_char + edge.char_start,
+            boundary.start_char + edge.char_end,
+        )
+    return spans
+
+
+def _legal_relationship_from_grounded(
+    edge: GroundedRelationship,
+    *,
+    document_id: str,
+    contract_index: int,
+) -> LegalRelationship:
+    """Convert a validated pass-2 edge into the canonical writer edge model.
+
+    Server-owned identity: only ``document_id``/``contract_index`` (job
+    identity) and content-derived entity/clause text enter the edge.  Content
+    can never influence tenant, group, or writer binding — the Graphiti
+    writer derives those from the server context, and the injection gate
+    proves it for this pass too.
+    """
+    return LegalRelationship(
+        edge_id=relationship_edge_id(
+            document_id=document_id,
+            contract_index=contract_index,
+            edge=edge,
+        ),
+        from_node=edge.from_entity,
+        relationship=edge.relationship,
+        to_node=edge.to_entity,
+        clause_id=edge.clause_id,
+        citation=Citation(
+            claim=f"{edge.from_entity} {edge.relationship.value} {edge.to_entity}",
+            source=f"{document_id}#contract={contract_index};clause={edge.clause_id}",
+            confidence=edge.confidence,
+            quoted_text=edge.quote[:2_000],
+        ),
+        contract_index=contract_index,
+    )
+
+
+def _relationship_state_from_pass(
+    *,
+    relationship_pass: RelationshipPassResult,
+    relationship_results: Sequence[object],
+) -> GraphRelationshipsState:
+    """Typed truth for the relationship phase given the pass and write results."""
+    attempted = len(relationship_results)
+    succeeded = sum(1 for result in relationship_results if getattr(result, "success", False))
+    # A provider failure returns ran=True WITH provider_error and zero edges.
+    # It must surface as a failed phase BEFORE the ran/ran=False branching —
+    # otherwise an outage persists as a successful pass with zero edges.
+    if relationship_pass.provider_error is not None:
+        return GraphRelationshipsState(
+            status=GraphRelationshipsStatus.FAILED,
+            reason=f"relationship_provider_error:{relationship_pass.provider_error}",
+            relationships_attempted=attempted,
+            relationships_succeeded=succeeded,
+            relationships_invalid_span=relationship_pass.drops.invalid_span,
+            relationships_dropped=relationship_pass.drops.total
+            - relationship_pass.drops.invalid_span,
+        )
+    if not relationship_pass.ran:
+        if relationship_pass.budget_exhausted:
+            skip_reason = RELATIONSHIP_BUDGET_EXHAUSTED_REASON
+        else:
+            skip_reason = relationship_pass.skip_reason or "relationship_pass_not_run"
+        return GraphRelationshipsState(
+            status=(
+                GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED
+                if skip_reason == RELATIONSHIP_CONFIG_DISABLED_REASON
+                else GraphRelationshipsStatus.NOT_ATTEMPTED
+            ),
+            reason=skip_reason,
+            relationships_dropped=relationship_pass.drops.total,
+        )
+    write_failures = attempted - succeeded
+    return GraphRelationshipsState(
+        status=(
+            GraphRelationshipsStatus.FAILED
+            if write_failures
+            else GraphRelationshipsStatus.SUCCEEDED
+        ),
+        reason="relationship_edge_write_failed" if write_failures else None,
+        relationships_attempted=attempted,
+        relationships_succeeded=succeeded,
+        relationships_invalid_span=relationship_pass.drops.invalid_span,
+        relationships_dropped=relationship_pass.drops.total - relationship_pass.drops.invalid_span,
     )
 
 
 async def _write_extracted_clause_episodes(
     *,
-    outcome: ExtractionSucceeded,
+    segments: list[ClauseSegment],
+    relationships: list[LegalRelationship],
+    edge_spans: dict[str, tuple[int, int]],
+    relationship_pass: RelationshipPassResult,
     graph_writer: object | None,
     idempotency: object | None,
     document_id: str,
@@ -1285,47 +1949,18 @@ async def _write_extracted_clause_episodes(
 ) -> GraphWritePhaseResult:
     """Map grounded clause extractions into the existing canonical writer.
 
-    Success is computed over clause writes only.  The relationship pass does not
-    exist yet (ingestion passes an empty relationship list), so when clause
-    writes ran, the phase reports the typed
-    ``skipped_not_implemented``/``not_attempted`` relationship state — never a
-    vacuous ``all([])`` success over an empty result list.
+    Success is computed over clause writes only: a clause-write failure fails
+    the phase (the document degrades), while the relationship phase reports
+    its own typed truth — extraction outcome, drop counts, and per-edge write
+    results — through ``GraphRelationshipsState``.
     """
-    segments: list[ClauseSegment] = []
-    valid_types = {member.value: member for member in ClauseType}
-    for document in outcome.documents:
-        for extraction in document.extractions:
-            interval = extraction.char_interval
-            if interval is None or interval.start_pos is None or interval.end_pos is None:
-                continue
-            attributes = extraction.attributes or {}
-            raw_type = str(attributes.get("clause_type") or extraction.extraction_class).casefold()
-            clause_type = valid_types.get(raw_type, ClauseType.OTHER)
-            raw_id = attributes.get("clause_id") or attributes.get("clause_number")
-            clause_id = (
-                str(raw_id)
-                if raw_id
-                else hashlib.sha256(
-                    f"{document_id}:{interval.start_pos}:{interval.end_pos}:{extraction.extraction_text}".encode()
-                ).hexdigest()[:20]
-            )
-            segments.append(
-                ClauseSegment(
-                    clause_id=clause_id,
-                    clause_type=clause_type,
-                    text=extraction.extraction_text,
-                    section_ref=str(attributes.get("section_ref") or clause_id),
-                    start_char=interval.start_pos,
-                    end_char=interval.end_pos,
-                    contract_index=contract_index,
-                )
-            )
     if not segments:
         return GraphWritePhaseResult(
             success=True,
             relationships=GraphRelationshipsState(
                 status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                 reason="no_clause_segments_extracted",
+                relationships_dropped=relationship_pass.drops.total,
             ),
         )
     if graph_writer is None and idempotency is None:
@@ -1336,6 +1971,7 @@ async def _write_extracted_clause_episodes(
             relationships=GraphRelationshipsState(
                 status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                 reason="graph_writer_unconfigured",
+                relationships_dropped=relationship_pass.drops.total,
             ),
         )
     if graph_writer is None or idempotency is None:
@@ -1348,11 +1984,12 @@ async def _write_extracted_clause_episodes(
             relationships=GraphRelationshipsState(
                 status=GraphRelationshipsStatus.NOT_ATTEMPTED,
                 reason="graph_writer_dependencies_incomplete",
+                relationships_dropped=relationship_pass.drops.total,
             ),
         )
     clause_results, relationship_results = await write_clause_episodes_to_graphiti(
         segments,
-        [],
+        relationships,
         GraphIngestionContext(
             document_id=document_id,
             tenant_id=tenant_id,
@@ -1365,25 +2002,38 @@ async def _write_extracted_clause_episodes(
         ),
         graphiti_service=cast("ClauseWriterService", graph_writer),
         idempotency=cast("IdempotencyGuard", idempotency),
+        edge_spans=edge_spans or None,
     )
-    # The relationship list is empty because grounded relationship extraction is
-    # not implemented.  Report that as its own typed state with a distinct
-    # structured event so dashboards count the skip instead of reading success.
-    logger.bind(
+    relationships_state = _relationship_state_from_pass(
+        relationship_pass=relationship_pass,
+        relationship_results=relationship_results,
+    )
+    log = logger.bind(
         document_id=document_id,
-        relationships_attempted=len(relationship_results),
-        reason="relationship_extraction_not_implemented",
-    ).warning("graph_relationships_skipped")
+        relationships_attempted=relationships_state.relationships_attempted,
+        relationships_succeeded=relationships_state.relationships_succeeded,
+        relationships_invalid_span=relationships_state.relationships_invalid_span,
+        relationships_dropped=relationships_state.relationships_dropped,
+    )
+    if relationships_state.status is GraphRelationshipsStatus.FAILED:
+        log.warning("graph_relationships_failed", reason=relationships_state.reason)
+    elif relationships_state.status is GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED:
+        log.warning("graph_relationships_skipped", reason=relationships_state.reason)
+    else:
+        log.info("graph_relationships_written")
+    # Relationship truth joins the retry decision: a failed edge write OR a
+    # failed relationship provider call must not leave a complete checkpoint
+    # that hides permanently-missing relationships — deterministic edge ids
+    # make the retry's rewrites idempotent.  Honest degradations (disabled
+    # pass, exhausted budget, no inventory) are skipped/not_attempted states
+    # and deliberately stay non-blocking.
     return GraphWritePhaseResult(
-        success=all(result.success for result in clause_results),
+        success=all(result.success for result in clause_results)
+        and all(result.success for result in relationship_results)
+        and relationships_state.status is not GraphRelationshipsStatus.FAILED,
         clause_writes_attempted=len(clause_results),
         clause_writes_succeeded=sum(1 for result in clause_results if result.success),
-        relationships=GraphRelationshipsState(
-            status=GraphRelationshipsStatus.SKIPPED_NOT_IMPLEMENTED,
-            reason="relationship_extraction_not_implemented",
-            relationships_attempted=len(relationship_results),
-            relationships_succeeded=sum(1 for result in relationship_results if result.success),
-        ),
+        relationships=relationships_state,
     )
 
 
