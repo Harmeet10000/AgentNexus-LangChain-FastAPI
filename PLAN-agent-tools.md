@@ -225,3 +225,58 @@ truncated "done"); every subgraph `read_evidence_by_id` resolves against the sam
   schema tokens on *every turn*; every hidden catalog entry costs nothing. "Tiny
   projection, big catalog" is not a security nicety — it's what lets the tool surface
   grow 10× while the prompt stays constant. That asymmetry is the whole game.
+
+---
+
+## D6 — the compiled retrieval graph as the qna engine (decided 2026-10-31)
+
+**Decision (supersedes the D-then-E unification sequencing):** mount the compiled
+retrieval graph (`features/documents/retrieval/graph/`, builder
+`application/queries/documents.py::build_retrieval_graph`) as the served retrieval
+implementation — both for the HTTP ask endpoints and as Agent Saul's grounded-answer
+engine — and expose it to Saul **as a node, not a tool**.
+
+### Which node requires it: `qna` — and only qna
+
+The orchestrator already routes grounded-answer intents to the schema-locked `qna`
+node (no tools by design). The retrieval graph is exactly what qna was missing: a
+bounded plan → retrieve-fused → rerank → grade → generate machine with citations.
+qna's current single-shot structured generation becomes the graph's generate stage.
+
+**Exposure pattern: node-internal subgraph invocation (reference 10, pattern 1) —
+deliberately NOT a tool.**
+
+- A tool is a model-chosen capability with narrow I/O; a full RAG pipeline is a
+  sub-agent with rich internal state (grade loop, rewrite, budget) and a citable
+  answer. Reference 11's supervisor→worker handoff is the pattern; reference 03's
+  compiled-subgraph-tool rule (narrow boundary, runtime-injected identity) governs
+  the *boundary*, while reference 10's invoke-in-node governs the *wiring* — agent
+  state and retrieval state have different schemas, so the node maps state in and
+  out explicitly.
+- **Zero toolset bloat:** risk, compliance, and orchestrator toolsets are unchanged
+  (P-visibility math holds). Routing to grounded answers is a conditional edge /
+  existing handoff, not a new tool.
+- Precedent consistency: deep_research (D5) is likewise a node wrapping a bounded
+  subgraph. Two heavy capabilities, two dedicated nodes, flat toolsets.
+
+### Hard requirements (each a spec task with an acceptance test)
+
+1. **V6 context construction:** the node builds the graph's initial state from the
+   server-owned `ToolRuntimeContext` (tenant, allowed_doc_ids, version scope) —
+   never model-supplied, never ambient. Tenant-bypass is the failure mode this
+   closes.
+2. **Port inline-only capabilities into the graph before cutover:** edge-aware
+   grounding (#110: `fetch_relationship_edges` + `expand_along_edges` + edge
+   citations), version-aware cache keys, fallback answer, warning merges. The graph
+   must reach behavioral parity with the inline path — the parity suite from the
+   existing grade-loop tests is the acceptance gate.
+3. **Budget:** the node draws from Saul's ledger; the grade loop stays bounded
+   (2 iterations, matching inline); per-stage spend attributed (feeds G6).
+4. **HTTP cutover:** `/search/ask` + `/legal/ask` route through the same compiled
+   graph; the inline `ask` is deleted once parity is proven (the one deletion the
+   bulletproof plan permits). One implementation, two consumers (HTTP + Saul).
+5. **Transcript/events:** qna emits the answer through the existing WS event
+   vocabulary; citations carry evidence handles per the citation contract.
+
+See `PLAN-bulletproof-ingestion.md` (retired below) for the step-6 decision matrix
+and the completion audit that motivated mounting over extraction.

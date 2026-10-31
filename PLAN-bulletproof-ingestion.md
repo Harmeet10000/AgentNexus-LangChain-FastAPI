@@ -1,4 +1,30 @@
-# PLAN — Bulletproof Ingestion First
+# PLAN — Bulletproof Ingestion
+
+> **RETIRED 2026-10-31 — delivered with recorded residue.**
+>
+> Completion audit (2026-10-31, main @ bf9441f+): Phases A–D ≈ 90% blended — the
+> north star ("the pipeline never lies, never loses data silently") is delivered:
+> the lying guaranteed-503 endpoint and the `[]`-fed edge writer are gone, typed
+> relationship extraction is live and injection-gated, fidelity metrics persist,
+> and the ingestion CI gate runs green. This file's checkboxes historically
+> drifted from runtime truth; the audit below is the authoritative record, and
+> the residues now live where they will be executed:
+>
+> - **Phase E (quarantine ledger + state key-set seatbelt test)** → open item; the
+>   one ungated silent-drop edge is `legacy_service.py:57-66` vs
+>   `ingestion/workflow.py:49-67`.
+> - **Phase F / step 6 (retrieval unification)** → DECIDED: mount the graph
+>   (approach C). Spec being written as an OpenSpec change (HTTP cutover +
+>   Agent Saul `qna` engine exposure); decision matrix appended below.
+> - **G1** recall-gate in CI (corpus at 105/150–300) · **G4** graphiti as a fused
+>   branch (registration point: `documents.py:126-128`) · **G5/G6/G7** untouched —
+>   tracked on issue #107.
+> - **Deferred re-ingestion preconditions** 3–5 still gate any re-ingest exposure.
+>
+> The step-6 decision matrix and the full audit tables below are kept as the
+> normative record for the OpenSpec change.
+
+---
 
 **Date:** 2026-10-27 · **Owner:** Harmeet · **Status:** ready to execute
 **Hand-off doc:** self-contained. Give this file to any agent session; it re-derives nothing.
