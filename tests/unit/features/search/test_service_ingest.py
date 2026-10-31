@@ -1,32 +1,30 @@
-"""Ingest orchestration: sha256 dedupe, typed-job enqueue, fail-closed seams.
+"""Ingest orchestration: sha256 dedupe, atomic staging, ownership, fail-closed seams.
 
 The service must never read ``tenant_id`` from the request body: it takes the
-authorization-derived tenant and writes it into both the document row and the
-queued payload. Every stub here records the tenant it was called with so the
-scoping claims are assertions, not narrative.
+authorization-derived tenant and writes it into the document row, the staged
+job, and the task-ownership record. Every stub here records the tenant it was
+called with so the scoping claims are assertions, not narrative.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import orjson
 import pytest
 from fakeredis.aioredis import FakeRedis
 from returns.result import Failure, Success
 
 from app.features.search.adapters.persistence.models import SearchDocument
 from app.features.search.api.http.dto import SearchIngestRequest
+from app.features.search.application import service as search_service_module
 from app.features.search.application.service import SearchService
 from app.features.search.domain.errors import (
     SearchConflictError,
     SearchInfrastructureError,
     SearchNotFoundError,
 )
-from app.shared.jobs import (
-    InMemoryDirectAdapter,
-    InMemoryTransactionalAdapter,
-    JobBus,
-)
+from app.shared.jobs import JobBus
 from app.shared.jobs.names import SEARCH_INGEST
 
 if TYPE_CHECKING:
@@ -34,9 +32,21 @@ if TYPE_CHECKING:
     from typing import Any
 
     from app.features.search.api.http.dto import HybridSearchRequest
+    from app.shared.jobs import AggregateRef
+    from app.shared.jobs.bus import TypedJob
+    from app.shared.jobs.payloads import CeleryTaskPayload
 
 TENANT = "tenant-1"
 OTHER_TENANT = "tenant-2"
+DOC_ID = "00000000-0000-0000-0000-0000000000aa"
+
+
+class _FakeSession:
+    """Just the staging capability the transaction guard looks for."""
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:  # pragma: no cover
+        message = "unit doubles never execute SQL"
+        raise NotImplementedError(message)
 
 
 class _StubRepository:
@@ -53,9 +63,16 @@ class _StubRepository:
         self.create_failure = create_failure
         self.lookup_failure = lookup_failure
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.rollbacks = 0
+        # The service binds transactional staging to the repo's session; the
+        # staging guard checks for an async `execute` capability.
+        self.session = _FakeSession()
 
     def _record(self, method: str, kwargs: dict[str, Any]) -> None:
         self.calls.append((method, kwargs))
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
 
     async def get_document_by_content_hash(self, *, tenant_id: str, content_hash: str) -> Any:
         self._record("get_document_by_content_hash", {"tenant_id": tenant_id})
@@ -68,7 +85,7 @@ class _StubRepository:
         if self.create_failure is not None:
             return Failure(self.create_failure)
         document = SearchDocument(
-            id=_uuid("00000000-0000-0000-0000-0000000000aa"),
+            id=_uuid(DOC_ID),
             tenant_id=kwargs["tenant_id"],
             title=kwargs["title"],
             source_uri=kwargs["source_uri"],
@@ -78,7 +95,7 @@ class _StubRepository:
         return Success(document)
 
     async def get_document_by_id(self, *, tenant_id: str, document_id: str) -> Any:
-        self._record("get_document_by_id", {"tenant_id": tenant_id})
+        self._record("get_document_by_id", {"tenant_id": tenant_id, "document_id": document_id})
         if self.lookup_failure is not None:
             return Failure(self.lookup_failure)
         return Success(None)
@@ -124,6 +141,47 @@ class _StubRepository:
         return Success(None)
 
 
+class _RecordingStagingAdapter:
+    """Transactional staging double that accepts any transaction handle.
+
+    The production adapter (``PostgresOutboxAdapter``) stages onto the
+    caller-owned session; this double records the staged jobs so tests can
+    assert on the wire payload without a database.
+    """
+
+    def __init__(self, *, failure: Exception | None = None):
+        self.failure = failure
+        self.staged: list[tuple[TypedJob[CeleryTaskPayload], AggregateRef]] = []
+        self._next_id = 0
+
+    async def stage(
+        self,
+        _tx: object,
+        job: TypedJob[CeleryTaskPayload],
+        *,
+        aggregate: AggregateRef,
+    ) -> str:
+        if self.failure is not None:
+            raise self.failure
+        self.staged.append((job, aggregate))
+        self._next_id += 1
+        return f"event-{self._next_id}"
+
+
+class _SetFailingRedis:
+    """Redis double whose ``set`` fails (ownership write cannot be recorded)."""
+
+    def __init__(self, inner: Any):
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    async def set(self, *_args: Any, **_kwargs: Any) -> Any:
+        message = "cache down"
+        raise RuntimeError(message)
+
+
 def _uuid(seed: str) -> Any:
     from uuid import UUID
 
@@ -153,6 +211,12 @@ def _service(
     )
 
 
+def _job_bus(staging: _RecordingStagingAdapter) -> JobBus:
+    from app.shared.jobs import InMemoryDirectAdapter
+
+    return JobBus(InMemoryDirectAdapter(), staging)  # type: ignore[arg-type]
+
+
 async def _stub_embed_query(text: str, *, task_type: Any) -> list[float]:
     return [0.1, 0.2, 0.3]
 
@@ -166,12 +230,19 @@ def _ingest_payload(**overrides: str) -> SearchIngestRequest:
     return SearchIngestRequest(**values)
 
 
+def _owner_key(task_id: str) -> str:
+    return f"search:task_owner:{task_id}"
+
+
+# --- ingest: dedupe, staging, ownership -------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_duplicate_content_short_circuits_without_enqueue() -> None:
-    existing = SearchDocument(id=_uuid("00000000-0000-0000-0000-0000000000aa"))
+async def test_completed_document_short_circuits_without_staging() -> None:
+    existing = SearchDocument(id=_uuid(DOC_ID), status="completed")
     repo = _StubRepository(existing_document=existing)
-    direct = InMemoryDirectAdapter()
-    service = _service(repo, job_bus=JobBus(direct, InMemoryTransactionalAdapter()))
+    staging = _RecordingStagingAdapter()
+    service = _service(repo, job_bus=_job_bus(staging))
 
     result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
 
@@ -180,7 +251,7 @@ async def test_duplicate_content_short_circuits_without_enqueue() -> None:
     assert response.duplicate is True
     assert response.task_id is None
     assert response.status == "completed"
-    assert direct.published == []
+    assert staging.staged == []
     # Dedupe lookup itself must be tenant-scoped.
     assert repo.calls[0] == (
         "get_document_by_content_hash",
@@ -189,10 +260,11 @@ async def test_duplicate_content_short_circuits_without_enqueue() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fresh_ingest_enqueues_typed_job_scoped_to_the_caller_tenant() -> None:
+async def test_fresh_ingest_stages_typed_job_atomically_with_the_document() -> None:
     repo = _StubRepository()
-    direct = InMemoryDirectAdapter()
-    service = _service(repo, job_bus=JobBus(direct, InMemoryTransactionalAdapter()))
+    staging = _RecordingStagingAdapter()
+    redis = FakeRedis(decode_responses=True)
+    service = _service(repo, job_bus=_job_bus(staging), redis=redis)
 
     result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
 
@@ -200,11 +272,15 @@ async def test_fresh_ingest_enqueues_typed_job_scoped_to_the_caller_tenant() -> 
     response = result.unwrap()
     assert response.duplicate is False
     assert response.status == "queued"
-    assert response.task_id == "broker-1"
+    assert response.task_id == "event-1"
 
-    assert len(direct.published) == 1
-    job = direct.published[0]
+    # The job went through the transactional staging seam (outbox), bound to
+    # the request session — never a direct broker publish.
+    assert len(staging.staged) == 1
+    job, aggregate = staging.staged[0]
     assert job.task_name == SEARCH_INGEST
+    assert aggregate.aggregate_type == "search_document"
+    assert aggregate.aggregate_id == response.document_id
     payload = job.wire_payload()
     assert payload["tenant_id"] == TENANT
     assert payload["document_id"] == response.document_id
@@ -212,14 +288,41 @@ async def test_fresh_ingest_enqueues_typed_job_scoped_to_the_caller_tenant() -> 
     # The document row also carries the caller's tenant.
     create_call = next(call for name, call in repo.calls if name == "create_document")
     assert create_call["tenant_id"] == TENANT
+    # The ownership record for GET /ingest/{task_id} was written.
+    owner_raw = await redis.get(_owner_key("event-1"))
+    assert owner_raw is not None
+    owner = orjson.loads(owner_raw)
+    assert owner == {"tenant_id": TENANT, "document_id": response.document_id}
+
+
+@pytest.mark.asyncio
+async def test_pending_row_is_re_enqueued_not_reported_done() -> None:
+    """A stored row whose pipeline never completed must be re-driven."""
+    existing = SearchDocument(id=_uuid(DOC_ID), status="pending")
+    repo = _StubRepository(existing_document=existing)
+    staging = _RecordingStagingAdapter()
+    service = _service(repo, job_bus=_job_bus(staging), redis=FakeRedis(decode_responses=True))
+
+    result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
+
+    assert isinstance(result, Success)
+    response = result.unwrap()
+    assert response.duplicate is False
+    assert response.status == "queued"
+    assert response.document_id == DOC_ID
+    # No second row: the staged job reuses the existing document identity.
+    assert not any(name == "create_document" for name, _ in repo.calls)
+    job, aggregate = staging.staged[0]
+    assert aggregate.aggregate_id == DOC_ID
+    assert job.wire_payload()["document_id"] == DOC_ID
 
 
 @pytest.mark.asyncio
 async def test_dedupe_is_per_tenant_for_identical_content() -> None:
     """The same content ingested by a second tenant must not dedupe to the first."""
     repo = _StubRepository()
-    direct = InMemoryDirectAdapter()
-    service = _service(repo, job_bus=JobBus(direct, InMemoryTransactionalAdapter()))
+    staging = _RecordingStagingAdapter()
+    service = _service(repo, job_bus=_job_bus(staging), redis=FakeRedis(decode_responses=True))
 
     first = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
     second = await service.ingest_document(tenant_id=OTHER_TENANT, payload=_ingest_payload())
@@ -237,23 +340,25 @@ async def test_dedupe_is_per_tenant_for_identical_content() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_job_bus_fails_closed() -> None:
-    """A document row without a queued pipeline is a pending orphan — an outage."""
+async def test_missing_job_bus_fails_closed_before_any_write() -> None:
+    """A document row without a queueable pipeline is a pending orphan — an outage."""
     repo = _StubRepository()
     service = _service(repo, job_bus=None)
 
     result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
 
     assert isinstance(result, Failure)
-    error = result.failure()
-    assert isinstance(error, SearchInfrastructureError)
+    assert isinstance(result.failure(), SearchInfrastructureError)
+    # Failed before the document row was created — nothing to strand.
+    assert not any(name == "create_document" for name, _ in repo.calls)
 
 
 @pytest.mark.asyncio
-async def test_enqueue_failure_is_a_typed_infrastructure_failure() -> None:
+async def test_staging_failure_rolls_back_and_fails_typed() -> None:
+    """A staged-but-failed ingest must unwind the flushed document row."""
     repo = _StubRepository()
-    direct = InMemoryDirectAdapter(failure=RuntimeError("broker down"))
-    service = _service(repo, job_bus=JobBus(direct, InMemoryTransactionalAdapter()))
+    staging = _RecordingStagingAdapter(failure=RuntimeError("broker down"))
+    service = _service(repo, job_bus=_job_bus(staging), redis=FakeRedis(decode_responses=True))
 
     result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
 
@@ -262,6 +367,23 @@ async def test_enqueue_failure_is_a_typed_infrastructure_failure() -> None:
     assert isinstance(error, SearchInfrastructureError)
     assert error.details is not None
     assert "document_id" in error.details
+    # Without this rollback, get_postgres_db would commit the pending row and
+    # every later submission would report it as an in-flight duplicate.
+    assert repo.rollbacks == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_ownership_record_rolls_back_and_fails_closed() -> None:
+    """Without the ownership record the tenant could never poll — fail closed."""
+    repo = _StubRepository()
+    staging = _RecordingStagingAdapter()
+    service = _service(repo, job_bus=_job_bus(staging), redis=_SetFailingRedis(FakeRedis()))
+
+    result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), SearchInfrastructureError)
+    assert repo.rollbacks == 1
 
 
 @pytest.mark.asyncio
@@ -270,7 +392,7 @@ async def test_database_failure_propagates_as_failure() -> None:
         create_failure=SearchConflictError(message="constraint violation", source="test")
     )
     service = _service(
-        repo, job_bus=JobBus(InMemoryDirectAdapter(), InMemoryTransactionalAdapter())
+        repo, job_bus=_job_bus(_RecordingStagingAdapter()), redis=FakeRedis(decode_responses=True)
     )
 
     result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
@@ -279,7 +401,7 @@ async def test_database_failure_propagates_as_failure() -> None:
     assert isinstance(result.failure(), SearchConflictError)
 
 
-# --- get_ingest_status: fail closed across tenants -------------------------
+# --- get_ingest_status: ownership, states, fail closed ----------------------
 
 
 class _FakeAsyncResult:
@@ -288,23 +410,52 @@ class _FakeAsyncResult:
         self.result = result
 
 
-@pytest.mark.asyncio
-async def test_ingest_status_of_another_tenant_reads_as_not_found(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A task created by tenant-1 is invisible to tenant-2 — same as missing."""
+def _seed_owner(monkeypatch: pytest.MonkeyPatch, state: str, result: object) -> None:
     from app.connections import celery_app
 
-    repo = _StubRepository()
     monkeypatch.setattr(
         celery_app,
         "AsyncResult",
-        lambda _task_id: _FakeAsyncResult(
-            state="SUCCESS",
-            result={"status": "completed", "tenant_id": TENANT, "document_id": "doc-1"},
-        ),
+        lambda _task_id: _FakeAsyncResult(state=state, result=result),
     )
-    service = _service(repo)
+
+
+@pytest.mark.asyncio
+async def test_queued_task_is_authorized_by_the_ownership_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A task no worker has run yet is visible to its owner — via the record."""
+    _seed_owner(monkeypatch, state="PENDING", result=None)
+    repo = _StubRepository()
+    redis = FakeRedis(decode_responses=True)
+    await redis.set(
+        _owner_key("task-1"),
+        orjson.dumps({"tenant_id": TENANT, "document_id": DOC_ID}),
+    )
+    service = _service(repo, redis=redis)
+
+    result = await service.get_ingest_status(tenant_id=TENANT, task_id="task-1")
+
+    assert isinstance(result, Success)
+    status = result.unwrap()
+    # Celery's PENDING means "never seen"; the ownership record proves the
+    # task is staged, so the reportable state is QUEUED.
+    assert status.status == "QUEUED"
+    assert status.document_id == DOC_ID
+
+
+@pytest.mark.asyncio
+async def test_queued_task_of_another_tenant_reads_as_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_owner(monkeypatch, state="PENDING", result=None)
+    repo = _StubRepository()
+    redis = FakeRedis(decode_responses=True)
+    await redis.set(
+        _owner_key("task-1"),
+        orjson.dumps({"tenant_id": TENANT, "document_id": DOC_ID}),
+    )
+    service = _service(repo, redis=redis)
 
     result = await service.get_ingest_status(tenant_id=OTHER_TENANT, task_id="task-1")
 
@@ -313,68 +464,89 @@ async def test_ingest_status_of_another_tenant_reads_as_not_found(
 
 
 @pytest.mark.asyncio
-async def test_own_tenant_sees_its_ingest_status(
+async def test_task_without_ownership_evidence_reads_as_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.connections import celery_app
-
+    """PENDING with no owner record and no payload tenant is someone else's task."""
+    _seed_owner(monkeypatch, state="PENDING", result=None)
     repo = _StubRepository()
-    monkeypatch.setattr(
-        celery_app,
-        "AsyncResult",
-        lambda _task_id: _FakeAsyncResult(
-            state="SUCCESS",
-            result={"status": "completed", "tenant_id": TENANT, "document_id": "doc-1"},
-        ),
-    )
-    service = _service(repo)
+    service = _service(repo, redis=FakeRedis(decode_responses=True))
 
     result = await service.get_ingest_status(tenant_id=TENANT, task_id="task-1")
 
-    assert isinstance(result, Success)
-    status = result.unwrap()
-    assert status.task_id == "task-1"
-    assert status.status == "SUCCESS"
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), SearchNotFoundError)
 
 
 @pytest.mark.asyncio
-async def test_failure_state_surfaces_the_error_field(
+async def test_completed_task_is_authorized_by_the_result_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.connections import celery_app
-
-    repo = _StubRepository()
-    monkeypatch.setattr(
-        celery_app,
-        "AsyncResult",
-        lambda _task_id: _FakeAsyncResult(
-            state="FAILURE",
-            result={"tenant_id": TENANT, "detail": "boom"},
-        ),
+    """After a worker runs, the result payload carries the tenant as a fallback."""
+    _seed_owner(
+        monkeypatch,
+        state="SUCCESS",
+        result={"status": "completed", "tenant_id": TENANT, "document_id": DOC_ID},
     )
-    service = _service(repo)
+    repo = _StubRepository()
+    service = _service(repo, redis=FakeRedis(decode_responses=True))
 
     result = await service.get_ingest_status(tenant_id=TENANT, task_id="task-1")
 
     assert isinstance(result, Success)
     status = result.unwrap()
+    assert status.status == "SUCCESS"
+    assert status.document_id == DOC_ID
+
+
+@pytest.mark.asyncio
+async def test_foreign_payload_tenant_reads_as_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_owner(
+        monkeypatch,
+        state="SUCCESS",
+        result={"status": "completed", "tenant_id": TENANT, "document_id": DOC_ID},
+    )
+    repo = _StubRepository()
+    service = _service(repo, redis=FakeRedis(decode_responses=True))
+
+    result = await service.get_ingest_status(tenant_id=OTHER_TENANT, task_id="task-1")
+
+    assert isinstance(result, Failure)
+    assert isinstance(result.failure(), SearchNotFoundError)
+
+
+@pytest.mark.asyncio
+async def test_failure_state_surfaces_the_exception_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The FAILURE result is an exception instance, and its message is the error."""
+    _seed_owner(monkeypatch, state="FAILURE", result=RuntimeError("embedding quota exceeded"))
+    repo = _StubRepository()
+    redis = FakeRedis(decode_responses=True)
+    await redis.set(
+        _owner_key("task-1"),
+        orjson.dumps({"tenant_id": TENANT, "document_id": DOC_ID}),
+    )
+    service = _service(repo, redis=redis)
+
+    result = await service.get_ingest_status(tenant_id=TENANT, task_id="task-1")
+
+    assert isinstance(result, Success)
+    status = result.unwrap()
+    assert status.status == "FAILURE"
     assert status.error is not None
-    assert "boom" in status.error
+    assert "embedding quota exceeded" in status.error
 
 
-# --- hybrid search: fusion, cache, tenant scoping --------------------------
+# --- hybrid search: fusion, cache, width guard, tenant scoping --------------
 
 
 @pytest.mark.asyncio
 async def test_hybrid_search_fuses_and_hydrates() -> None:
     repo = _StubRepository()
-    repo.fetch_results = {}  # type: ignore[attr-defined]
-    direct = InMemoryDirectAdapter()
-    service = _service(
-        repo,
-        job_bus=JobBus(direct, InMemoryTransactionalAdapter()),
-        redis=FakeRedis(decode_responses=True),
-    )
+    service = _service(repo, job_bus=None, redis=FakeRedis(decode_responses=True))
 
     payload: HybridSearchRequest = _hybrid_payload()
     result = await service.hybrid_search(tenant_id=TENANT, payload=payload)
@@ -398,6 +570,39 @@ def _hybrid_payload(**overrides: Any) -> Any:
     values: dict[str, Any] = {"query": "site query", "limit": 10, "candidate_limit": 50}
     values.update(overrides)
     return HybridSearchRequest(**values)
+
+
+@pytest.mark.asyncio
+async def test_branches_run_sequentially_on_the_shared_session() -> None:
+    """The three branches must not interleave on one request-scoped AsyncSession."""
+    repo = _StubRepository()
+    service = _service(repo, job_bus=None, redis=FakeRedis(decode_responses=True))
+
+    result = await service.hybrid_search(tenant_id=TENANT, payload=_hybrid_payload())
+
+    assert isinstance(result, Success)
+    branch_order = [
+        name for name, _ in repo.calls if name in {"bm25_search", "vector_search", "trigram_search"}
+    ]
+    assert branch_order == ["bm25_search", "vector_search", "trigram_search"]
+
+
+@pytest.mark.asyncio
+async def test_width_mismatch_fails_closed_before_querying(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A column/setting width disagreement ranks nothing — refuse before embedding."""
+    repo = _StubRepository()
+    service = _service(repo, job_bus=None, redis=FakeRedis(decode_responses=True))
+    monkeypatch.setattr(search_service_module, "SEARCH_EMBEDDING_DIM", 123)
+
+    result = await service.hybrid_search(tenant_id=TENANT, payload=_hybrid_payload())
+
+    assert isinstance(result, Failure)
+    error = result.failure()
+    assert isinstance(error, SearchInfrastructureError)
+    assert "search_chunks.embedding" in error.message
+    assert repo.calls == []
 
 
 @pytest.mark.asyncio
@@ -453,3 +658,23 @@ async def test_a_broken_branch_fails_the_request_and_names_it() -> None:
     error = result.failure()
     assert isinstance(error, SearchInfrastructureError)
     assert error.message.startswith("vector retrieval branch failed")
+
+
+@pytest.mark.asyncio
+async def test_ingest_stages_through_the_transactional_seam_not_direct_publish() -> None:
+    """Direct publication would break document+job atomicity; it must never run."""
+    repo = _StubRepository()
+    bus = JobBus(_ExplodingDirectAdapter(), _RecordingStagingAdapter())  # type: ignore[arg-type]
+    service = _service(repo, job_bus=bus, redis=FakeRedis(decode_responses=True))
+
+    result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
+
+    # The transactional adapter was used (its staging recorded, receipt is the
+    # outbox event id), so the direct path was never touched.
+    assert isinstance(result, Success)
+
+
+class _ExplodingDirectAdapter:
+    async def publish(self, _job: Any, **_kwargs: Any) -> str:
+        message = "direct publish must not be used by the search service"
+        raise AssertionError(message)

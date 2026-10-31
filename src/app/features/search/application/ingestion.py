@@ -28,6 +28,7 @@ from app.features.search.domain.errors import SearchInfrastructureError
 from app.features.search.domain.models import SearchDocumentStatus
 from app.observability.logging import logger
 from app.utils import InfrastructureException, ServiceUnavailableException
+from app.utils.embedding import assert_stored_width_matches_configured
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -60,9 +61,15 @@ async def process_search_ingestion_document(
 
     Idempotent end to end: chunk indexes are stable for identical content, and
     the (document_id, chunk_index) upsert makes re-runs converge to the same
-    rows rather than duplicating them.
+    rows rather than duplicating them. Embedding and upsert happen per batch,
+    in one transaction, so a huge document never materializes a single giant
+    INSERT and memory stays bounded by SEARCH_INGEST_EMBEDDING_BATCH_SIZE.
     """
     settings = get_settings()
+    # Fail fast when the configured producer width disagrees with the width
+    # this relation stores: a retry loop cannot fix a column/setting drift,
+    # so the configuration error must be terminal, not retried.
+    assert_stored_width_matches_configured(SEARCH_EMBEDDING_DIM, relation="search_chunks.embedding")
     chunks = chunk_text(
         content,
         chunk_size=settings.SEARCH_INGEST_CHUNK_SIZE,
@@ -70,35 +77,46 @@ async def process_search_ingestion_document(
     )
 
     if not chunks:
+        # Even a zero-chunk ingest is a terminal state the tenant can poll:
+        # record it instead of leaving the row pending forever.
+        status_result = await repo.set_document_status(
+            document_id=document_id, status=SearchDocumentStatus.COMPLETED.value
+        )
+        if isinstance(status_result, Failure):
+            raise _to_raising_exception(status_result.failure())
         return {"status": "completed", "document_id": document_id, "chunk_count": 0}
 
-    chunk_payloads: list[dict[str, object]] = []
+    chunk_count = 0
     for batch in _batched(chunks, settings.SEARCH_INGEST_EMBEDDING_BATCH_SIZE):
         embeddings = await embed_texts(
             [chunk.content for chunk in batch],
             task_type=EmbeddingTaskType.DOCUMENT,
         )
-        for chunk, embedding in zip(batch, embeddings, strict=True):
-            chunk_payloads.append(
-                {
-                    "id": str(uuid4()),
-                    "chunk_index": chunk.chunk_index,
-                    "content": chunk.content,
-                    "embedding": embedding,
-                    "chunk_metadata": {"token_count": chunk.token_count},
-                }
+        batch_rows = [
+            {
+                "id": str(uuid4()),
+                "chunk_index": chunk.chunk_index,
+                "content": chunk.content,
+                "embedding": embedding,
+                "chunk_metadata": {"token_count": chunk.token_count},
+            }
+            for chunk, embedding in zip(batch, embeddings, strict=True)
+        ]
+        # One INSERT per embedding batch, all inside the caller's transaction:
+        # the whole document either lands or rolls back, but no statement ever
+        # carries every chunk of a huge document at once.
+        upsert_result = await repo.upsert_chunks(
+            build_chunk_rows(
+                document_id=document_id,
+                tenant_id=tenant_id,
+                chunks=batch_rows,
             )
-
-    upsert_result = await repo.upsert_chunks(
-        build_chunk_rows(
-            document_id=document_id,
-            tenant_id=tenant_id,
-            chunks=chunk_payloads,
         )
-    )
-    if isinstance(upsert_result, Failure):
-        raise _to_raising_exception(upsert_result.failure())
-    if len(chunk_payloads) > settings.SEARCH_ANALYZE_THRESHOLD_CHUNKS:
+        if isinstance(upsert_result, Failure):
+            raise _to_raising_exception(upsert_result.failure())
+        chunk_count += len(batch_rows)
+
+    if chunk_count > settings.SEARCH_ANALYZE_THRESHOLD_CHUNKS:
         analyze_result = await repo.analyze_chunks()
         if isinstance(analyze_result, Failure):
             raise _to_raising_exception(analyze_result.failure())
@@ -109,14 +127,14 @@ async def process_search_ingestion_document(
     if isinstance(status_result, Failure):
         raise _to_raising_exception(status_result.failure())
 
-    logger.bind(document_id=document_id, tenant_id=tenant_id, chunk_count=len(chunk_payloads)).info(
+    logger.bind(document_id=document_id, tenant_id=tenant_id, chunk_count=chunk_count).info(
         "search_ingest_processed"
     )
     return {
         "status": "completed",
         "document_id": document_id,
         "tenant_id": tenant_id,
-        "chunk_count": len(chunk_payloads),
+        "chunk_count": chunk_count,
         "embedding_dim": SEARCH_EMBEDDING_DIM,
     }
 

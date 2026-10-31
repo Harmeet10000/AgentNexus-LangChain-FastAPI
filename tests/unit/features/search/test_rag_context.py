@@ -108,6 +108,61 @@ def test_budget_exactly_reached_admits_the_section() -> None:
     assert len(sections) == 1
 
 
+def test_merged_group_over_budget_keeps_the_fitting_prefix() -> None:
+    """An overflowing merged run is split, not dropped wholesale (G P2)."""
+    pairs = [
+        _chunk("a1", "doc-a", 0, "one two"),  # merged with a2 = 4 tokens
+        _chunk("a2", "doc-a", 1, "three four"),
+    ]
+    sections = assemble_rag_context(
+        [rank for rank, _ in pairs],
+        {rank.chunk_id: record for rank, record in pairs},
+        max_tokens=3,
+        count_tokens=_whitespace_tokens,
+    )
+    # The merged pair (4) overflows 3, so the run is emitted as its largest
+    # fitting prefix — chunk 0 alone (2 tokens) — and chunk 1 cannot fit alone.
+    assert [section.chunk_indices for section in sections] == [[0]]
+    assert sections[0].content == "one two"
+
+
+def test_overflow_chunk_starts_the_next_section_when_it_fits() -> None:
+    """A separator-costing counter makes merged content exceed the token sum;
+    the overflow chunk must then start its own section, not vanish with the
+    group."""
+
+    def _count_with_separator_cost(text: str) -> int:
+        return len(text.split()) + (1 if "\n\n" in text else 0)
+
+    pairs = [
+        _chunk("a1", "doc-a", 0, "one"),  # 1 token
+        _chunk("a2", "doc-a", 1, "two"),  # merged = 1+1+1(separator) = 3
+    ]
+    sections = assemble_rag_context(
+        [rank for rank, _ in pairs],
+        {rank.chunk_id: record for rank, record in pairs},
+        max_tokens=2,
+        count_tokens=_count_with_separator_cost,
+    )
+    # a1+a2 merged (3) overflows; a1 alone fits, and a2 alone (1 ≤ remaining 1)
+    # starts a new section rather than being dropped with the group.
+    assert [section.chunk_indices for section in sections] == [[0], [1]]
+
+
+def test_group_whose_first_chunk_cannot_fit_is_skipped_but_later_groups_survive() -> None:
+    pairs = [
+        _chunk("big", "doc-a", 0, " ".join(["token"] * 10)),  # 10 tokens, never fits
+        _chunk("b1", "doc-b", 0, "tiny"),  # 1 token, fits
+    ]
+    sections = assemble_rag_context(
+        [rank for rank, _ in pairs],
+        {rank.chunk_id: record for rank, record in pairs},
+        max_tokens=5,
+        count_tokens=_whitespace_tokens,
+    )
+    assert [section.document_id for section in sections] == ["doc-b"]
+
+
 def test_unknown_chunk_ids_are_skipped() -> None:
     sections = assemble_rag_context(
         [RankedChunk(chunk_id="missing", score=1.0, rank=1)],

@@ -54,12 +54,15 @@ def test_repository_uses_the_bind_cast_helpers_not_postfix_casts() -> None:
 
 
 def test_text_is_reserved_for_extension_operators_and_maintenance() -> None:
-    """The four sanctioned text() shapes: <@>, <=>, %/similarity, ANALYZE."""
+    """The sanctioned text() shapes: <@>, <=>, %/similarity + GUCs, ANALYZE."""
     assert _REPO_SOURCE.count("<@> to_bm25query") >= 2
     assert "<=> CAST(:embedding AS vector)" in _REPO_SOURCE
     assert "SET LOCAL diskann.query_search_list_size" in _REPO_SOURCE
     assert "SET LOCAL diskann.query_rescore" in _REPO_SOURCE
     assert "similarity(c.content, :query)" in _REPO_SOURCE
+    # The `%` operator reads pg_trgm.similarity_threshold from the session;
+    # set_config(..., is_local => true) is its parameterizable SET LOCAL form.
+    assert "set_config('pg_trgm.similarity_threshold', :threshold, true)" in _REPO_SOURCE
     assert 'text(text="ANALYZE search_chunks")' in _REPO_SOURCE
 
 

@@ -416,6 +416,11 @@ class Settings(BaseSettings):
     SEARCH_DISKANN_QUERY_RESCORE: int = Field(default=50, ge=1)
     SEARCH_CHUNKS_BM25_INDEX_NAME: str = Field(default="search_chunks_bm25_idx")
     SEARCH_TRIGRAM_SIMILARITY_THRESHOLD: float = Field(default=0.1, ge=0.0, le=1.0)
+    # How long the task->tenant ownership record written at ingest survives.
+    # It is the authorization source for GET /search/ingest/{task_id} while a
+    # task is queued (the Celery result payload only carries the tenant after
+    # a worker runs), so it must outlive any realistic polling window.
+    SEARCH_TASK_OWNER_TTL_SECONDS: int = Field(default=86_400, ge=1)
 
     # --- Redis Cache for Crawler ---
     REDIS_CRAWL_CACHE_TTL: int = Field(default=3600)  # 1 hour

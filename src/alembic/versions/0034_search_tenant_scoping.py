@@ -111,6 +111,37 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Restoring the GLOBAL content-hash unique constraint is only possible
+    # while the corpus is still single-tenant per hash. Normal cross-tenant
+    # operation makes identical content legal per tenant, so a naive downgrade
+    # would fail mid-constraint-swap or, worse, tempt a "fix" that deletes
+    # tenant data. Policy: fail loudly, name the conflicting hashes, change
+    # nothing. The operator must resolve duplicates explicitly (delete or
+    # re-hash per tenant) before downgrading.
+    conn = op.get_bind()
+    conflicts = conn.execute(
+        sa.text(
+            """
+            SELECT content_hash, COUNT(DISTINCT tenant_id) AS tenant_count
+            FROM search_documents
+            GROUP BY content_hash
+            HAVING COUNT(DISTINCT tenant_id) > 1
+            ORDER BY content_hash
+            LIMIT 25
+            """
+        )
+    ).fetchall()
+    if conflicts:
+        listing = ", ".join(f"{row.content_hash} ({row.tenant_count} tenants)" for row in conflicts)
+        msg = (
+            "Cannot downgrade 0034: search_documents contains content hashes "
+            "owned by more than one tenant, which the global "
+            f"uq_search_documents_content_hash constraint forbids: {listing}. "
+            "Resolve the duplicates (delete or re-key per tenant) and retry; "
+            "this downgrade never deletes tenant data automatically."
+        )
+        raise RuntimeError(msg)
+
     op.add_column(
         "search_chunks",
         sa.Column(

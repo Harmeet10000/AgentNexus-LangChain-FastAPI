@@ -42,13 +42,21 @@ class SearchIngestResponse(BaseModel):
     model_config = _READ_MODEL_CONFIG
 
     document_id: str
+    # The pollable task identity. Ingest stages the job through the
+    # transactional job bus (atomic with the document row), so this is the
+    # outbox event id; Celery assigns its own task id only at relay dispatch.
     task_id: str | None = None
     status: str
     duplicate: bool = False
 
 
 class SearchTaskStatusResponse(BaseModel):
-    """Normalized ingestion task status payload."""
+    """Normalized ingestion task status payload.
+
+    ``status`` is the Celery result state, except that a staged-but-undispatched
+    task (known via the enqueue-time ownership record) reports ``QUEUED`` —
+    Celery's ``PENDING`` means "never seen this task", not "waiting".
+    """
 
     model_config = _READ_MODEL_CONFIG
 

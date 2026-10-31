@@ -50,7 +50,13 @@ def assemble_rag_context(
     max_tokens: int,
     count_tokens: CountTokens = count_tokens,
 ) -> list[ContextSection]:
-    """Group by document, restore chunk order, merge adjacent chunks, and budget output."""
+    """Group by document, restore chunk order, merge adjacent runs, and budget output.
+
+    The budget splits at chunk granularity: a merged run that would overflow is
+    emitted as its largest fitting prefix, and the overflow chunk starts the
+    next run if it fits on its own. A group is never dropped wholesale when its
+    first chunk fits — only a chunk that cannot fit even alone is skipped.
+    """
     grouped: dict[str, list[tuple[RankedChunk, SearchChunkRecord]]] = {}
     document_order: list[str] = []
 
@@ -73,30 +79,47 @@ def assemble_rag_context(
 
         for _, chunk in ordered_chunks:
             if not current_group:
+                if used_tokens + count_tokens(chunk.content) <= max_tokens:
+                    current_group = [chunk]
+                # A chunk that cannot fit even alone is skipped; there is no
+                # smaller prefix of it to keep.
+                continue
+
+            if chunk.chunk_index == current_group[-1].chunk_index + 1:
+                merged = _build_context_section([*current_group, chunk])
+                if used_tokens + count_tokens(merged.content) <= max_tokens:
+                    current_group.append(chunk)
+                    continue
+                # Budget boundary inside a merged run: flush the largest
+                # fitting prefix, then try to start the next run with chunk.
+                used_tokens += _flush(sections, current_group, count_tokens)
+                current_group = []
+                if used_tokens + count_tokens(chunk.content) <= max_tokens:
+                    current_group = [chunk]
+                continue
+
+            # Adjacency break: the run is final, and it was admitted under the
+            # budget incrementally, so it always fits.
+            used_tokens += _flush(sections, current_group, count_tokens)
+            current_group = []
+            if used_tokens + count_tokens(chunk.content) <= max_tokens:
                 current_group = [chunk]
-                continue
-
-            previous_index = current_group[-1].chunk_index
-            current_index = chunk.chunk_index
-            if current_index == previous_index + 1:
-                current_group.append(chunk)
-                continue
-
-            section = _build_context_section(current_group)
-            used_tokens += count_tokens(section.content)
-            if used_tokens > max_tokens:
-                return sections
-            sections.append(section)
-            current_group = [chunk]
 
         if current_group:
-            section = _build_context_section(current_group)
-            used_tokens += count_tokens(section.content)
-            if used_tokens > max_tokens:
-                return sections
-            sections.append(section)
+            used_tokens += _flush(sections, current_group, count_tokens)
 
     return sections
+
+
+def _flush(
+    sections: list[ContextSection],
+    group: list[SearchChunkRecord],
+    count_tokens: CountTokens,
+) -> int:
+    """Emit ``group`` as a section and return its token cost."""
+    section = _build_context_section(group)
+    sections.append(section)
+    return count_tokens(section.content)
 
 
 def _build_context_section(chunks: list[SearchChunkRecord]) -> ContextSection:

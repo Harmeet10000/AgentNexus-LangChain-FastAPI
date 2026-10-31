@@ -169,6 +169,18 @@ class SearchRepository:
                 )
             )
 
+    async def rollback(self) -> None:
+        """Discard the caller-visible pending writes on this session.
+
+        Ingest stages the document row and the outbox event on the request
+        session, which the ``get_postgres_db`` dependency commits after the
+        handler returns. When the service returns a ``Failure`` after either
+        was flushed, it must unwind them here first — a returned ``Failure``
+        does not roll a request-scoped session back, and committing a
+        document without its job strands it as a permanent pending orphan.
+        """
+        await self.session.rollback()
+
     async def upsert_chunks(self, rows: list[dict[str, Any]]) -> SearchResult[None]:
         """Bulk upsert chunk rows on the (document_id, chunk_index) key."""
         if not rows:
@@ -332,6 +344,7 @@ class SearchRepository:
         metadata_filter: dict[str, object],
     ) -> SearchResult[list[RankedResultRow]]:
         settings = get_settings()
+        similarity_threshold = settings.SEARCH_TRIGRAM_SIMILARITY_THRESHOLD
         try:
             # Documented text() fallback: pg_trgm's `%` match operator and
             # `similarity()` ordering have no readable expression form.
@@ -351,12 +364,26 @@ class SearchRepository:
                 LIMIT :candidate_limit
                 """
             )
+            # The `%` operator filters against the *session* similarity
+            # threshold (PostgreSQL default 0.3), not this query's bind — so a
+            # configured 0.1 would silently lose the 0.1-0.3 band before the
+            # explicit similarity() check ever ran. `set_config(..., is_local
+            # => true)` is the parameterizable equivalent of `SET LOCAL` (a
+            # utility statement accepts no bind parameters), transaction-
+            # scoped exactly like the DiskANN GUCs above; the value is a
+            # settings float, never user input.
+            await self.session.execute(
+                statement=text(
+                    text="SELECT set_config('pg_trgm.similarity_threshold', :threshold, true)"
+                ),
+                params={"threshold": str(similarity_threshold)},
+            )
             result = await self.session.execute(
                 statement,
                 params={
                     "query": query,
                     "candidate_limit": candidate_limit,
-                    "similarity_threshold": settings.SEARCH_TRIGRAM_SIMILARITY_THRESHOLD,
+                    "similarity_threshold": similarity_threshold,
                     "metadata_filter": json.dumps(metadata_filter),
                     "tenant_id": tenant_id,
                 },
