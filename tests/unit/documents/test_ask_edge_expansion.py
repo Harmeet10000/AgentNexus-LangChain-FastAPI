@@ -92,7 +92,9 @@ def _install_episode_source(monkeypatch: pytest.MonkeyPatch, episodes: list[Any]
     """Patch the episode read surface; the reader reads episodes by group."""
     graphiti = _FakeGraphiti(episodes)
 
-    async def fake_read(_driver: object, *, group_ids: list[str], limit: int) -> list[Any]:
+    async def fake_read(
+        _driver: object, *, group_ids: list[str], limit: int, uuid_cursor: str | None = None
+    ) -> list[Any]:
         graphiti.calls.append({"surface": "episodes", "group_ids": list(group_ids), "limit": limit})
         return [episode for episode in episodes if episode.group_id in group_ids][:limit]
 

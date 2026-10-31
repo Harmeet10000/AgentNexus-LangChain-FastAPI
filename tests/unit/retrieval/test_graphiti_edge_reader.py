@@ -83,7 +83,7 @@ def _install_episode_source(
     """Patch the episode read surface; records the scoped groups it reads."""
 
     async def fake_read(
-        _driver: object, *, group_ids: list[str], limit: int
+        _driver: object, *, group_ids: list[str], limit: int, uuid_cursor: str | None = None
     ) -> list[SimpleNamespace]:
         source.calls.append({"group_ids": list(group_ids), "limit": limit})
         return [episode for episode in episodes if episode.group_id in group_ids][:limit]
@@ -99,7 +99,7 @@ class _ExplodingGraphiti:
 
 def _install_exploding_source(monkeypatch: pytest.MonkeyPatch) -> _ExplodingGraphiti:
     async def explode(
-        _driver: object, *, group_ids: list[str], limit: int
+        _driver: object, *, group_ids: list[str], limit: int, uuid_cursor: str | None = None
     ) -> list[SimpleNamespace]:
         message = "graph is down"
         raise GraphitiError(message)
@@ -375,3 +375,55 @@ async def test_legacy_prose_rows_still_parse_despite_abbreviations(
     assert record.relationship == "obliges"
     assert "Corp" in record.from_entity
     assert "GlobalTech" in record.to_entity
+
+
+async def test_pagination_keeps_collecting_until_the_edge_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chunk/clause episodes share the groups; they must not crowd edges out.
+
+    Page 1 is full of non-edge episodes; page 2 carries the relationship.
+    The read must keep paging until the edge cap is met.
+    """
+    pages = [
+        [
+            SimpleNamespace(
+                uuid=f"clause-{index}",
+                name=f"clause:{index}",
+                content="The Employer shall pay within fourteen days.",
+                source_description=json.dumps({"type": "clause_episode"}),
+                group_id=_TENANT_A_GROUP,
+                score=0.5,
+                created_at=None,
+            )
+            for index in range(64)
+        ],
+        [_edge_episode("edge-1", group_id=_TENANT_A_GROUP)],
+    ]
+    seen_cursors: list[str | None] = []
+
+    async def paged_read(
+        _driver: object,
+        *,
+        group_ids: list[str],
+        limit: int,
+        uuid_cursor: str | None = None,
+    ) -> list[SimpleNamespace]:
+        del group_ids, limit
+        seen_cursors.append(uuid_cursor)
+        return pages.pop(0) if pages else []
+
+    monkeypatch.setattr(client_module, "_read_episodes_by_group", paged_read)
+    graphiti = _FakeGraphiti()
+
+    result = await fetch_relationship_edges(
+        graphiti,
+        "payment",
+        allowed_doc_ids=("doc-a",),
+        tenant_id="tenant-a",
+        document_versions=(("doc-a", 1),),
+        document_contracts=(("doc-a", 1, (0,), False),),
+    )
+
+    assert [record.edge_id for record in result] == ["edge-1"]
+    assert seen_cursors == [None, "clause-63"]

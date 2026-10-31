@@ -623,14 +623,34 @@ def _scoped_group_ids(
 # ---------------------------------------------------------------------------
 
 
+_EPISODE_PAGE_SIZE = 64
+_MAX_EPISODE_PAGES = 8
+
+
+def _is_relationship_episode_source(raw: Any) -> bool:
+    """Cheap structural pre-check: the producer typed this episode as an edge."""
+    source_desc: str = getattr(raw, "source_description", "") or ""
+    try:
+        meta = json.loads(source_desc)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(meta, dict) and meta.get("type") == "relationship_edge"
+
+
 async def _read_episodes_by_group(
     driver: Any,
     *,
     group_ids: list[str],
     limit: int,
+    uuid_cursor: str | None = None,
 ) -> list[Any]:
-    """Read the producer's episodes for the scoped groups from the graph."""
-    return await EpisodicNode.get_by_group_ids(driver, group_ids=group_ids, limit=limit)
+    """Read one page of the groups' episodes, newest-uuid first."""
+    return await EpisodicNode.get_by_group_ids(
+        driver,
+        group_ids=group_ids,
+        limit=limit,
+        uuid_cursor=uuid_cursor,
+    )
 
 
 async def fetch_relationship_edges(
@@ -680,21 +700,34 @@ async def fetch_relationship_edges(
     if driver is None:
         return ()
     try:
-        raw_results = await _read_episodes_by_group(
-            driver,
-            group_ids=group_ids,
-            limit=num_results,
-        )
+        # Page through the group's episodes until the edge cap is met: chunk
+        # and clause episodes share these groups, so a fixed first-page limit
+        # would let non-edge episodes crowd stored relationships out of the
+        # answer context on chunk-heavy documents.
+        raw_results: list[Any] = []
+        cursor: str | None = None
+        for _page in range(_MAX_EPISODE_PAGES):
+            page = await _read_episodes_by_group(
+                driver,
+                group_ids=group_ids,
+                limit=_EPISODE_PAGE_SIZE,
+                uuid_cursor=cursor,
+            )
+            raw_results.extend(page)
+            edges_seen = sum(1 for raw in raw_results if _is_relationship_episode_source(raw))
+            if edges_seen >= num_results or len(page) < _EPISODE_PAGE_SIZE:
+                break
+            cursor = str(getattr(page[-1], "uuid", "") or "")
+            if not cursor:
+                break
     except _GRAPHITI_TRANSPORT_ERRORS as exc:
         exc.add_note(f"query={query[:80]}, task=relationship_edges")
         exc.add_note(traceback.format_exc())
         logger.bind(service="graphiti").exception("Graphiti relationship edge fetch failed")
         return ()
     edges = [
-        record
-        for raw in (raw_results or [])
-        if (record := _parse_relationship_edge(raw)) is not None
-    ]
+        record for raw in raw_results if (record := _parse_relationship_edge(raw)) is not None
+    ][:num_results]
     return tuple(edges)
 
 
