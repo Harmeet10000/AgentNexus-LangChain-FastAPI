@@ -7,10 +7,11 @@ from fastapi import Depends, Request, WebSocket
 from langchain_core.language_models import BaseChatModel
 from redis.asyncio import Redis
 from returns.result import Failure
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.connections import get_postgres_db, get_redis
+from app.connections.postgres import independent_session
 from app.features.auth.api.http.dependencies import (
     AuthorizationContext,
     CurrentAuthorizationContext,
@@ -91,12 +92,38 @@ async def get_current_user_id(context: CurrentAuthorizationContext) -> str:
     return context.user_id
 
 
+async def get_document_session_factory_ws(
+    websocket: WebSocket,
+) -> async_sessionmaker[AsyncSession]:
+    """Return the session maker for WebSocket-scoped work.
+
+    A WebSocket dependency cannot borrow the request-scoped session returned
+    by ``get_postgres_db``: that dependency's cleanup runs only when the
+    socket closes, so every open socket would pin a pool connection for the
+    lifetime of its conversation.
+    """
+    return websocket.app.state.db_session_local
+
+
 async def _tenant_document_ids(repo: DocumentRepository, tenant_id: str) -> tuple[str, ...]:
+    """Load the tenant's complete document allowlist from the repository."""
     result = await repo.list_document_ids_for_tenant(tenant_id=tenant_id)
     if isinstance(result, Failure):
         message = "Unable to resolve tenant document capability"
         raise InfrastructureException(message)
     return result.unwrap()
+
+
+async def _tenant_document_ids_from_factory(
+    session_factory: async_sessionmaker[AsyncSession], tenant_id: str
+) -> tuple[str, ...]:
+    """Load the tenant capability in a session that closes before returning.
+
+    WebSocket handlers outlive any request scope, so the lookup owns and
+    releases its own connection instead of holding one across the session.
+    """
+    async with independent_session(session_factory) as session:
+        return await _tenant_document_ids(DocumentRepository(session), tenant_id)
 
 
 async def get_document_authorization(
@@ -118,14 +145,17 @@ async def get_document_authorization(
 async def get_document_authorization_ws(
     websocket: WebSocket,
     context: WebSocketAuthorizationContext,
-    repo: Annotated[DocumentRepository, Depends(get_document_repository)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_document_session_factory_ws)
+    ],
 ) -> AuthorizationContext:
     """WebSocket twin of ``get_document_authorization``.
 
     Derives the same server capability, but only through WebSocket-safe
     dependencies: the HTTP authorization context is unreachable from a WS
     handshake because HTTPBearer and ``Request`` cannot execute in a
-    WebSocket dependency graph.
+    WebSocket dependency graph. The capability query runs in a short-lived
+    session so a streaming socket never holds a database connection.
     """
     thread_id = (
         str(websocket.path_params.get("thread_id") or "")
@@ -133,7 +163,7 @@ async def get_document_authorization_ws(
     )
     return replace(
         context.for_thread(thread_id),
-        allowed_doc_ids=await _tenant_document_ids(repo, context.tenant_id),
+        allowed_doc_ids=await _tenant_document_ids_from_factory(session_factory, context.tenant_id),
     )
 
 
@@ -141,6 +171,4 @@ DocumentCommandServiceDep = Annotated[DocumentCommandService, Depends(get_docume
 DocumentQueryServiceDep = Annotated[DocumentQueryService, Depends(get_document_query_service)]
 UserIdDep = Annotated[str, Depends(get_current_user_id)]
 DocumentAuthorizationDep = Annotated[AuthorizationContext, Depends(get_document_authorization)]
-DocumentAuthorizationWsDep = Annotated[
-    AuthorizationContext, Depends(get_document_authorization_ws)
-]
+DocumentAuthorizationWsDep = Annotated[AuthorizationContext, Depends(get_document_authorization_ws)]
