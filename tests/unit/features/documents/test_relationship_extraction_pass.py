@@ -9,10 +9,12 @@ deterministic edge identity for idempotent re-writes.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, cast
 
 import langextract as lx
 import pytest
+from loguru import logger as loguru_logger
 
 from app.extraction.langextract.relationships import (
     RELATIONSHIP_BUDGET_EXHAUSTED_REASON,
@@ -44,6 +46,7 @@ from app.features.documents.ingestion.enrichment.legal_metadata import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from typing import Any
 
     from app.extraction.langextract.service import ExtractionRequest
 
@@ -980,3 +983,468 @@ def test_absolute_edge_spans_add_the_boundary_offset() -> None:
     spans = _absolute_edge_spans(boundary, grounded, legal)
     assert spans["edge-0"] == (5100, 5150)
     assert spans["edge-1"] == (5200, 5240)
+
+
+# ---------------------------------------------------------------------------
+# Shared-validation adoption (validation-seam-adoption): the pipeline-backed
+# pass. Non-retryable drops are pinned byte-identical by the suites above;
+# these tests pin the added feedback-carrying retry behaviour.
+
+
+def _captured_decision_events() -> tuple[list[dict[str, Any]], ExitStack]:
+    """Capture ``validation_decision`` events emitted while the block runs."""
+    events: list[dict[str, Any]] = []
+    stack = ExitStack()
+
+    def _sink(message: Any) -> None:
+        record = message.record
+        if record["message"] == "validation_decision":
+            events.append(dict(record["extra"]))
+
+    sink_id = loguru_logger.add(_sink, level="DEBUG", format="{message}")
+    stack.callback(loguru_logger.remove, sink_id)
+    return events, stack
+
+
+def _flawed_clause_span_attributes() -> dict[str, str]:
+    return _valid_attributes()  # clause_id "2.1", span below cites clause 2.2
+
+
+async def test_retryable_flaw_is_retried_with_structured_feedback_and_recovers() -> None:
+    """A unknown_clause-flawed first attempt is retried with the finding.
+
+    The second attempt carries the server validation feedback in the prompt's
+    trusted section, recovers, and the recovered edge stands with zero drops.
+    """
+    flawed = _relationship_extraction(
+        start=0,
+        end=len(_PHRASE_PAY),
+        attributes={**_valid_attributes(), "clause_id": "999.999"},
+    )
+    valid = _relationship_extraction(start=0, end=len(_PHRASE_PAY), attributes=_valid_attributes())
+    calls: list[ExtractionRequest] = []
+
+    def _script(request: ExtractionRequest) -> Sequence[lx.data.AnnotatedDocument]:
+        calls.append(request)
+        if len(calls) == 1:
+            return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[flawed]),)
+        return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid]),)
+
+    provider = _DispatchProvider(_script)
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_INVENTORY,
+        entity_corpus=_CORPUS,
+        budget=ExtractionBudget(),
+        config=RelationshipPassConfig(),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert len(result.edges) == 1
+    assert result.drops.total == 0
+    # The retry carried structured feedback in the trusted prompt section.
+    retry_prompt = provider.calls[1].prompt_description
+    assert "PREVIOUS ATTEMPT CORRECTION" in retry_prompt
+    assert "[unknown_clause]" in retry_prompt
+    assert _PHRASE_PAY not in retry_prompt
+
+
+async def test_retry_exhaustion_drops_with_the_existing_reason() -> None:
+    """A retryable flaw that survives the retry drops with its own reason."""
+    provider = _DispatchProvider(
+        lambda _request: (
+            lx.data.AnnotatedDocument(
+                text=_BOUNDARY,
+                extractions=[
+                    _relationship_extraction(
+                        start=len(_PHRASE_PAY) + 1,
+                        end=len(_BOUNDARY),
+                        attributes=_flawed_clause_span_attributes(),
+                    )
+                ],
+            ),
+        )
+    )
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_TWO_CLAUSE_INVENTORY,
+        entity_corpus=_CORPUS,
+        budget=ExtractionBudget(),
+        config=RelationshipPassConfig(),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert result.edges == ()
+    assert result.drops.clause_span_mismatch == 1
+    assert result.drops.total == 1
+
+
+async def test_non_retryable_flaw_is_not_retried() -> None:
+    """invalid_span is not a retryable class: one call, immediate drop."""
+    provider = _DispatchProvider(
+        lambda _request: (
+            lx.data.AnnotatedDocument(
+                text=_BOUNDARY,
+                extractions=[
+                    _relationship_extraction(
+                        start=len(_BOUNDARY) + 500,
+                        end=len(_BOUNDARY) + 560,
+                        attributes=_valid_attributes(),
+                    )
+                ],
+            ),
+        )
+    )
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_INVENTORY,
+        entity_corpus=_CORPUS,
+        budget=ExtractionBudget(),
+        config=RelationshipPassConfig(),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 1
+    assert result.edges == ()
+    assert result.drops.invalid_span == 1
+
+
+async def test_retry_share_exhaustion_maps_to_existing_drop_with_budget_event() -> None:
+    """An exhausted share refuses the retry charge: existing drop state plus
+    a ``budget_exhausted`` decision event."""
+    provider = _DispatchProvider(
+        lambda _request: (
+            lx.data.AnnotatedDocument(
+                text=_BOUNDARY,
+                extractions=[
+                    _relationship_extraction(
+                        start=len(_PHRASE_PAY) + 1,
+                        end=len(_BOUNDARY),
+                        attributes=_flawed_clause_span_attributes(),
+                    )
+                ],
+            ),
+        )
+    )
+    events, manager = _captured_decision_events()
+    with manager:
+        result = await run_relationship_pass(
+            extraction=_service(provider),
+            boundary_text=_BOUNDARY,
+            inventory=_TWO_CLAUSE_INVENTORY,
+            entity_corpus=_CORPUS,
+            budget=ExtractionBudget(relationship_max_model_calls=1),
+            config=RelationshipPassConfig(),
+            document_id="doc-1",
+            contract_index=0,
+            max_char_buffer=100_000,
+            max_workers=2,
+        )
+
+    # One provider call only: the share was spent by the first attempt.
+    assert len(provider.calls) == 1
+    assert result.ran is True
+    assert result.edges == ()
+    assert result.drops.clause_span_mismatch == 1
+    assert result.budget_exhausted is False
+    assert [
+        event
+        for event in events
+        if event.get("seam") == "relationship_pass" and event.get("reason") == "budget_exhausted"
+    ] == [
+        {
+            "seam": "relationship_pass",
+            "decision": "escalate",
+            "reason": "budget_exhausted",
+            "attempts": 1,
+        }
+    ]
+
+
+async def test_retry_retains_the_first_attempt_validated_edges() -> None:
+    """Attempt 1's validated edges stand: the retry unions with them, deduped.
+
+    The retry re-emits the accepted relationship unchanged (as the feedback
+    section asks) and adds a second valid edge; the union keeps both, the
+    unchanged re-emission is not a drop, and the flawed candidate's claim
+    re-appears validated at the same span (corrected clause), so its drop is
+    removed rather than stacked with the retry's.
+    """
+    valid_pay = _relationship_extraction(
+        start=0, end=len(_PHRASE_PAY), attributes=_valid_attributes()
+    )
+    flawed = _relationship_extraction(
+        start=0,
+        end=len(_PHRASE_PAY),
+        attributes={**_valid_attributes(), "clause_id": "999.999"},
+    )
+    valid_maintain = _relationship_extraction(
+        start=len(_PHRASE_PAY) + 1,
+        end=len(_BOUNDARY),
+        attributes={**_valid_attributes(), "clause_id": "2.2"},
+    )
+    calls: list[ExtractionRequest] = []
+
+    def _script(request: ExtractionRequest) -> Sequence[lx.data.AnnotatedDocument]:
+        calls.append(request)
+        if len(calls) == 1:
+            return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay, flawed]),)
+        # The unchanged re-emission of the accepted edge, plus the fix.
+        return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay, valid_maintain]),)
+
+    provider = _DispatchProvider(_script)
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_TWO_CLAUSE_INVENTORY,
+        entity_corpus=_CORPUS,
+        budget=ExtractionBudget(),
+        config=RelationshipPassConfig(),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert [(edge.clause_id, edge.quote) for edge in result.edges] == [
+        ("2.1", _PHRASE_PAY),
+        ("2.2", _PHRASE_MAINTAIN),
+    ]
+    assert result.drops.total == 0
+    # The feedback section names only the dropped candidates and asks for the
+    # accepted relationships unchanged — not a smaller output.
+    retry_prompt = provider.calls[1].prompt_description
+    assert "only the candidate relationships counted below were dropped" in retry_prompt
+    assert "validated relationships unchanged" in retry_prompt
+
+
+async def test_retry_omitting_a_dropped_candidate_keeps_its_drop_visible() -> None:
+    """A retry that simply omits a dropped candidate does not erase its drop.
+
+    Attempt 1 validates the pay edge and drops a distinct unknown_clause-
+    flawed candidate on the maintain clause; the retry re-emits only the
+    validated edge.  Nothing matching the flawed claim was validated, so its
+    unknown_clause drop must remain in the merged counts.
+    """
+    valid_pay = _relationship_extraction(
+        start=0, end=len(_PHRASE_PAY), attributes=_valid_attributes()
+    )
+    flawed = _relationship_extraction(
+        start=len(_PHRASE_PAY) + 1,
+        end=len(_BOUNDARY),
+        attributes={**_valid_attributes(), "clause_id": "999.999"},
+    )
+    calls: list[ExtractionRequest] = []
+
+    def _script(request: ExtractionRequest) -> Sequence[lx.data.AnnotatedDocument]:
+        calls.append(request)
+        if len(calls) == 1:
+            return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay, flawed]),)
+        # The retry omits the flawed candidate entirely.
+        return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay]),)
+
+    provider = _DispatchProvider(_script)
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_INVENTORY,
+        entity_corpus=_CORPUS,
+        budget=ExtractionBudget(),
+        config=RelationshipPassConfig(),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert [(edge.clause_id, edge.quote) for edge in result.edges] == [("2.1", _PHRASE_PAY)]
+    # The omitted candidate was never fixed: its drop persists.
+    assert result.drops.unknown_clause == 1
+    assert result.drops.total == 1
+
+
+async def test_retry_union_respects_max_edges_per_boundary() -> None:
+    """The retained union is still capped at the boundary's edge budget."""
+    valid_pay = _relationship_extraction(
+        start=0, end=len(_PHRASE_PAY), attributes=_valid_attributes()
+    )
+    flawed = _relationship_extraction(
+        start=0,
+        end=len(_PHRASE_PAY),
+        attributes={**_valid_attributes(), "clause_id": "999.999"},
+    )
+    valid_maintain = _relationship_extraction(
+        start=len(_PHRASE_PAY) + 1,
+        end=len(_BOUNDARY),
+        attributes={**_valid_attributes(), "clause_id": "2.2"},
+    )
+
+    def _script(request: ExtractionRequest) -> Sequence[lx.data.AnnotatedDocument]:
+        if len(request.prompt_description.split("PREVIOUS ATTEMPT CORRECTION")) > 1:
+            return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_maintain]),)
+        return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay, flawed]),)
+
+    provider = _DispatchProvider(_script)
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_TWO_CLAUSE_INVENTORY,
+        entity_corpus=_CORPUS,
+        budget=ExtractionBudget(),
+        config=RelationshipPassConfig(max_edges_per_boundary=1),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert [(edge.clause_id, edge.quote) for edge in result.edges] == [("2.1", _PHRASE_PAY)]
+    # Attempt 1's non-retryable tally stands byte-identical. The retry
+    # omitted the flawed candidate without ever validating its claim, so its
+    # unknown_clause drop persists — and the union member beyond the cap is
+    # counted, never silent.
+    assert result.drops.unknown_clause == 1
+    assert result.drops.over_cap == 1
+    assert result.drops.total == 2
+
+
+async def test_retry_provider_failure_keeps_the_validated_first_attempt() -> None:
+    """A retry that fails at the provider must not discard validated edges.
+
+    Any retry failure code (here ``provider_error``) maps to the validated
+    attempt's result with the merged budget, not the pre-pipeline error shape.
+    """
+    valid_pay = _relationship_extraction(
+        start=0, end=len(_PHRASE_PAY), attributes=_valid_attributes()
+    )
+    flawed = _relationship_extraction(
+        start=0,
+        end=len(_PHRASE_PAY),
+        attributes={**_valid_attributes(), "clause_id": "999.999"},
+    )
+    calls: list[ExtractionRequest] = []
+
+    def _script(request: ExtractionRequest) -> Sequence[lx.data.AnnotatedDocument]:
+        calls.append(request)
+        if len(calls) == 1:
+            return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay, flawed]),)
+        message = "provider down on the retry"
+        raise RuntimeError(message)
+
+    provider = _DispatchProvider(_script)
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_INVENTORY,
+        entity_corpus=_CORPUS,
+        budget=ExtractionBudget(),
+        config=RelationshipPassConfig(),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert result.ran is True
+    assert result.provider_error is None
+    assert [(edge.clause_id, edge.quote) for edge in result.edges] == [("2.1", _PHRASE_PAY)]
+    # The flaw was never fixed, so its retryable drop tally stands. The
+    # failed retry still charges the call it attempted (crash-truthful).
+    assert result.drops.unknown_clause == 1
+    assert result.budget.model_calls == 2
+
+
+async def test_retry_budget_exhausted_with_validated_attempt_keeps_the_edges() -> None:
+    """A retry refused for budget maps to the validated attempt's result."""
+    valid_pay = _relationship_extraction(
+        start=0, end=len(_PHRASE_PAY), attributes=_valid_attributes()
+    )
+    flawed = _relationship_extraction(
+        start=0,
+        end=len(_PHRASE_PAY),
+        attributes={**_valid_attributes(), "clause_id": "999.999"},
+    )
+    calls: list[ExtractionRequest] = []
+
+    def _script(request: ExtractionRequest) -> Sequence[lx.data.AnnotatedDocument]:
+        calls.append(request)
+        if len(calls) == 1:
+            return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay, flawed]),)
+        return (lx.data.AnnotatedDocument(text=_BOUNDARY, extractions=[valid_pay]),)
+
+    provider = _DispatchProvider(_script)
+    result = await run_relationship_pass(
+        extraction=_service(provider),
+        boundary_text=_BOUNDARY,
+        inventory=_INVENTORY,
+        entity_corpus=_CORPUS,
+        # Two document-level calls so the SERVICE (not the share ledger)
+        # refuses the retry: attempt 1 spends the first, the retry hits the
+        # document cap and comes back BUDGET_EXHAUSTED.
+        budget=ExtractionBudget(max_model_calls=2, relationship_max_model_calls=2),
+        config=RelationshipPassConfig(),
+        document_id="doc-1",
+        contract_index=0,
+        max_char_buffer=100_000,
+        max_workers=2,
+    )
+
+    assert len(provider.calls) == 2
+    assert result.ran is True
+    assert result.budget_exhausted is False
+    assert result.provider_error is None
+    assert [(edge.clause_id, edge.quote) for edge in result.edges] == [("2.1", _PHRASE_PAY)]
+    assert result.budget.model_calls == 2
+
+
+async def test_decision_event_names_the_relationship_seam_on_accept() -> None:
+    provider = _DispatchProvider(
+        lambda _request: (
+            lx.data.AnnotatedDocument(
+                text=_BOUNDARY,
+                extractions=[
+                    _relationship_extraction(
+                        start=0, end=len(_PHRASE_PAY), attributes=_valid_attributes()
+                    )
+                ],
+            ),
+        )
+    )
+    events, manager = _captured_decision_events()
+    with manager:
+        await run_relationship_pass(
+            extraction=_service(provider),
+            boundary_text=_BOUNDARY,
+            inventory=_INVENTORY,
+            entity_corpus=_CORPUS,
+            budget=ExtractionBudget(),
+            config=RelationshipPassConfig(),
+            document_id="doc-1",
+            contract_index=0,
+            max_char_buffer=100_000,
+            max_workers=2,
+        )
+
+    assert [
+        event
+        for event in events
+        if event.get("seam") == "relationship_pass" and event.get("decision") == "accept"
+    ] == [{"seam": "relationship_pass", "decision": "accept", "reason": "accepted", "attempts": 1}]

@@ -1,23 +1,37 @@
 """Agent Saul node implementations and routing helpers."""
 
-import asyncio
 import hashlib
 import inspect
 import json
-from collections.abc import Awaitable, Callable, Mapping
+import re
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
+from typing import Any, Literal, assert_never, cast
 
 from langchain.agents.structured_output import StructuredOutputValidationError
+from langchain.tools import ToolRuntime
 from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
+from langgraph.config import get_config
 from langgraph.graph import END
 from langgraph.types import Send, interrupt
 from pydantic import BaseModel, Field, ValidationError
 from returns.result import Failure, Success
 
+from app.ai.tools.policy import grants_for
+from app.ai.validation import (
+    EvaluationContext,
+    GateReport,
+    HumanReviewSink,
+    SchemaError,
+    SemanticFinding,
+    SemanticReport,
+    ValidationDecision,
+    ValidationOutcome,
+    ValidationReason,
+)
 from app.features.agent_saul.adapters.document_source import (
     CanonicalDocumentChunk,
     DocumentTextFailure,
@@ -61,11 +75,11 @@ from app.features.agent_saul.domain.state import (
     WorkflowStatus,
     hydrate_state,
 )
-from app.features.documents.api.http.dto import EvidenceSearchRequest, EvidenceSearchResponse
 from app.features.documents.application.tools.authorization import ToolRuntimeContext
 from app.observability.logging import logger
 from app.shared.langchain_layer.messages import make_delegation_pair
 
+from .deep_research import make_deep_research_tool
 from .prompts import (
     _COMPLIANCE_SYSTEM_PROMPT,
     _ENTITY_EXTRACTION_SYSTEM_PROMPT,
@@ -79,9 +93,6 @@ from .prompts import (
     _RISK_ANALYSIS_SYSTEM_PROMPT,
     _SEGMENTATION_SYSTEM_PROMPT,
 )
-
-if TYPE_CHECKING:
-    from app.features.documents.api.http.dto import EvidencePolicy
 
 _CLARIFICATION_THRESHOLD = 0.72
 _OCR_CONFIDENCE_THRESHOLD = 0.85
@@ -1561,8 +1572,14 @@ def delegation_pairs_from(messages: list[Any]) -> list[tuple[Any, Any]]:
     return pairs
 
 
-def _analysis_tool_context(state: LegalAgentState) -> ToolRuntimeContext:
-    """Project only server-owned scope into a nested specialist graph."""
+def _analysis_tool_context(state: LegalAgentState, *, role: str) -> ToolRuntimeContext:
+    """Project only server-owned scope into a nested specialist graph.
+
+    Capability grants come from the role → grants policy
+    (``app.ai.tools.policy``) — the policy is the only author of a grant, so
+    the context's capability set is exactly the policy's entry for ``role``
+    (openspec ``tool-capability-catalog``); no call site assembles one ad hoc.
+    """
     run_id = state.get("run_id") or state.get("correlation_id") or state["thread_id"]
     evidence_checkpoint_id = state.get("evidence_checkpoint_id") or f"run:{run_id}"
     return {
@@ -1570,7 +1587,7 @@ def _analysis_tool_context(state: LegalAgentState) -> ToolRuntimeContext:
         "tenant_id": state.get("tenant_id", ""),
         "allowed_doc_ids": tuple(state.get("allowed_doc_ids", ())),
         "allowed_operations": tuple(state.get("allowed_operations", ())),
-        "capabilities": tuple(state.get("capabilities", ())),
+        "capabilities": tuple(sorted(grants_for(role))),
         "thread_id": state["thread_id"],
         "step_id": str(state.get("current_step", 0)),
         "run_id": run_id,
@@ -1630,7 +1647,7 @@ def make_risk_analysis_node(risk_agent: Any) -> StateNode:
                         *state["messages"],
                     ]
                 },
-                context=_analysis_tool_context(state),
+                context=_analysis_tool_context(state, role="risk"),
             )
         except Exception as exc:
             exc.add_note(f"node=risk_analysis, doc_id={state['doc_id']}")
@@ -1749,7 +1766,7 @@ def make_compliance_node(compliance_agent: Any) -> StateNode:
                         *state["messages"],
                     ]
                 },
-                context=_analysis_tool_context(state),
+                context=_analysis_tool_context(state, role="compliance"),
             )
         except (StructuredOutputValidationError, OutputParserException) as exc:
             exc.add_note(f"node=compliance, doc_id={state['doc_id']}")
@@ -1839,6 +1856,95 @@ def _not_assessable_compliance_output(reason: str) -> ComplianceOutput:
     )
 
 
+# ---------------------------------------------------------------------------
+# Verdict-path shared-vocabulary mapping (D7, type-level adoption).
+#
+# The mechanical gates below already implement the validation pattern: pure
+# mechanical checks before model entailment, fail-closed on provider errors.
+# These helpers map their existing pass/fail shapes onto the shared vocabulary
+# (``SemanticReport`` findings with locators, ``ValidationOutcome`` decisions)
+# WITHOUT moving any gate logic — the existing verdict-path suite passing
+# unmodified is the acceptance gate. Finding codes are reused, not minted:
+# the codes the path already emits are the seam's entry in the shared
+# vocabulary.
+# ---------------------------------------------------------------------------
+
+_VERDICT_GATE_REJECTED_CODE = "GROUNDING_GATE_REJECTED"
+# The verdict path's validation seam name: the ESCALATE outcomes delivered
+# through the human-review sink carry it as their evaluation context.
+_VERDICT_SEAM = "agent_saul.verdict"
+_VERDICT_VERIFIER_FAILURE_CODES = frozenset(
+    {"INVALID_GROUNDING_OUTPUT", "GROUNDING_VERIFIER_UNAVAILABLE"}
+)
+
+# The gate issues are prose, but every one names its handle: "Quote citation
+# <id> ..." or "(Risk|Compliance|) Finding <id> ...". The named handle becomes
+# the shared finding's locator.
+_VERDICT_LOCATOR_PATTERN = re.compile(r"(?:citation|finding) ([\w.:-]+)", re.IGNORECASE)
+
+
+def _verdict_issue_locator(issue: str) -> str | None:
+    match = _VERDICT_LOCATOR_PATTERN.search(issue)
+    return match.group(1) if match else None
+
+
+def verdict_issue_finding(issue: str) -> SemanticFinding:
+    """Map one mechanical-gate issue onto the shared finding shape (D7)."""
+    return SemanticFinding(
+        code=_VERDICT_GATE_REJECTED_CODE,
+        message=issue,
+        locator=_verdict_issue_locator(issue),
+    )
+
+
+def verdict_mechanical_report(issues: Sequence[str]) -> SemanticReport:
+    """The mechanical gates' issues as one semantic report (D7)."""
+    findings = tuple(verdict_issue_finding(issue) for issue in issues)
+    if findings:
+        return SemanticReport(verdict="reject", findings=findings)
+    return SemanticReport(verdict="pass")
+
+
+def verdict_outcome(
+    result: GroundingVerificationOutput,
+    *,
+    error_code: str | None = None,
+) -> ValidationOutcome[GroundingVerificationOutput]:
+    """The verdict path's accept/escalate exits as a shared-vocabulary decision (D7).
+
+    ACCEPT carries the verified grounding output; ESCALATE carries none. A
+    verifier that never produced a validated structured result is the typed
+    ``evaluator_unavailable`` escalation (fail closed); a gate rejection is the
+    review-class ``non_retryable_rejection`` escalation, which routes to the
+    human-review node through the sink.
+    """
+    if result.verified:
+        return ValidationOutcome(
+            decision=ValidationDecision.ACCEPT,
+            value=result,
+            attempts=1,
+            schema_gate=GateReport.passed(result),
+            semantic=SemanticReport(verdict="pass"),
+            reason=ValidationReason.ACCEPTED,
+        )
+    if error_code in _VERDICT_VERIFIER_FAILURE_CODES:
+        return ValidationOutcome(
+            decision=ValidationDecision.ESCALATE,
+            attempts=1,
+            schema_gate=GateReport.failed((SchemaError(code=error_code, message=result.notes),)),
+            semantic=SemanticReport.unavailable(result.notes),
+            reason=ValidationReason.EVALUATOR_UNAVAILABLE,
+        )
+    findings = tuple(verdict_issue_finding(claim) for claim in result.unverified_claims)
+    return ValidationOutcome(
+        decision=ValidationDecision.ESCALATE,
+        attempts=1,
+        schema_gate=GateReport.passed(result),
+        semantic=SemanticReport(verdict="reject", findings=findings),
+        reason=ValidationReason.NON_RETRYABLE_REJECTION,
+    )
+
+
 async def _verify_quotes_against_canonical_source(  # noqa: PLR0914 — bounded quote re-read and span validation
     state: LegalAgentState,
     config: RunnableConfig | None,
@@ -1903,6 +2009,7 @@ async def _verify_quotes_against_canonical_source(  # noqa: PLR0914 — bounded 
 
 def make_grounding_verification_node(
     grounding_llm: Runnable[list[Any], GroundingVerificationOutput],
+    human_review_sink: HumanReviewSink | None = None,
 ) -> Callable[[LegalAgentState, RunnableConfig | None], Awaitable[dict[str, Any]]]:
     async def grounding_verification_node(
         state: LegalAgentState, config: RunnableConfig | None = None
@@ -2003,7 +2110,28 @@ def make_grounding_verification_node(
                             "One or more analysis claims could not pass the mandatory grounding gate.",
                         )
                     )
-        log.info("grounding_verified", verified=result.verified, status=result.status)
+        # D7: the verdict path's exit is emitted in the shared vocabulary. The
+        # mapping is type-level only — the gate logic above is untouched.
+        outcome = verdict_outcome(result, error_code=errors[0].code if errors else None)
+        if human_review_sink is not None and outcome.decision is ValidationDecision.ESCALATE:
+            # A real grounding failure reaches the HITL review through the
+            # sink's thread-buffered enqueue — the deliveries the human-review
+            # node drains into its interrupt payload. The node's returned
+            # state is unchanged (the sink, not a state channel, is the
+            # delivery path).
+            await human_review_sink.escalate(
+                outcome,
+                EvaluationContext.model_validate(
+                    {"seam": _VERDICT_SEAM, "doc_id": state["doc_id"]}
+                ),
+            )
+        log.info(
+            "grounding_verified",
+            verified=result.verified,
+            status=result.status,
+            validation_decision=outcome.decision.value,
+            validation_reason=outcome.reason.value,
+        )
 
         return {
             "grounding": result,
@@ -2332,7 +2460,52 @@ def _mechanical_final_citations(
     return retained
 
 
-def make_human_review_node() -> StateNode:
+def _escalation_payload(outcome: ValidationOutcome[Any]) -> dict[str, Any]:
+    """Compact review view of one ESCALATE outcome delivered by the sink."""
+    return {
+        "decision": outcome.decision.value,
+        "reason": outcome.reason.value,
+        "attempts": outcome.attempts,
+        "findings": [
+            finding.model_dump(mode="json")
+            for finding in (outcome.semantic.findings if outcome.semantic is not None else ())
+        ],
+        "schema_errors": [error.model_dump(mode="json") for error in outcome.schema_gate.errors],
+    }
+
+
+def _current_thread_id() -> str:
+    """The LangGraph thread id of the running node, for per-thread scoping.
+
+    Escalation carriage is scoped to the checkpoint's thread: the sink reads
+    it at delivery time and the review node at drain time, so one thread's
+    escalations can never render in another thread's interrupt payload.
+    """
+    try:
+        configurable = get_config().get("configurable") or {}
+    except RuntimeError:
+        # Outside a LangGraph runtime (direct node invocation in tests).
+        return ""
+    return str(configurable.get("thread_id") or "")
+
+
+def make_human_review_node(
+    pending_escalations: Callable[[str], Sequence[ValidationOutcome[Any]]] | None = None,
+) -> StateNode:
+    """Build the HITL review node.
+
+    ``pending_escalations`` is the sink's side of the seam (D7 / ADR-2): when a
+    Saul-side pipeline escalated through
+    :func:`make_human_review_entry`'s sink, the node drains those outcomes and
+    renders them into the interrupt payload, so the checkpoint carries the
+    escalation reason and findings across worker migration. Escalations reach
+    the node through two per-thread channels: the checkpointed
+    ``pending_escalations`` state (written by the validating node, surviving
+    worker migration and restarts) and the sink's process-local deliveries for
+    this thread only. Without escalations the payload is byte-identically the
+    pre-adoption one.
+    """
+
     async def human_review_node(state: LegalAgentState) -> dict[str, Any]:
         risk_analysis = state.get("risk_analysis")
         compliance_result = state.get("compliance_result")
@@ -2363,17 +2536,32 @@ def make_human_review_node() -> StateNode:
             ],
             "message": "Please review findings, add overrides if needed, and approve to finalize",
         }
+        # Checkpointed escalations first (they survive worker migration), then
+        # this thread's process-local sink deliveries — never another
+        # thread's. Once rendered, the channel is cleared in the node's
+        # post-resume update below so a later replay cannot re-interrupt with
+        # stale escalations.
+        escalations = list(state.get("pending_escalations") or [])
+        if pending_escalations is not None:
+            escalations.extend(pending_escalations(_current_thread_id()))
+        if escalations:
+            review_payload["escalations"] = [_escalation_payload(o) for o in escalations]
 
         human_response: dict[str, Any] = interrupt(review_payload)
 
         if human_response.get("action") == "reject":
             log.warning("human_review_rejected")
-            return _fail(
-                "human_review",
-                "REVIEW_REJECTED",
-                human_response.get("feedback") or "Rejected at human review",
-                retryable=True,
-            )
+            return {
+                **_fail(
+                    "human_review",
+                    "REVIEW_REJECTED",
+                    human_response.get("feedback") or "Rejected at human review",
+                    retryable=True,
+                ),
+                # The escalations were rendered into this thread's interrupt
+                # payload; drain the channel either way.
+                "pending_escalations": [],
+            }
 
         raw_overrides = human_response.get("overrides") or []
         overrides = [ReviewOverride.model_validate(o) for o in raw_overrides]
@@ -2396,9 +2584,50 @@ def make_human_review_node() -> StateNode:
             "human_review": review_output,
             "self_reviewed": review_output.reviewer_id == state.get("user_id"),
             "status": WorkflowStatus.FINALIZING,
+            # The escalations were rendered into this thread's interrupt
+            # payload; drain the channel so a later replay cannot re-render
+            # them.
+            "pending_escalations": [],
         }
 
     return human_review_node
+
+
+def make_human_review_entry() -> tuple[HumanReviewSink, StateNode]:
+    """The HITL review seam as the validation layer's ``HumanReviewSink`` (D7 / ADR-2).
+
+    Returns the sink and the review node wired to it as one unit. An ESCALATE
+    outcome delivered through ``sink.escalate`` is drained and rendered by the
+    node's existing interrupt payload — the HITL flow (approval, resume, role
+    checks) is unchanged, and no Saul seam reaches the review node around the
+    sink. Every ESCALATE reason is review-class in this seam: the review node
+    is Saul's only escalation mechanism, so the sink keeps the check explicit
+    and ignores anything that is not an ESCALATE outcome rather than silently
+    widening what can interrupt a human.
+
+    Escalations are scoped to the LangGraph thread that delivered them. The
+    sink buffers them per thread for the mid-node delivery path, and the
+    checkpointed ``pending_escalations`` channel on :class:`LegalAgentState`
+    is the carriage that survives worker migration or restart: a validating
+    node that routes outcomes through the sink should also return them as its
+    ``pending_escalations`` state update.
+    """
+    pending: dict[str, list[ValidationOutcome[Any]]] = {}
+
+    async def enqueue(outcome: ValidationOutcome[Any], context: EvaluationContext) -> None:
+        if outcome.decision is not ValidationDecision.ESCALATE:
+            logger.bind(seam=context.seam, reason=outcome.reason.value).warning(
+                "escalation_ignored_not_an_escalate_outcome"
+            )
+            return
+        pending.setdefault(_current_thread_id(), []).append(outcome)
+
+    def drain(thread_id: str) -> list[ValidationOutcome[Any]]:
+        return pending.pop(thread_id, [])
+
+    sink = HumanReviewSink(enqueue=enqueue)
+    node = make_human_review_node(pending_escalations=drain)
+    return sink, node
 
 
 def make_finalization_node(
@@ -2671,136 +2900,31 @@ def route_deep_research(
     return "orchestrator"
 
 
-async def _run_scoped_research_step(
-    evidence_service: Any | None,
-    state: LegalAgentState,
-    step: PlanStep,
-    log: Any,
-) -> tuple[EvidenceSearchResponse | None, list[AgentError]]:
-    """Execute one research query through the server-scoped evidence seam."""
-    if evidence_service is None:
-        return None, [
-            _analysis_failure(
-                "deep_research",
-                "DEEP_RESEARCH_SERVICE_UNAVAILABLE",
-                "Precedent research was not assessable because no scoped evidence service was configured.",
-            )
-        ]
-
-    user_id = state.get("user_id", "")
-    tenant_id = state.get("tenant_id", "")
-    allowed_doc_ids = tuple(dict.fromkeys(state.get("allowed_doc_ids", ())))
-    evidence_policy = state.get("evidence_policy", "mechanically_verified")
-    if evidence_policy not in {"mechanically_verified", "graph_indexed_only"}:
-        evidence_policy = "mechanically_verified"
-    if not user_id or not tenant_id or not allowed_doc_ids:
-        return (
-            EvidenceSearchResponse(
-                status="unauthorized",
-                evidence_policy=cast("EvidencePolicy", evidence_policy),
-                message="Deep research has no complete server-owned authorization scope.",
-            ),
-            [],
-        )
-
-    thread_id = state.get("thread_id", "")
-    try:
-        response = await evidence_service.search_evidence(
-            principal_id=user_id,
-            tenant_id=tenant_id,
-            allowed_doc_ids=allowed_doc_ids,
-            thread_id=thread_id,
-            run_id=state.get("run_id") or state.get("correlation_id") or thread_id,
-            checkpoint_id=state.get("evidence_checkpoint_id"),
-            request=EvidenceSearchRequest(query=step.description, limit=5),
-            evidence_policy=cast("EvidencePolicy", evidence_policy),
-        )
-    except Exception as exc:
-        exc.add_note(f"node=deep_research, step_id={step.step_id}")
-        log.exception("deep_research_evidence_service_failed", step_id=step.step_id)
-        return None, [
-            _analysis_failure(
-                "deep_research",
-                "DEEP_RESEARCH_SERVICE_UNAVAILABLE",
-                "Precedent research was not assessable because the evidence service was unavailable.",
-            )
-        ]
-
-    if isinstance(response, EvidenceSearchResponse):
-        return response, []
-    try:
-        return EvidenceSearchResponse.model_validate(response), []
-    except ValidationError as exc:
-        exc.add_note(f"node=deep_research, step_id={step.step_id}")
-        return None, [
-            _analysis_failure(
-                "deep_research",
-                "DEEP_RESEARCH_INVALID_RESPONSE",
-                "Precedent research returned an invalid evidence envelope.",
-            )
-        ]
-
-
-def _collect_scoped_research_response(
-    response: EvidenceSearchResponse,
-    step: PlanStep,
-) -> tuple[dict[str, EvidenceRef], dict[str, int], list[AgentError]]:
-    """Reduce a typed search response to checkpoint-safe metadata."""
-    coverage: dict[str, int] = {
-        key: value
-        for key, value in response.coverage.model_dump(mode="json").items()
-        if isinstance(value, int)
-    }
-    errors: list[AgentError] = []
-    refs: dict[str, EvidenceRef] = {}
-    if response.status == "ok":
-        for item in response.items:
-            ref = EvidenceRef.model_validate(item.evidence.model_dump(mode="json"))
-            refs[ref.evidence_id] = ref
-        if response.coverage.documents_ready < response.coverage.documents_requested:
-            errors.append(
-                _analysis_failure(
-                    "deep_research",
-                    "DEEP_RESEARCH_PARTIAL_COVERAGE",
-                    f"Precedent research step {step.step_id} returned only partial document coverage.",
-                )
-            )
-    else:
-        errors.append(
-            _analysis_failure(
-                "deep_research",
-                f"DEEP_RESEARCH_{response.status.upper()}",
-                response.message
-                or f"Precedent research step {step.step_id} was not assessable ({response.status}).",
-            )
-        )
-    return refs, coverage, errors
-
-
-def make_deep_research_node(
+def make_deep_research_node(  # noqa: PLR0915 — bounded envelope bookkeeping
     deep_research_tool: BaseTool | None = None,
     *,
     evidence_service: Any | None = None,
 ) -> StateNode:
-    """Run only the precedent-search steps in an approved plan.
+    """Run the bounded deep-research subgraph for a plan's research steps.
 
-    Deep research is deliberately an adapter over the scoped evidence service,
-    not a second model/tool contract.  The service receives the server-owned
-    tenant and document allowlist from the outer Saul state and returns typed
-    evidence handles.  Search snippets and source content never enter graph
-    state; only ``EvidenceRef`` metadata, coverage, and typed errors do.
+    Deep research is the compiled ``plan → search_evidence →
+    read_evidence_by_id → synthesize`` subgraph exposed as exactly one tool
+    (D5, ``graph/deep_research.py``). The node stays plan-conditional and
+    ledger-gated; it constructs the server-owned ``ToolRuntime`` context the
+    wrapper requires and maps the bounded envelope onto graph state. Search
+    snippets and read content never enter graph state; only ``EvidenceRef``
+    metadata, coverage, and typed errors do.
 
-    ``deep_research_tool`` remains as a compatibility parameter for old test
-    factories, but is intentionally not invoked.  The former tool accepted a
-    mismatched ``question`` argument and returned hydrated precedent text,
-    which could both fail at runtime and leak source content into checkpoints.
+    ``deep_research_tool`` is the registered wrapper; when it is absent the
+    node refuses with a typed service-unavailable failure rather than
+    bypassing the evidence seam.
     """
 
-    # Keep the old parameter source-compatible for external graph factories;
-    # it is deliberately not a fallback because it cannot issue scoped handles.
-    del deep_research_tool
+    research_tool = deep_research_tool
+    if research_tool is None and evidence_service is not None:
+        research_tool = make_deep_research_tool(evidence_service)
 
-    async def deep_research_node(state: LegalAgentState) -> dict[str, Any]:  # noqa: PLR0914 — bounded fan-out bookkeeping
+    async def deep_research_node(state: LegalAgentState) -> dict[str, Any]:  # noqa: PLR0912, PLR0914, PLR0915 — bounded envelope bookkeeping
         log = logger.bind(
             node="deep_research",
             user_id=state["user_id"],
@@ -2844,27 +2968,128 @@ def make_deep_research_node(
         refs: dict[str, EvidenceRef] = {}
         coverage: dict[str, int] = dict(state.get("coverage", {}))
         errors: list[AgentError] = []
+        envelope_status: str | None = None
+        envelope_message: str | None = None
+        current_status = state.get("status", WorkflowStatus.PLAN_APPROVED)
 
-        # A plan normally contains only a small number of research steps. Keep
-        # the fan-out bounded by the planner's maximum rather than introducing
-        # an unbounded recursive search loop.
-        responses = await asyncio.gather(
-            *(
-                _run_scoped_research_step(evidence_service, state, step, log)
-                for step in research_steps
+        if research_tool is None:
+            errors.append(
+                _analysis_failure(
+                    "deep_research",
+                    "DEEP_RESEARCH_SERVICE_UNAVAILABLE",
+                    "Precedent research was not assessable because no scoped evidence service was configured.",
+                )
             )
-        )
-        for step, (response, step_errors) in zip(research_steps, responses, strict=True):
-            errors.extend(step_errors)
-            if response is None:
-                continue
-            response_refs, response_coverage, response_errors = _collect_scoped_research_response(
-                response, step
+        else:
+            # Context by explicit construction: the wrapper builds the
+            # subgraph's scope from this server-owned context only (V6).
+            runtime = ToolRuntime(
+                state={},
+                context=dict(_analysis_tool_context(state, role="deep_research")),
+                config=RunnableConfig(configurable={}),
+                # No stream writer on a node-internal tool call; the runtime
+                # requires a callable, so an inert one is supplied.
+                stream_writer=cast("Callable[..., None]", lambda *_args: None),
+                tool_call_id="deep_research",
+                store=None,
             )
-            refs.update(response_refs)
-            errors.extend(response_errors)
-            for key, value in response_coverage.items():
-                coverage[key] = max(coverage.get(key, 0), value)
+            research_call = cast("Any", research_tool).coroutine
+            envelope: dict[str, Any] | None = None
+            try:
+                envelope = await research_call(
+                    objective="; ".join(step.description for step in research_steps),
+                    runtime=runtime,
+                )
+            except Exception as exc:
+                exc.add_note("node=deep_research, operation=deep_research_subgraph")
+                log.exception("deep_research_subgraph_failed")
+                envelope = None
+                errors.append(
+                    _analysis_failure(
+                        "deep_research",
+                        "DEEP_RESEARCH_SERVICE_UNAVAILABLE",
+                        "Precedent research was not assessable because the evidence service was unavailable.",
+                    )
+                )
+
+            if envelope is not None:
+                envelope_status = str(envelope.get("status", ""))
+                envelope_message = envelope.get("message")
+                for raw in envelope.get("evidence", []):
+                    try:
+                        ref = EvidenceRef.model_validate(raw)
+                    except ValidationError:
+                        continue
+                    refs[ref.evidence_id] = ref
+                for key, value in envelope.get("coverage", {}).items():
+                    if isinstance(value, int):
+                        coverage[key] = max(coverage.get(key, 0), value)
+
+                match envelope_status:
+                    case "completed":
+                        response_coverage = envelope.get("coverage", {})
+                        if isinstance(response_coverage, dict) and response_coverage.get(
+                            "documents_requested", 0
+                        ) > response_coverage.get("documents_ready", 0):
+                            errors.append(
+                                _analysis_failure(
+                                    "deep_research",
+                                    "DEEP_RESEARCH_PARTIAL_COVERAGE",
+                                    "Precedent research returned only partial document coverage.",
+                                )
+                            )
+                    case "no_evidence":
+                        current_status = WorkflowStatus.FAILED
+                        errors.append(
+                            AgentError(
+                                node="deep_research",
+                                code="DEEP_RESEARCH_NO_EVIDENCE",
+                                message=envelope_message
+                                or "Precedent research found no admissible evidence.",
+                                retryable=False,
+                            )
+                        )
+                    case "ingestion_incomplete":
+                        current_status = WorkflowStatus.FAILED
+                        errors.append(
+                            AgentError(
+                                node="deep_research",
+                                code="DEEP_RESEARCH_INGESTION_INCOMPLETE",
+                                message=envelope_message
+                                or "Precedent research could not serve the authorized scope.",
+                                retryable=False,
+                            )
+                        )
+                    case "budget_exhausted":
+                        current_status = WorkflowStatus.FAILED
+                        errors.append(
+                            AgentError(
+                                node="deep_research",
+                                code="BUDGET_EXHAUSTED",
+                                message=envelope_message
+                                or "Deep-research step budget was exhausted.",
+                                retryable=False,
+                            )
+                        )
+                    case "refused":
+                        current_status = WorkflowStatus.FAILED
+                        errors.append(
+                            AgentError(
+                                node="deep_research",
+                                code="DEEP_RESEARCH_REFUSED",
+                                message=envelope_message
+                                or "Deep research was refused for missing authorization.",
+                                retryable=False,
+                            )
+                        )
+                    case _:
+                        errors.append(
+                            _analysis_failure(
+                                "deep_research",
+                                "DEEP_RESEARCH_INVALID_RESPONSE",
+                                "Precedent research returned an invalid evidence envelope.",
+                            )
+                        )
 
         merged_registry = dict(state.get("evidence_registry", {}))
         merged_registry.update(refs)
@@ -2875,14 +3100,33 @@ def make_deep_research_node(
             ensure_ascii=False,
             sort_keys=True,
         )
-        current_status = state.get("status", WorkflowStatus.PLAN_APPROVED)
         if not refs and errors:
             current_status = WorkflowStatus.FAILED
+        transcript: list[AIMessage] = []
+        if envelope_status is not None:
+            # The bounded envelope lands in the transcript: statuses, handles,
+            # and coverage only — never snippets or read content.
+            transcript.append(
+                AIMessage(
+                    content=json.dumps(
+                        {
+                            "tool": "deep_research",
+                            "status": envelope_status,
+                            "evidence": sorted(refs),
+                            "coverage": coverage,
+                            "message": envelope_message,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+            )
         return {
             "deep_research_results": metadata_only,
             "evidence_registry": merged_registry,
             "coverage": coverage,
             "errors": errors,
+            "messages": transcript,
             "status": current_status,
             "current_step": indexed_research_steps[-1][0] + 1,
             "budget_ledger": ledger,

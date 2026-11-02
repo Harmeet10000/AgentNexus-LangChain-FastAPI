@@ -41,11 +41,17 @@ import hashlib
 import math
 import re
 from enum import StrEnum
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import langextract as lx
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.ai.validation import (
+    EvaluationContext,
+    MechanicalEvaluator,
+    SemanticFinding,
+    ValidationPipeline,
+)
 from app.features.agent_saul.domain.state import RelationshipType
 from app.features.documents.ingestion.enrichment.legal_metadata import (
     UNTRUSTED_CONTENT_DIRECTIVE,
@@ -65,7 +71,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from typing import Final
 
-    from .service import AsyncExtractionService
+    from app.ai.validation import RetryFeedback
+
+    from .service import AsyncExtractionService, ExtractionFailed
 
 RELATIONSHIP_EXTRACTION_CLASS: Final[str] = "relationship"
 RELATIONSHIP_CONFIG_DISABLED_REASON: Final[str] = "relationship_pass_disabled_by_config"
@@ -165,14 +173,40 @@ class GroundedRelationship(BaseModel):
 
     def dedup_key(self) -> tuple[str, str, str, str, int, int]:
         """Stable identity used to collapse duplicate candidates."""
-        return (
-            self.from_entity.casefold(),
-            self.relationship.value,
-            self.to_entity.casefold(),
-            self.clause_id,
-            self.char_start,
-            self.char_end,
+        return relationship_candidate_key(
+            from_entity=self.from_entity,
+            relationship=self.relationship,
+            to_entity=self.to_entity,
+            clause_id=self.clause_id,
+            start=self.char_start,
+            end=self.char_end,
         )
+
+
+# Identity of one pass-2 candidate, validated or dropped: the dedup-key shape
+# of :class:`GroundedRelationship`, constructible even for a candidate whose
+# span and attributes parsed cleanly but failed a retryable-class check.
+_RelationshipKey = tuple[str, str, str, str, int, int]
+
+
+def relationship_candidate_key(
+    *,
+    from_entity: str,
+    relationship: RelationshipType,
+    to_entity: str,
+    clause_id: str,
+    start: int,
+    end: int,
+) -> _RelationshipKey:
+    """Stable candidate identity shared by validated edges and dropped candidates."""
+    return (
+        from_entity.casefold(),
+        relationship.value,
+        to_entity.casefold(),
+        clause_id,
+        start,
+        end,
+    )
 
 
 def relationship_edge_id(
@@ -238,6 +272,220 @@ class RelationshipDropCounts(BaseModel):
             + self.over_cap
             + self.invalid_clause_identity
         )
+
+
+# Shared-validation adoption (validation-seam-adoption): the pass-2 batch is
+# produced and gated through the shared ValidationPipeline. The existing
+# per-candidate validators are unchanged — they run inside the mechanical
+# predicate — and only the declared retryable finding classes are worth a
+# feedback-carrying retry, inside the existing relationship budget share.
+RELATIONSHIP_VALIDATION_SEAM: Final[str] = "relationship_pass"
+# First attempt + one feedback-carrying retry, mirroring the metadata seam's
+# one-retry bound.
+_RELATIONSHIP_MAX_VALIDATION_ATTEMPTS: Final[int] = 2
+_RETRYABLE_DROP_REASONS: Final[tuple[RelationshipDropReason, ...]] = (
+    RelationshipDropReason.UNKNOWN_CLAUSE,
+    RelationshipDropReason.CLAUSE_SPAN_MISMATCH,
+)
+_RETRY_FINDING_CODES: Final[tuple[str, ...]] = tuple(
+    reason.value for reason in _RETRYABLE_DROP_REASONS
+)
+_RETRY_FEEDBACK_GUIDANCE: Final[dict[str, str]] = {
+    RelationshipDropReason.UNKNOWN_CLAUSE.value: (
+        "set 'clause_id' to a clause_id exactly as listed in the server-provided clause inventory"
+    ),
+    RelationshipDropReason.CLAUSE_SPAN_MISMATCH.value: (
+        "emit the extraction text as an exact span of text inside the char range "
+        "of the clause named by 'clause_id'"
+    ),
+}
+
+
+class RelationshipCandidateBatch(BaseModel):
+    """Schema-gate wrapper around one pass-2 provider outcome.
+
+    The langextract documents are held opaquely: the gate exists so the
+    pipeline owns the produce→validate loop, not to re-model langextract's
+    shapes (the per-candidate validators below remain the ground truth).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    documents: tuple[Any, ...] = ()
+
+
+class _ProviderCallError(Exception):
+    """The provider outcome carried no candidates to validate.
+
+    Raised out of ``produce`` so the typed failure propagates to the caller,
+    which maps it onto the existing pass result exactly as the pre-pipeline
+    code did — unless an earlier attempt already validated, whose result
+    stands (a retry failure must not discard validated edges).
+    """
+
+    def __init__(self, outcome: ExtractionFailed) -> None:
+        super().__init__(outcome.message)
+        self.outcome = outcome
+
+
+class _ValidatedAttempt(NamedTuple):
+    """One validation attempt's retained result, plus its retryable drops.
+
+    ``retryable_drops`` records each candidate dropped for a retryable reason
+    as ``(candidate key, reason)`` so a later attempt can decide per candidate
+    whether the drop was actually fixed — counts alone cannot.
+    """
+
+    edges: tuple[GroundedRelationship, ...]
+    drops: RelationshipDropCounts
+    retryable_drops: tuple[tuple[_RelationshipKey, RelationshipDropReason], ...]
+
+
+class _RelationshipRunState:
+    """Mutable per-run cell shared by the pipeline's produce and evaluator.
+
+    The pipeline callables are stateless between themselves, so the merged
+    budget, the last completed attempt's validation result, and a provider
+    failure ride here; the caller maps the outcome onto
+    :class:`RelationshipPassResult` from this cell.
+    """
+
+    __slots__ = ("last_validation", "merged_budget", "provider_failure")
+
+    def __init__(self) -> None:
+        self.merged_budget: ExtractionBudget | None = None
+        self.provider_failure: ExtractionFailed | None = None
+        self.last_validation: _ValidatedAttempt | None = None
+
+
+class _RelationshipShareLedger:
+    """:class:`BudgetLedger` port over the relationship share of the ledger.
+
+    A retry re-invokes the provider, so a charge is granted only while the
+    relationship share still has headroom on every dimension. The real
+    counters move when the provider's returned ledger is merged back; this
+    adapter only answers whether one more call fits.
+    """
+
+    __slots__ = ("_state",)
+
+    def __init__(self, state: _RelationshipRunState) -> None:
+        self._state = state
+
+    def charge(self) -> bool:
+        budget = self._state.merged_budget
+        if budget is None:
+            return False
+        return _relationship_share_exhausted(budget) is None
+
+
+def _retryable_drop_resolved(
+    candidate: _RelationshipKey,
+    validated_keys: Sequence[_RelationshipKey],
+) -> bool:
+    """Whether the retry demonstrably fixed one dropped candidate.
+
+    A fix is a validated retry edge that re-states the same relationship claim
+    (same endpoints) with the flawed part corrected: the same span under a
+    clause that now resolves (an ``unknown_clause`` fix), or the same clause
+    under a span that now fits (a ``clause_span_mismatch`` fix).  A retry that
+    merely emits unrelated edges never resolves anything.
+    """
+    from_entity, relationship, to_entity, clause_id, start, end = candidate
+    return any(
+        key[0] == from_entity
+        and key[1] == relationship
+        and key[2] == to_entity
+        and ((key[4], key[5]) == (start, end) or key[3] == clause_id)
+        for key in validated_keys
+    )
+
+
+def _merge_validated_attempts(
+    previous: _ValidatedAttempt | None,
+    edges: tuple[GroundedRelationship, ...],
+    drops: RelationshipDropCounts,
+    retryable_drops: tuple[tuple[_RelationshipKey, RelationshipDropReason], ...],
+    *,
+    max_edges: int,
+) -> _ValidatedAttempt:
+    """Fold one validation attempt into the run's retained result.
+
+    A validated attempt is never discarded by the retry: the retained edges
+    are the union of the attempts' validated edges, deduplicated by
+    :meth:`GroundedRelationship.dedup_key` and still capped at ``max_edges``.
+    A re-emitted relationship the earlier attempt already validated is not a
+    drop — the retry feedback explicitly asks for that unchanged re-emission —
+    but union members beyond the cap are counted (``OVER_CAP``), never
+    silent. Non-retryable drop tallies accumulate (attempt one's stand as the
+    parity suites pin them).
+
+    Retryable drops persist per candidate: attempt one's retryable drops
+    survive the merge unless the retry demonstrably fixed them (the candidate
+    re-appears validated, per :func:`_retryable_drop_resolved`), and the
+    retry's own new candidate drops join them.  A retry that simply omits a
+    dropped candidate therefore keeps its drop visible — only a demonstrated
+    fix removes one — and a candidate the retry re-drops under its own key is
+    counted once, not stacked.
+    """
+    if previous is None:
+        return _ValidatedAttempt(edges, drops, retryable_drops)
+    prev_edges, prev_drops, prev_retryable = previous
+    retryable = {reason.value for reason in _RETRYABLE_DROP_REASONS}
+    validated_keys = [edge.dedup_key() for edge in edges]
+    surviving = [
+        (candidate, reason)
+        for candidate, reason in prev_retryable
+        if not _retryable_drop_resolved(candidate, validated_keys)
+    ]
+    surviving_keys = {candidate for candidate, _ in surviving}
+    merged_retryable = (
+        *surviving,
+        *(item for item in retryable_drops if item[0] not in surviving_keys),
+    )
+    retryable_tally = RelationshipDropCounts()
+    for _candidate, reason in merged_retryable:
+        retryable_tally = retryable_tally.bump(reason)
+    merged_drops = RelationshipDropCounts(
+        **{
+            field: getattr(retryable_tally, field)
+            if field in retryable
+            else getattr(prev_drops, field) + getattr(drops, field)
+            for field in RelationshipDropCounts.model_fields
+        }
+    )
+    merged_edges = list(prev_edges)
+    seen = {edge.dedup_key() for edge in prev_edges}
+    for edge in edges:
+        key = edge.dedup_key()
+        if key in seen:
+            # The unchanged re-emission the retry feedback asks for.
+            continue
+        if len(merged_edges) >= max_edges:
+            merged_drops = merged_drops.bump(RelationshipDropReason.OVER_CAP)
+            continue
+        seen.add(key)
+        merged_edges.append(edge)
+    return _ValidatedAttempt(tuple(merged_edges), merged_drops, merged_retryable)
+
+
+def _retry_feedback_section(feedback: RetryFeedback) -> str:
+    """Render the pipeline's structured feedback as a trusted prompt addendum.
+
+    The one allowed prompt-content change (appending structured retry
+    feedback): server-authored finding codes and correction guidance — never
+    document content, so the trusted section stays document-free.
+    """
+    lines = [
+        "PREVIOUS ATTEMPT CORRECTION (server validation): only the candidate "
+        "relationships counted below were dropped; the other relationships "
+        "from the previous attempt were validated and stand. Re-emit the "
+        "validated relationships unchanged, and re-emit replacements for the "
+        "dropped candidates only, so that the dropped candidates satisfy:"
+    ]
+    lines.extend(f"- [{finding.code}] {finding.message}" for finding in feedback.semantic_findings)
+    lines.extend(f"- [{error.code}] {error.message}" for error in feedback.schema_errors)
+    return "\n".join(lines)
 
 
 class RelationshipPassResult(BaseModel):
@@ -530,6 +778,12 @@ async def run_relationship_pass(
     boundary text and the pass-1 identities; dropped candidates are counted
     per reason.  Budget share exhaustion degrades explicitly (``skip_reason``
     ``relationship_budget_exhausted``) instead of silently skipping.
+
+    Validation runs through the shared :class:`ValidationPipeline`: the
+    per-candidate validators are unchanged (they execute inside the mechanical
+    predicate), a ``unknown_clause``/``clause_span_mismatch`` finding earns
+    one feedback-carrying retry inside the relationship budget share, and
+    every other drop reason behaves exactly as before the adoption.
     """
     if not config.enabled:
         return RelationshipPassResult(
@@ -559,7 +813,6 @@ async def run_relationship_pass(
             drops=inventory_drops,
             budget=budget,
         )
-    share_budget = _relationship_share_budget(budget)
     # The single-call design raises max_char_buffer to the wrapped length; a
     # pathological boundary (a whole book as one "contract") must degrade the
     # pass explicitly instead of building an unbounded prompt.
@@ -570,43 +823,142 @@ async def run_relationship_pass(
             drops=inventory_drops,
             budget=budget,
         )
-    request = build_relationship_request(
-        boundary_text=boundary_text,
-        inventory=sanitized_inventory,
-        budget=share_budget,
-        document_id=document_id,
-        tenant_id=tenant_id,
-        document_version=document_version,
-        contract_index=contract_index,
-        max_char_buffer=max_char_buffer,
-        max_workers=max_workers,
-    )
-    outcome = await extraction.extract(request)
-    merged = _merge_relationship_charge(original=budget, returned=outcome.budget)
-    if isinstance(outcome, ExtractionSucceeded):
-        frame = wrap_boundary_text(boundary_text)
-        edges, drops = _validate_relationship_extractions(
-            outcome.documents,
+    frame = wrap_boundary_text(boundary_text)
+    state = _RelationshipRunState()
+
+    async def _produce(feedback: RetryFeedback | None) -> object:
+        """One provider call: the raw pass-2 candidate documents, unparsed.
+
+        The retry re-derives the tightened share from the merged ledger so
+        the second call spends only the share's remaining headroom, and it
+        appends the pipeline's structured feedback to the prompt's trusted
+        section (the one allowed prompt-content change).
+        """
+        base_budget = budget if state.merged_budget is None else state.merged_budget
+        request = build_relationship_request(
+            boundary_text=boundary_text,
+            inventory=sanitized_inventory,
+            budget=_relationship_share_budget(base_budget),
+            document_id=document_id,
+            tenant_id=tenant_id,
+            document_version=document_version,
+            contract_index=contract_index,
+            max_char_buffer=max_char_buffer,
+            max_workers=max_workers,
+        )
+        if feedback is not None:
+            request = request.model_copy(
+                update={
+                    "prompt_description": (
+                        f"{request.prompt_description}\n\n{_retry_feedback_section(feedback)}"
+                    )
+                }
+            )
+        outcome = await extraction.extract(request)
+        state.merged_budget = _merge_relationship_charge(original=budget, returned=outcome.budget)
+        if isinstance(outcome, ExtractionSucceeded):
+            return {"documents": outcome.documents}
+        state.provider_failure = outcome
+        raise _ProviderCallError(outcome)
+
+    def _batch_predicate(
+        value: RelationshipCandidateBatch, _context: EvaluationContext
+    ) -> SemanticFinding | None:
+        """Mechanical gate: the unchanged per-candidate validators, verbatim.
+
+        Non-retryable flaws stay plain per-candidate drops (recorded in the
+        run state); a retryable-class drop surfaces as the finding that earns
+        the feedback-carrying retry.
+        """
+        # A retry starts from a clean candidate tally: the inventory drops and
+        # the earlier attempt's non-retryable drops are already retained in
+        # the run state and must not be counted twice.
+        edges, drops, retryable_drops = _validate_relationship_extractions(
+            value.documents,
             boundary_text=boundary_text,
             frame=frame,
             inventory=sanitized_inventory,
             entity_corpus=entity_corpus,
             max_edges=config.max_edges_per_boundary,
-            drops=inventory_drops,
+            drops=inventory_drops if state.last_validation is None else RelationshipDropCounts(),
         )
-        return RelationshipPassResult(ran=True, edges=edges, drops=drops, budget=merged)
-    if outcome.code is ExtractionFailureCode.BUDGET_EXHAUSTED:
+        state.last_validation = _merge_validated_attempts(
+            state.last_validation,
+            edges,
+            drops,
+            retryable_drops,
+            max_edges=config.max_edges_per_boundary,
+        )
+        for reason in _RETRYABLE_DROP_REASONS:
+            count = getattr(drops, reason.value)
+            if count:
+                return SemanticFinding(
+                    code=reason.value,
+                    message=(
+                        f"{count} candidate relationship(s) were dropped as "
+                        f"{reason.value}: {_RETRY_FEEDBACK_GUIDANCE[reason.value]}."
+                    ),
+                )
+        return None
+
+    pipeline = ValidationPipeline(
+        schema=RelationshipCandidateBatch,
+        evaluator=MechanicalEvaluator((_batch_predicate,)),
+        max_attempts=_RELATIONSHIP_MAX_VALIDATION_ATTEMPTS,
+        retryable_findings=_RETRY_FINDING_CODES,
+        budget=_RelationshipShareLedger(state),
+    )
+    context = EvaluationContext.model_validate(
+        {
+            "seam": RELATIONSHIP_VALIDATION_SEAM,
+            "document_id": document_id,
+            "contract_index": contract_index,
+        }
+    )
+    try:
+        await pipeline.validate(_produce, context)
+    except _ProviderCallError as failure:
+        merged = budget if state.merged_budget is None else state.merged_budget
+        if state.last_validation is not None:
+            # A validated attempt stands regardless of why the retry failed:
+            # the edges it validated are returned with the merged budget, and
+            # only the pre-pipeline skip/error shapes below apply when no
+            # attempt ever validated.
+            attempt = state.last_validation
+            return RelationshipPassResult(
+                ran=True, edges=attempt.edges, drops=attempt.drops, budget=merged
+            )
+        if failure.outcome.code is ExtractionFailureCode.BUDGET_EXHAUSTED:
+            return RelationshipPassResult(
+                ran=False,
+                skip_reason=RELATIONSHIP_BUDGET_EXHAUSTED_REASON,
+                budget_exhausted=True,
+                budget=merged,
+            )
         return RelationshipPassResult(
-            ran=False,
-            skip_reason=RELATIONSHIP_BUDGET_EXHAUSTED_REASON,
-            budget_exhausted=True,
+            ran=True,
+            provider_error=failure.outcome.code.value,
             budget=merged,
         )
-    return RelationshipPassResult(
-        ran=True,
-        provider_error=outcome.code.value,
-        budget=merged,
-    )
+    merged = budget if state.merged_budget is None else state.merged_budget
+    if state.last_validation is None:
+        # Defensive: a terminal outcome without any completed validation run
+        # (e.g. a schema-gate defect). Fail closed with no edges, as before.
+        return RelationshipPassResult(ran=True, drops=inventory_drops, budget=merged)
+    attempt = state.last_validation
+    return RelationshipPassResult(ran=True, edges=attempt.edges, drops=attempt.drops, budget=merged)
+
+
+class _EdgeRejection(NamedTuple):
+    """One dropped candidate: the reason plus its identity when reconstructable.
+
+    ``candidate_key`` is set only for the retryable-class drops — those
+    candidates' spans and attributes parsed cleanly, so the candidate can be
+    tracked across attempts and its drop removed only by a demonstrated fix.
+    """
+
+    reason: RelationshipDropReason
+    candidate_key: _RelationshipKey | None
 
 
 def _validate_relationship_extractions(
@@ -618,9 +970,18 @@ def _validate_relationship_extractions(
     entity_corpus: Sequence[str],
     max_edges: int,
     drops: RelationshipDropCounts,
-) -> tuple[tuple[GroundedRelationship, ...], RelationshipDropCounts]:
-    """Fail-closed validation of pass-2 candidates; drops are counted."""
+) -> tuple[
+    tuple[GroundedRelationship, ...],
+    RelationshipDropCounts,
+    tuple[tuple[_RelationshipKey, RelationshipDropReason], ...],
+]:
+    """Fail-closed validation of pass-2 candidates; drops are counted.
+
+    Returns the validated edges, the per-reason drop tally, and the retryable
+    drops as per-candidate ``(candidate key, reason)`` records.
+    """
     edges: list[GroundedRelationship] = []
+    retryable_drops: list[tuple[_RelationshipKey, RelationshipDropReason]] = []
     seen: set[tuple[str, str, str, str, int, int]] = set()
     # Retained inventory char ranges: a validated edge span must lie inside
     # the range of the clause it names, or it is dropped (CLAUSE_SPAN_MISMATCH).
@@ -638,8 +999,10 @@ def _validate_relationship_extractions(
                 clause_ranges=clause_ranges,
                 corpus=corpus,
             )
-            if isinstance(validated, RelationshipDropReason):
-                drops = drops.bump(validated)
+            if isinstance(validated, _EdgeRejection):
+                drops = drops.bump(validated.reason)
+                if validated.candidate_key is not None:
+                    retryable_drops.append((validated.candidate_key, validated.reason))
                 continue
             key = validated.dedup_key()
             if key in seen:
@@ -650,7 +1013,7 @@ def _validate_relationship_extractions(
                 continue
             seen.add(key)
             edges.append(validated)
-    return tuple(edges), drops
+    return tuple(edges), drops, tuple(retryable_drops)
 
 
 def _validated_edge(
@@ -660,7 +1023,7 @@ def _validated_edge(
     frame: BoundaryFrame,
     clause_ranges: dict[str, tuple[int, int]],
     corpus: str,
-) -> GroundedRelationship | RelationshipDropReason:
+) -> GroundedRelationship | _EdgeRejection:
     """Validate one candidate against the original boundary text and identities.
 
     The provider's char interval is relative to the wrapped, delimiter-
@@ -672,30 +1035,40 @@ def _validated_edge(
     if interval is None or interval.start_pos is None or interval.end_pos is None:
         # Skip ungrounded extractions exactly as langextract_to_graph
         # does (char_interval is None) — and count the skip.
-        return RelationshipDropReason.INVALID_SPAN
+        return _EdgeRejection(RelationshipDropReason.INVALID_SPAN, None)
     body_start = interval.start_pos - frame.prefix_len
     body_end = interval.end_pos - frame.prefix_len
     if not 0 <= body_start < body_end <= len(frame.body):
-        return RelationshipDropReason.INVALID_SPAN
+        return _EdgeRejection(RelationshipDropReason.INVALID_SPAN, None)
     start = frame.to_original(body_start)
     end = frame.to_original(body_end)
     if not 0 <= start < end <= len(boundary_text):
-        return RelationshipDropReason.INVALID_SPAN
+        return _EdgeRejection(RelationshipDropReason.INVALID_SPAN, None)
     attributes = extraction.attributes or {}
     try:
         relationship = RelationshipType(str(attributes.get("relationship", "")).strip().casefold())
     except ValueError:
-        return RelationshipDropReason.INVALID_TYPE
+        return _EdgeRejection(RelationshipDropReason.INVALID_TYPE, None)
     clause_id = str(attributes.get("clause_id", "")).strip()
-    clause_range = clause_ranges.get(clause_id)
-    if clause_range is None:
-        return RelationshipDropReason.UNKNOWN_CLAUSE
-    if not (clause_range[0] <= start and end <= clause_range[1]):
-        return RelationshipDropReason.CLAUSE_SPAN_MISMATCH
     from_entity = str(attributes.get("from_entity", "")).strip()
     to_entity = str(attributes.get("to_entity", "")).strip()
+    # A retryable-class drop's candidate is fully identified (its span and
+    # attributes parsed cleanly), so the drop can be tracked across attempts.
+    candidate_key = relationship_candidate_key(
+        from_entity=from_entity,
+        relationship=relationship,
+        to_entity=to_entity,
+        clause_id=clause_id,
+        start=start,
+        end=end,
+    )
+    clause_range = clause_ranges.get(clause_id)
+    if clause_range is None:
+        return _EdgeRejection(RelationshipDropReason.UNKNOWN_CLAUSE, candidate_key)
+    if not (clause_range[0] <= start and end <= clause_range[1]):
+        return _EdgeRejection(RelationshipDropReason.CLAUSE_SPAN_MISMATCH, candidate_key)
     if not (_entity_grounded(from_entity, corpus) and _entity_grounded(to_entity, corpus)):
-        return RelationshipDropReason.INVALID_ENDPOINT
+        return _EdgeRejection(RelationshipDropReason.INVALID_ENDPOINT, None)
     return GroundedRelationship(
         from_entity=from_entity,
         relationship=relationship,

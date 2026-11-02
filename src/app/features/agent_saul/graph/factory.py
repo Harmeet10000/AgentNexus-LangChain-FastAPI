@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.ai.tools.registry import (
     get_tool_registry,
+    register_deep_research_tool,
     register_default_tools,
 )
 from app.features.agent_saul.domain.state import (
@@ -22,6 +23,7 @@ from app.features.agent_saul.domain.state import (
 from app.features.documents.application.tools.authorization import ToolRuntimeContext
 from app.features.documents.application.tools.bundle import AgentToolBundle
 
+from .deep_research import make_deep_research_tool
 from .nodes import (
     ClauseSegmentationOutput,
     EntityExtractionOutput,
@@ -34,7 +36,7 @@ from .nodes import (
     make_finalization_node,
     make_gateway_node,
     make_grounding_verification_node,
-    make_human_review_node,
+    make_human_review_entry,
     make_ingestion_node,
     make_normalization_node,
     make_orchestrator_node,
@@ -82,6 +84,11 @@ class AgentRegistry(BaseModel):
     grounding_llm: Runnable[list[Any], GroundingVerificationOutput]
     finalization_llm: Runnable[list[Any], Any]  # FinalReport
 
+    # The compiled deep-research subgraph behind its single tool wrapper
+    # (D5). ``None`` only when no EvidenceService is provisioned; the node
+    # then refuses with a typed service-unavailable failure.
+    deep_research_tool: Any | None = None
+
 
 class SaulGraphNodes(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -100,6 +107,11 @@ class SaulGraphNodes(BaseModel):
     compliance: Any
     grounding_verification: Any
     human_review: Any
+    # The validation layer's HumanReviewSink wired to the human_review node
+    # (D7 / ADR-2): every Saul-side ESCALATE routes into the HITL review
+    # through this sink, never around it. ``None`` only for hand-built node
+    # sets that predate the sink seam.
+    human_review_sink: Any | None = None
     finalization: Any
     persist_memory: Any
     deep_research: Any
@@ -129,6 +141,15 @@ def build_agent_registry(
     register_default_tools()
     handoff = get_tool_registry()
 
+    # D5: the deep-research subgraph wrapper registers once in the single
+    # registry, compiled here at graph-build time, with read-only authority
+    # tags. The deep_research role's projection stays at exactly its transfer
+    # tool plus this one research tool.
+    deep_research_tool: Any | None = None
+    if tools is not None and tools.evidence_service is not None:
+        deep_research_tool = make_deep_research_tool(tools.evidence_service)
+        register_deep_research_tool(deep_research_tool)
+
     def _transfer(name: str) -> Any:
         return handoff.get(name)
 
@@ -144,17 +165,15 @@ def build_agent_registry(
         risk_tools += [tools.query_knowledge_graph, tools.get_obligation_chain]
         compliance_tools += [tools.search_legal_precedents, tools.retrieve_statute_section]
         if tools.search_evidence is not None and tools.read_evidence_by_id is not None:
-            # Both specialists use the same scoped evidence seam; compliance
-            # additionally receives readiness so missing uploaded authorities
-            # cannot be interpreted as compliance.
+            # Both specialists use the same scoped evidence seam; both receive
+            # readiness (D3 parity) so missing or incomplete uploaded
+            # authorities cannot be interpreted as a complete analysis.
             compliance_tools = [
                 _transfer("transfer_to_orchestrator"),
                 _transfer("transfer_to_risk"),
                 tools.search_evidence,
                 tools.read_evidence_by_id,
             ]
-            if tools.get_ingestion_state is not None:
-                compliance_tools.append(tools.get_ingestion_state)
             risk_tools = [
                 _transfer("transfer_to_orchestrator"),
                 tools.query_knowledge_graph,
@@ -162,6 +181,9 @@ def build_agent_registry(
                 tools.search_evidence,
                 tools.read_evidence_by_id,
             ]
+            if tools.get_ingestion_state is not None:
+                compliance_tools.append(tools.get_ingestion_state)
+                risk_tools.append(tools.get_ingestion_state)
 
     risk_agent = create_agent(
         model=pro_llm,
@@ -228,6 +250,7 @@ def build_agent_registry(
         relationship_llm=relationship_llm,
         grounding_llm=grounding_llm,
         finalization_llm=finalization_llm,
+        deep_research_tool=deep_research_tool,
     )
 
 
@@ -237,6 +260,9 @@ def _build_graph_nodes(
     memory_service: Any,
     tool_registry: AgentToolBundle,
 ) -> SaulGraphNodes:
+    # D7 / ADR-2: the review node is built only through its sink entry, so a
+    # Saul-side ESCALATE reaches HITL through the HumanReviewSink contract.
+    review_sink, review_node = make_human_review_entry()
     return SaulGraphNodes(
         gateway=make_gateway_node(),
         qna=make_qna_node(registry.qna_llm),
@@ -255,11 +281,18 @@ def _build_graph_nodes(
         relationship_mapping=make_relationship_mapping_node(registry.relationship_llm),
         risk_analysis=make_risk_analysis_node(registry.risk_agent),
         compliance=make_compliance_node(registry.compliance_agent),
-        grounding_verification=make_grounding_verification_node(registry.grounding_llm),
-        human_review=make_human_review_node(),
+        # The verdict path escalates through the same sink the review node
+        # drains: a real grounding failure reaches HITL via the sink's
+        # thread-buffered enqueue, never around the seam.
+        grounding_verification=make_grounding_verification_node(
+            registry.grounding_llm, human_review_sink=review_sink
+        ),
+        human_review=review_node,
+        human_review_sink=review_sink,
         finalization=make_finalization_node(registry.finalization_llm),
         persist_memory=make_persist_memory_node(memory_service),
         deep_research=make_deep_research_node(
+            deep_research_tool=registry.deep_research_tool,
             evidence_service=tool_registry.evidence_service,
         ),
     )

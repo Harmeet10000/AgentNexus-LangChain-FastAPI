@@ -6,15 +6,23 @@ import asyncio
 import hashlib
 import inspect
 from operator import itemgetter
-from typing import TYPE_CHECKING, NamedTuple, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from graphiti_core.errors import GraphitiError
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.generation import TextGenerationRequest
 from app.ai.graph.retry import TransientExternalError, retry_immediate
+from app.ai.validation import (
+    EvaluationContext,
+    SemanticFinding,
+    SemanticReport,
+    ValidationDecision,
+    ValidationPipeline,
+)
 from app.config import get_settings
 from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.adapters.persistence.postgres.document_repository import (
@@ -77,7 +85,6 @@ from app.utils import to_sorted_key_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
-    from typing import Any
 
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
@@ -85,6 +92,7 @@ if TYPE_CHECKING:
     from ty_extensions import Unknown
 
     from app.ai.generation import TextGenerationStructuredResult
+    from app.ai.validation import RetryFeedback
     from app.config.settings import Settings
     from app.features.documents.api.http import dto as documents_dto
     from app.features.documents.domain.errors import DocumentResult
@@ -145,6 +153,10 @@ class _BranchInput(NamedTuple):
 class _LegalPreparation(NamedTuple):
     metadata: LegalMetadataExtraction | None
     warnings: list[QualityWarning]
+    # True when the metadata extraction ran but failed validation: the record
+    # must carry the explicit metadata_validation_failed state and must not
+    # merge unvalidated heuristic metadata (validation-seam-adoption).
+    validation_failed: bool = False
 
 
 async def _run_bm25_branch(
@@ -358,6 +370,105 @@ class ContextGrader(Protocol):
     def generate_structured(
         self, request: TextGenerationRequest
     ) -> Awaitable[TextGenerationStructuredResult]: ...
+
+
+# Ask-loop pipeline adoption (validation-seam-adoption): the grade/rewrite
+# loop runs through the shared ValidationPipeline. Grading is the semantic
+# evaluator (``_grade_context`` verbatim); one full plan→retrieve→rerank
+# iteration is ``produce``; the rewrite suggestion rides the bounded
+# feedback-carrying retry. The observable ask contract is byte-identical
+# (parity suite: the existing grade-loop and ask tests).
+_ASK_VALIDATION_SEAM = "ask_context_grader"
+# First attempt + the bounded rewrite retry: the two-iteration bound, unchanged.
+_ASK_MAX_ATTEMPTS = 2
+_INSUFFICIENT_CONTEXT_FINDING = "insufficient_context"
+
+
+class RetrievedContext(BaseModel):
+    """One retrieval iteration's produced context, as the grader consumes it.
+
+    The schema-gate model for the ask loop's pipeline: ``produce`` runs one
+    full plan→graphiti-filter→embed→retrieve→rerank iteration and hands this
+    to the semantic evaluator (the context grader).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    query: str
+    reranked: tuple[RetrievedChunk, ...] = ()
+    rows: tuple[dict[str, Any], ...] = ()
+
+
+class _AskLoopState:
+    """Mutable per-ask cell shared by the pipeline's produce and evaluator.
+
+    The evaluator records the latest :class:`ContextGrade` so the retry's
+    rewrite suggestion reaches ``produce`` exactly as the hand-rolled loop's
+    second iteration consumed it; the last completed iteration's rows drive
+    the warning envelope and coverage in both the accepted and escalated
+    outcomes, byte-identically.
+    """
+
+    __slots__ = ("failure", "grade", "rows", "rows_by_chunk_id")
+
+    def __init__(self) -> None:
+        self.failure: object | None = None
+        self.grade: ContextGrade | None = None
+        self.rows: list[dict[str, Any]] = []
+        self.rows_by_chunk_id: dict[str, dict[str, Any]] = {}
+
+
+class _RetrievalFailedError(Exception):
+    """The fused-retrieval step failed: nothing was produced to grade.
+
+    Raised out of ``produce`` so the typed failure reaches the caller exactly
+    as the inline loop returned it. No validation happened, so no decision
+    event exists for a failed retrieval.
+    """
+
+
+class _ContextGradeEvaluator:
+    """The ask loop's semantic evaluator: ``_grade_context`` behind the port.
+
+    ``_grade_context`` is kept verbatim (dual paths, degrade-on-failure), so
+    the adoption changes only who calls it and what an insufficient grade
+    means: the retryable finding that feeds the bounded rewrite retry.
+    """
+
+    __slots__ = ("_grader", "_grader_llm", "_state")
+
+    def __init__(
+        self,
+        *,
+        grader_llm: Any,
+        grader: ContextGrader | None,
+        state: _AskLoopState,
+    ) -> None:
+        self._grader_llm = grader_llm
+        self._grader = grader
+        self._state = state
+
+    async def evaluate(
+        self, value: RetrievedContext, context: EvaluationContext  # noqa: ARG002 — port signature
+    ) -> SemanticReport:
+        grade = await _grade_context(
+            grader_llm=self._grader_llm,
+            grader=self._grader,
+            query=value.query,
+            reranked=value.reranked,
+        )
+        self._state.grade = grade
+        if grade.sufficient:
+            return SemanticReport(verdict="pass")
+        return SemanticReport(
+            verdict="reject",
+            findings=(
+                SemanticFinding(
+                    code=_INSUFFICIENT_CONTEXT_FINDING,
+                    message="retrieved context is insufficient to answer the query",
+                ),
+            ),
+        )
 
 
 class DocumentQueryService:
@@ -856,7 +967,7 @@ class DocumentQueryService:
             ),
         )
 
-    async def _ask(  # noqa: PLR0914
+    async def _ask(  # noqa: PLR0914 PLR0915
         self,
         *,
         user_id: str,
@@ -917,17 +1028,24 @@ class DocumentQueryService:
         generator_llm = llm.with_structured_output(GeneratedAnswer)
         response_warnings: list[QualityWarningDTO] = []
         answer = GeneratedAnswer(answer=_FALLBACK_ANSWER, citations=[], confidence="uncertain")
-        grade = ContextGrade(sufficient=False, missing_aspects=["No retrieved chunks"])
         # Edge-grounded expansion is additive: it stays empty unless an
         # authorized graph scope, a healthy graphiti, and at least one typed
         # edge touching the reranked chunks all exist.
         edge_expansions: list[EdgeExpansion] = []
         resolved_edges: list[tuple[EdgeContextBlock, dict[str, object]]] = []
+        loop_state = _AskLoopState()
 
-        for iteration in range(2):
-            rewritten_query = (
-                payload.query if iteration == 0 else (grade.rewrite_suggestion or payload.query)
-            )
+        async def _produce_retrieval_context(feedback: RetryFeedback | None) -> object:
+            """One full retrieval iteration: plan → filter → embed → retrieve → rerank.
+
+            The retry's rewrite arrives as pipeline feedback: the previous
+            attempt's grade carries the rewrite suggestion, consumed exactly
+            as the hand-rolled loop's second iteration consumed it (deleted
+            below — the pipeline owns the bounded retry now).
+            """
+            rewritten_query = payload.query
+            if feedback is not None and loop_state.grade is not None:
+                rewritten_query = loop_state.grade.rewrite_suggestion or payload.query
             plan = await _build_query_plan(
                 query_llm=query_llm,
                 query=rewritten_query,
@@ -946,9 +1064,8 @@ class DocumentQueryService:
                 document_contracts=scope_contracts,
             )
             embedding = await retry_immediate(
-                # `query=` binds the loop variable at definition rather than at call. It is awaited
-                # inside the same iteration so late binding would not bite today, but this loop
-                # retries on a grade and the binding is what keeps that true.
+                # `query=` binds the plan query at definition rather than at call, so the
+                # awaited embedding always matches this iteration's plan.
                 lambda query=plan.rewritten_query: embed_text(
                     query,
                     task_type=EmbeddingTaskType.QUERY,
@@ -982,7 +1099,9 @@ class DocumentQueryService:
                 exact_phrase=plan.exact_phrase,
             )
             if isinstance(fused_result, Failure):
-                return Failure(fused_result.failure())
+                loop_state.failure = fused_result.failure()
+                message = "fused retrieval failed"
+                raise _RetrievalFailedError(message)
             fused, lookup = fused_result.unwrap()
             rows = lookup_to_rows(fused, lookup)
             rows_by_chunk_id = {str(row["chunk_id"]): row for row in rows}
@@ -990,43 +1109,64 @@ class DocumentQueryService:
             reranked = await get_shared_reranker().rerank(
                 plan.rewritten_query, retrieved_chunks, limit=5
             )
-            grade = await _grade_context(
-                grader_llm=grader_llm,
-                grader=self.grader,
-                query=plan.rewritten_query,
-                reranked=reranked,
+            loop_state.rows = rows
+            loop_state.rows_by_chunk_id = rows_by_chunk_id
+            return RetrievedContext(
+                query=plan.rewritten_query, reranked=tuple(reranked), rows=tuple(rows)
             )
-            response_warnings = _merge_warning_lists([_warnings_from_rows(rows)])
-            if grade.sufficient or iteration == 1:
-                if grade.sufficient:
-                    edge_expansions = await _edge_grounding_for_reranked(
-                        graphiti=self.graphiti,
-                        query=plan.rewritten_query,
-                        tenant_id=tenant_id,
-                        scope_ids=scope_ids if explicit_scope else (),
-                        scope_versions=scope_versions,
-                        scope_contracts=scope_contracts,
-                        contract_index=payload.contract_index,
-                        reranked=reranked,
-                    )
-                    resolved_edges = _resolved_edge_blocks(edge_expansions, rows_by_chunk_id)
-                    answer = await _generate_answer(
-                        generator_llm=generator_llm,
-                        query=plan.rewritten_query,
-                        reranked=reranked,
-                        grounding_edges=[block.text for block, _ in resolved_edges],
-                    )
-                break
+
+        pipeline = ValidationPipeline(
+            schema=RetrievedContext,
+            evaluator=_ContextGradeEvaluator(
+                grader_llm=grader_llm, grader=self.grader, state=loop_state
+            ),
+            max_attempts=_ASK_MAX_ATTEMPTS,
+            retryable_findings=(_INSUFFICIENT_CONTEXT_FINDING,),
+        )
+        try:
+            outcome = await pipeline.validate(
+                _produce_retrieval_context,
+                EvaluationContext(seam=_ASK_VALIDATION_SEAM),
+            )
+        except _RetrievalFailedError:
+            assert loop_state.failure is not None  # noqa: S101 — set on every raise
+            return Failure(loop_state.failure)
+
+        # The last completed iteration's rows drive the warning envelope,
+        # citations and coverage — accepted or escalated — byte-identically.
+        response_warnings = _merge_warning_lists([_warnings_from_rows(loop_state.rows)])
+        if outcome.decision is ValidationDecision.ACCEPT:
+            context_value = outcome.value
+            assert context_value is not None  # noqa: S101 — an ACCEPT outcome carries its value
+            edge_expansions = await _edge_grounding_for_reranked(
+                graphiti=self.graphiti,
+                query=context_value.query,
+                tenant_id=tenant_id,
+                scope_ids=scope_ids if explicit_scope else (),
+                scope_versions=scope_versions,
+                scope_contracts=scope_contracts,
+                contract_index=payload.contract_index,
+                reranked=list(context_value.reranked),
+            )
+            resolved_edges = _resolved_edge_blocks(edge_expansions, loop_state.rows_by_chunk_id)
+            answer = await _generate_answer(
+                generator_llm=generator_llm,
+                query=context_value.query,
+                reranked=list(context_value.reranked),
+                grounding_edges=[block.text for block, _ in resolved_edges],
+            )
 
         evidence_policy: EvidencePolicy = (
             "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
         )
-        result_document_ids = {str(row["document_id"]) for row in rows}
+        result_document_ids = {str(row["document_id"]) for row in loop_state.rows}
         graph_document_ids = {
-            str(row["document_id"]) for row in rows if bool(row.get("graphiti_verified", False))
+            str(row["document_id"])
+            for row in loop_state.rows
+            if bool(row.get("graphiti_verified", False))
         }
         citations = [
-            _citation_response(citation, rows_by_chunk_id.get(citation.chunk_id))
+            _citation_response(citation, loop_state.rows_by_chunk_id.get(citation.chunk_id))
             for citation in answer.citations
         ]
         citations.extend(_edge_citations(resolved_edges))

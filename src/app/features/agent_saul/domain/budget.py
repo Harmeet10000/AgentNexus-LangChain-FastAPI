@@ -182,5 +182,46 @@ class BudgetLedger(BaseModel, frozen=True):
 WALL_CLOCK_DIMENSION = BudgetDimension.WALL_CLOCK
 
 
+class PipelineLedgerAdapter:
+    """Saul's frozen ledger behind the validation pipeline's budget port (D7).
+
+    The pipeline's :class:`~app.ai.validation.BudgetLedger` port asks for
+    ``charge() -> bool`` — exhaustion is an expected answer — while Saul's
+    :class:`BudgetLedger.consume` raises. This adapter translates between the
+    two without replacing either: an accepted charge advances the very ledger
+    instance the caller supplied (no fresh allowance is ever minted), and a
+    rejected charge marks the ledger exhausted exactly as the graph's budget
+    gate does, so the state survives the checkpoint.
+    """
+
+    def __init__(
+        self,
+        ledger: BudgetLedger,
+        dimension: BudgetDimension = BudgetDimension.MODEL_CALLS,
+    ) -> None:
+        self._ledger = ledger
+        self._dimension = dimension
+        # Honesty accounting: recorded charges must equal the actual
+        # re-invocations the pipeline makes (tasks.md 3.1).
+        self.charges = 0
+
+    @property
+    def ledger(self) -> BudgetLedger:
+        return self._ledger
+
+    def charge(self) -> bool:
+        if self._ledger.exhausted:
+            return False
+        try:
+            self._ledger = self._ledger.consume(self._dimension)
+        except BudgetExhaustedError as exc:
+            self._ledger = self._ledger.model_copy(
+                update={"exhausted": True, "exhausted_dimension": exc.dimension}
+            )
+            return False
+        self.charges += 1
+        return True
+
+
 def new_budget_ledger(limits: BudgetLimits | None = None) -> BudgetLedger:
     return BudgetLedger(limits=limits or BudgetLimits())

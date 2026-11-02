@@ -20,6 +20,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.ai.validation.schema import ValidationOutcome
 from app.features.agent_saul.domain.budget import BudgetLedger
 from app.retrieval.graphiti.schemas import RelationshipType
 
@@ -681,6 +682,8 @@ _LEGACY_STATE_DEFAULTS: dict[str, Any] = {
     "coverage": {},
     "evidence_policy": "mechanically_verified",
     "human_review": None,
+    # Additive HITL escalation channel: pre-adoption checkpoints carry none.
+    "pending_escalations": [],
     "final_report": None,
     "long_term_refs": [],
     "working_memory": {},
@@ -855,6 +858,14 @@ class LegalAgentState(TypedDict):
 
     # --- Human review ---
     human_review: HumanReviewOutput | None
+    # Checkpointed escalation carriage for the HITL review seam (D7 / ADR-2):
+    # the ESCALATE outcomes a validating seam routes through the
+    # HumanReviewSink. Per-thread by construction (graph state is scoped to
+    # the checkpoint's thread), so one thread's escalations can never render
+    # in another thread's interrupt payload. Last-write-wins: a validating
+    # node returns the outcomes it collected; the review node drains the
+    # channel into its interrupt payload and clears it on resume.
+    pending_escalations: list[ValidationOutcome[Any]]
 
     # --- Final ---
     final_report: FinalReport | None

@@ -21,6 +21,7 @@ Usage::
                 keep=("messages", 20),
             ),
             HumanInTheLoopMiddleware(interrupt_on={"delete_file": True}),
+            PolicyToolScopeMiddleware(),  # authority: shrink-only, before ranking
             LLMToolSelectorMiddleware(model=fast_llm),
             ToolRetryMiddleware(
                 tools=["safe_lookup"],  # idempotent tools only
@@ -53,6 +54,7 @@ from app.ai.guardrails import (
     GuardrailMiddleware,
     MiddlewareConfig,
     ModelRetryMiddleware,
+    PolicyToolScopeMiddleware,
     TodoListMiddleware,
     build_default_middleware_stack,
     build_minimal_middleware_stack,
@@ -70,6 +72,7 @@ __all__ = [
     "LangChainModelRetryMiddleware",
     "MiddlewareConfig",
     "ModelRetryMiddleware",
+    "PolicyToolScopeMiddleware",
     "SummarizationMiddleware",
     "TodoListMiddleware",
     "ToolRetryMiddleware",

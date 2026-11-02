@@ -12,10 +12,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from langchain_core.tools import BaseTool
+
 from app.ai.tools import shell
+from app.ai.tools.registry import register_default_tools
+from app.ai.tools.web_search import WebSearchInput
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import Final
 
     import pytest
 
@@ -200,3 +205,91 @@ async def test_file_search_skips_symlinked_file_outside_jail(tmp_path, monkeypat
     finally:
         link.unlink(missing_ok=True)
         outside.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Registry authority metadata (openspec: agent-tool-capability-enforcement §3.1)
+#
+# The ``capability:*`` and ``side-effect:*`` tags are the authority catalog:
+# what a registration advertises must be discoverable per tool, and the legacy
+# category tags used for selection must behave exactly as before the metadata
+# landed.
+# ---------------------------------------------------------------------------
+
+#: tool name → (enforced capability tag, side-effect class tag, legacy category tag)
+_AUTHORITY: Final[dict[str, tuple[str, str, str]]] = {
+    "shell_tool": ("capability:system.shell.execute", "side-effect:write", "system"),
+    "read_file": ("capability:filesystem.read", "side-effect:read", "filesystem"),
+    "write_file": ("capability:filesystem.write", "side-effect:write", "filesystem"),
+    "list_directory": ("capability:filesystem.read", "side-effect:read", "filesystem"),
+    "file_search": ("capability:filesystem.read", "side-effect:read", "filesystem"),
+}
+
+
+def test_default_registrations_carry_authority_metadata() -> None:
+    """Each system/filesystem registration names its capability and side-effect class."""
+    registry = register_default_tools()
+
+    for name, (capability, side_effect, _legacy) in _AUTHORITY.items():
+        # by_tags is AND-semantics, so a hit proves the same registration
+        # carries both the capability and the side-effect tag.
+        matches = {t.name for t in registry.by_tags(capability, side_effect)}
+        assert name in matches, (name, capability, side_effect)
+
+    # The capability identifiers are real, discoverable registry tags.
+    assert {cap for cap, _, _ in _AUTHORITY.values()} <= registry.tags()
+
+
+async def test_authority_metadata_matches_enforced_capability() -> None:
+    """A registration's advertised capability is the one the executor enforces."""
+    registry = register_default_tools()
+
+    # Arguments are irrelevant: the grant check runs before anything else, so
+    # the no-runtime refusal names the tool's enforced capability and none of
+    # these paths is ever touched.
+    args_by_tool: Final[dict[str, dict[str, str]]] = {
+        "shell_tool": {"command": "echo hi"},
+        "read_file": {"path": "unused/denied.md"},
+        "write_file": {"path": "unused/denied.md", "content": "x"},
+        "list_directory": {"path": "unused"},
+        "file_search": {"query": "x", "directory": "unused"},
+    }
+
+    for name, (capability, _side_effect, _legacy) in _AUTHORITY.items():
+        advertised = capability.removeprefix("capability:")
+        result = await registry.get(name).coroutine(**args_by_tool[name])
+        assert result.success is False, name
+        assert advertised in (result.error or ""), (name, advertised, result.error)
+
+
+def test_legacy_tag_selection_unchanged() -> None:
+    """Selection by the legacy category tags returns the same tools as before."""
+    registry = register_default_tools()
+
+    assert {t.name for t in registry.by_tags("filesystem")} == {
+        "read_file",
+        "write_file",
+        "list_directory",
+        "file_search",
+    }
+    assert {t.name for t in registry.by_tags("web")} == {"web_search"}
+    assert {t.name for t in registry.by_tags("system")} == {"shell_tool"}
+
+
+# ---------------------------------------------------------------------------
+# Argument schemas are plain schema models (openspec §3.2)
+# ---------------------------------------------------------------------------
+
+
+def test_web_search_args_schema_is_schema_only() -> None:
+    """The web-search tool's argument schema is a plain schema model, not a tool."""
+    registry = register_default_tools()
+
+    schema = registry.get("web_search").args_schema
+    assert schema is WebSearchInput
+    # Schema-only: it must not be a tool type, so it cannot be registered or
+    # invoked in its own right.
+    assert not issubclass(schema, BaseTool)
+    # It exposes exactly its declared, model-visible fields — no injected
+    # runtime context leaks into the schema.
+    assert set(schema.model_fields) == {"query", "max_results"}

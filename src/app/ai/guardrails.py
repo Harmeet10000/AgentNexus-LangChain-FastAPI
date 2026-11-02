@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents.middleware import (
@@ -317,6 +317,75 @@ class DynamicSystemPromptMiddleware(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Policy tool scoping (authority, not relevance)
+# ---------------------------------------------------------------------------
+
+
+def _normalized_grants(context: Any) -> frozenset[str]:
+    """Read the server-owned capability grants out of a runtime context."""
+    if not isinstance(context, Mapping):
+        return frozenset()
+    granted = context.get("capabilities", ())
+    if isinstance(granted, str):
+        granted = (granted,)
+    if not isinstance(granted, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(str(item) for item in granted if str(item))
+
+
+class PolicyToolScopeMiddleware(BaseModel):
+    """
+    Intersect the model request's tools with the policy-authorized subset
+    *before* relevance ranking runs (ADR-3 of ``tool-capability-catalog``:
+    intersection, not post-filter — an unauthorized tool never influences
+    ordering or telemetry of what remains).
+
+    The authority decision is the server-owned runtime context's
+    ``capabilities`` tuple, populated from the role → grants policy
+    (``app.ai.tools.policy``) at every context-build site. A tool is
+    selectable only when it declares no capability identifier (handoff and
+    bundle tools carry no authority) or when its declared capability is in
+    the grant set. The executor's grant check remains the final gate.
+    """
+
+    def build(self) -> Any:  # noqa: PLR6301 — same builder surface as the other middlewares
+        # Local import: the tools package pulls the tavily connection module,
+        # and guardrails is imported from the shared langchain layer.
+        from app.ai.tools.registry import get_tool_registry
+
+        @wrap_model_call
+        async def scope_tools(
+            request: ModelRequest[Any],
+            handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+        ) -> ModelResponse[Any]:
+            tools = request.tools
+            if not tools:
+                return await handler(request)
+
+            granted = (
+                _normalized_grants(request.runtime.context)
+                if request.runtime is not None
+                else frozenset()
+            )
+            registry = get_tool_registry()
+
+            def _authorized(tool: Any) -> bool:
+                try:
+                    capability = registry.authority(tool.name).capability
+                except KeyError:
+                    return True  # not a catalog tool: no declared authority
+                return capability is None or capability in granted
+
+            scoped = [tool for tool in tools if not isinstance(tool, dict) and _authorized(tool)]
+            # Provider-specific tool dicts carry no registry identity; pass
+            # them through untouched.
+            provider_tools = [tool for tool in tools if isinstance(tool, dict)]
+            return await handler(request.override(tools=[*scoped, *provider_tools]))
+
+        return scope_tools
+
+
+# ---------------------------------------------------------------------------
 # Pre-built middleware stacks
 # ---------------------------------------------------------------------------
 
@@ -355,8 +424,10 @@ def build_default_middleware_stack(
 
     Stack (before_model order):
       1. Summarization     — trim context FIRST
-      2. LLMToolSelector   — reduce tool list to relevant ones
-      3. DynamicPrompt     — inject runtime context
+      2. PolicyToolScope   — intersect tools with the policy-authorized set
+                             (authority — before the selector ranks anything)
+      3. LLMToolSelector   — reduce the already-authorized list to relevant ones
+      4. DynamicPrompt     — inject runtime context
       HumanInTheLoop       — pause before dangerous tools
       Guardrails           — validate response (after_model)
     """
@@ -364,16 +435,22 @@ def build_default_middleware_stack(
     cfg = config or MiddlewareConfig()
     fast_model_name = _provider_model_name(cfg.fast_model_name)
 
-    # 1. Summarization (context management)
-    stack.append(
-        SummarizationMiddleware(
-            model=fast_model_name,
-            trigger=("tokens", cfg.max_tokens_before_summary),
-            keep=("messages", cfg.messages_to_keep),
-        )
+    # 1. Summarization (context management) and 2. Policy scoping (authority):
+    #    the selector below only ever sees the intersection the runtime
+    #    context's policy grants authorize — it can shrink, never widen
+    #    (openspec tool-capability-catalog, ADR-3).
+    stack.extend(
+        [
+            SummarizationMiddleware(
+                model=fast_model_name,
+                trigger=("tokens", cfg.max_tokens_before_summary),
+                keep=("messages", cfg.messages_to_keep),
+            ),
+            PolicyToolScopeMiddleware().build(),
+        ]
     )
 
-    # 2. Tool selector (reduces tool-call noise)
+    # 3. Tool selector (reduces tool-call noise)
     if enable_tool_selector:
         stack.append(LLMToolSelectorMiddleware(model=fast_model_name))
 

@@ -14,13 +14,12 @@ from .registry import (
     get_web_tools,
     register_default_tools,
 )
-from .web_search import WebSearchTool, get_web_search_tool
+from .web_search import get_web_search_tool
 
 __all__ = [
     "IdempotencyGuard",
     "ToolRegistry",
     "ToolResult",
-    "WebSearchTool",
     "get_all_tools",
     "get_tool_registry",
     "get_web_search_tool",

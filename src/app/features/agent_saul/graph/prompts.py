@@ -137,6 +137,10 @@ _RISK_ANALYSIS_SYSTEM_PROMPT = render_prompt_sections(
         "CONSTRAINTS",
         "Every risk finding must include citations whose source/evidence_id is a handle issued in this run. If you cannot cite a source, do not make the claim. Do not let tactical cleverness outrun the record or the law.",
     ),
+    (
+        "READINESS POLICY",
+        "Check ingestion readiness with get_ingestion_state before concluding. While any in-scope document is not ingestion-complete, disclose that incompleteness in the analysis output instead of reading as a complete analysis.",
+    ),
 )
 
 

@@ -599,12 +599,23 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             warnings=[
                 warning for _, preparation in legal_preparations for warning in preparation.warnings
             ],
+            validation_failed=any(
+                preparation.validation_failed for _, preparation in legal_preparations
+            ),
         )
     )
+    # A terminally rejected extraction persists no metadata at all: the
+    # classified heuristics are NOT a fallback (honest absence), so the
+    # resolved columns stay empty and the record carries the explicit
+    # metadata_validation_failed state instead.
     extraction_jurisdiction = (
         legal.metadata.jurisdiction
         if legal.metadata
-        else (classified.jurisdiction if len(boundaries) == 1 else None)
+        else (
+            classified.jurisdiction
+            if len(boundaries) == 1 and not legal.validation_failed
+            else None
+        )
     )
     phase1_outcome, phase1_state = await _extract_document_knowledge(
         runtime=runtime,
@@ -616,39 +627,28 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
     )
     # Shared classification/legal metadata persisted by every status write in
     # this block (the writer shallow-merges metadata keys per call).
-    classification_metadata: dict[str, object] = {
-        "content_type": job.content_type,
-        "filename": job.filename,
-        **classified.metadata_,
-        **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
-        **(
-            {
-                "contracts": [
-                    {
-                        "contract_index": boundary.contract_index,
-                        **(
-                            preparation.metadata.model_dump(exclude_none=True)
-                            if preparation.metadata
-                            else {}
-                        ),
-                    }
-                    for boundary, preparation in legal_preparations
-                ]
-            }
-            if len(boundaries) > 1
-            else {}
-        ),
-    }
+    classification_metadata: dict[str, object] = _classification_metadata(
+        job=job,
+        classified=classified,
+        legal=legal,
+        legal_preparations=legal_preparations,
+    )
     resolved_contract_type = (
         legal.metadata.contract_type
         if legal.metadata
-        else (classified.contract_type if len(boundaries) == 1 else None)
+        else (
+            classified.contract_type
+            if len(boundaries) == 1 and not legal.validation_failed
+            else None
+        )
     )
     resolved_parties: list[object] = [
         *(
             legal.metadata.parties
             if legal.metadata
-            else (classified.parties if len(boundaries) == 1 else [])
+            else (
+                classified.parties if len(boundaries) == 1 and not legal.validation_failed else []
+            )
         )
     ]
     phase1_inventory: list[dict[str, object]] | None = None
@@ -668,7 +668,9 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             title=parsed.title,
             document_kind=classified.document_kind,
             jurisdiction=(
-                legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction
+                legal.metadata.jurisdiction
+                if legal.metadata
+                else (None if legal.validation_failed else classified.jurisdiction)
             ),
             contract_type=resolved_contract_type,
             parties=resolved_parties,
@@ -725,7 +727,9 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             title=parsed.title,
             document_kind=classified.document_kind,
             jurisdiction=(
-                legal.metadata.jurisdiction if legal.metadata else classified.jurisdiction
+                legal.metadata.jurisdiction
+                if legal.metadata
+                else (None if legal.validation_failed else classified.jurisdiction)
             ),
             contract_type=resolved_contract_type,
             parties=resolved_parties,
@@ -766,15 +770,24 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
     # the old transactional ordering while keeping each contract isolated.
     boundary_chunks: list[tuple[ContractBoundary, list[PreparedChunk]]] = []
     for index, (boundary, contract_parsed, contract_classified) in enumerate(contract_parsed_items):
+        legal_preparation = legal_preparations[index][1]
+        # A terminally rejected extraction leaves no heuristic metadata in the
+        # searchable text either: chunks are segmented from the stripped
+        # classification so their metadata and preamble carry no rejected
+        # party/jurisdiction/contract_type string.
+        segment_classified = (
+            _unvalidated_classified(contract_classified)
+            if legal_preparation.validation_failed
+            else contract_classified
+        )
         contract_chunks, warnings = await segment_chunks(
             parsed=contract_parsed,
-            classified=contract_classified,
+            classified=segment_classified,
         )
-        legal_preparation = legal_preparations[index][1]
         if legal_preparation.metadata is not None:
             contract_chunks = enrich_legal_chunks(
                 chunks=contract_chunks,
-                classified=contract_classified,
+                classified=segment_classified,
                 metadata=legal_preparation.metadata,
             )
         annotated = _annotate_contract_chunks(contract_chunks, boundary)
@@ -1068,12 +1081,96 @@ async def _prepare_legal_metadata(
 ) -> _LegalPreparation:
     if not classified.graphiti_required:
         return _LegalPreparation(metadata=None, warnings=[])
-    metadata, warnings = await extract_legal_metadata(
+    outcome = await extract_legal_metadata(
         llm=runtime.llm,
         markdown=markdown,
         classified=classified,
     )
-    return _LegalPreparation(metadata=metadata, warnings=warnings)
+    return _LegalPreparation(
+        metadata=outcome.metadata,
+        warnings=outcome.warnings,
+        validation_failed=outcome.validation_failed,
+    )
+
+
+def _unvalidated_classified(classified: ClassifiedDocument) -> ClassifiedDocument:
+    """Strip the regex heuristics when their LLM extraction was rejected.
+
+    A terminally validation-failed extraction means the classified
+    party/jurisdiction/contract_type guesses were not corroborated, so they
+    must not reach chunk metadata, chunk preambles, or the document record.
+    Everything load-bearing for chunking (``document_kind``) survives.
+    """
+    return classified.model_copy(
+        update={"jurisdiction": None, "contract_type": None, "parties": [], "metadata_": {}}
+    )
+
+
+def _classification_metadata(
+    *,
+    job: IngestionJob,
+    classified: ClassifiedDocument,
+    legal: _LegalPreparation,
+    legal_preparations: Sequence[tuple[ContractBoundary, _LegalPreparation]],
+) -> dict[str, object]:
+    """The shared classification/legal metadata persisted by every status write.
+
+    When any boundary's validation failed terminally, the classified regex
+    heuristics are dropped along with the resolved columns: the persisted
+    ``metadata_validation_failed`` flag is the only trace, so the record never
+    mixes rejected extraction output into searchable metadata.  A plain
+    "not extracted" outcome keeps the heuristic fields (honest absence is
+    signalled by the flag's absence, not by scrubbing the classifier).
+    """
+    return {
+        "content_type": job.content_type,
+        "filename": job.filename,
+        **({} if legal.validation_failed else classified.metadata_),
+        **(legal.metadata.model_dump(exclude_none=True) if legal.metadata else {}),
+        **_metadata_validation_state(legal_preparations),
+        **(
+            {
+                "contracts": [
+                    {
+                        "contract_index": boundary.contract_index,
+                        **(
+                            preparation.metadata.model_dump(exclude_none=True)
+                            if preparation.metadata
+                            else {}
+                        ),
+                    }
+                    for boundary, preparation in legal_preparations
+                ]
+            }
+            if len(legal_preparations) > 1
+            else {}
+        ),
+    }
+
+
+def _metadata_validation_state(
+    preparations: Sequence[tuple[ContractBoundary, _LegalPreparation]],
+) -> dict[str, object]:
+    """The persisted honest-failure state for the metadata seam.
+
+    Empty when every boundary either extracted validated metadata or did not
+    extract at all. When any boundary's validation failed terminally the
+    record carries the explicit ``metadata_validation_failed`` flag (plus the
+    per-contract truth for multi-boundary documents), so consumers can
+    distinguish "not extracted" from "extracted but rejected by validation".
+    """
+    if not any(preparation.validation_failed for _, preparation in preparations):
+        return {}
+    state: dict[str, object] = {"metadata_validation_failed": True}
+    if len(preparations) > 1:
+        state["contracts_metadata_validation"] = [
+            {
+                "contract_index": boundary.contract_index,
+                "metadata_validation_failed": preparation.validation_failed,
+            }
+            for boundary, preparation in preparations
+        ]
+    return state
 
 
 async def _write_contract_events(
