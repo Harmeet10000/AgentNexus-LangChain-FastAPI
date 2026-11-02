@@ -15,6 +15,7 @@ from langchain_core.tools import tool
 from app.ai.tools.policy import ROLE_CAPABILITY_GRANTS, grants_for
 from app.ai.tools.registry import (
     DEEP_RESEARCH_TOOL_NAME,
+    PORTFOLIO_TRAVERSAL_TOOL_NAMES,
     deep_research_role_projection,
     get_tool_registry,
     register_default_tools,
@@ -23,6 +24,11 @@ from app.features.agent_saul.graph import factory as saul_factory
 from app.features.agent_saul.graph.nodes import _analysis_tool_context
 from app.features.documents.application.evidence.service import EvidenceService
 from app.features.documents.application.tools.bundle import AgentToolBundle
+from app.features.documents.application.tools.portfolio import (
+    RelationshipEdgeProbe,
+    RelationshipEdgeVerdict,
+    TraversalGateError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -80,6 +86,8 @@ def _leave_registry_as_found() -> Iterator[None]:
     r = get_tool_registry()
     for attr in ("_tools", "_tags", "_authority"):
         getattr(r, attr).pop(DEEP_RESEARCH_TOOL_NAME, None)
+        for name in PORTFOLIO_TRAVERSAL_TOOL_NAMES:
+            getattr(r, attr).pop(name, None)
 
 
 def _role_toolsets(bound: dict[str, Any]) -> dict[str, list[str]]:
@@ -141,3 +149,117 @@ def test_unknown_role_context_grants_nothing() -> None:
     state: dict[str, Any] = {"user_id": "user-1", "thread_id": "thread-1"}
     context = _analysis_tool_context(state, role="no-such-role")  # type: ignore[arg-type]
     assert context["capabilities"] == ()
+
+
+# ---------------------------------------------------------------------------
+# Portfolio traversal binding (openspec agent-portfolio-traversal-tools 3.2)
+# ---------------------------------------------------------------------------
+
+
+def _open_gate_probe() -> RelationshipEdgeProbe:
+    return RelationshipEdgeProbe(
+        verdict=RelationshipEdgeVerdict.EDGES_PRESENT,
+        edges_observed=1,
+        documents_probed=2,
+    )
+
+
+def test_traversal_binding_keeps_projections_within_cap_and_authorized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the gate, both specialists' projections stay ≤7 and authorized."""
+    captured = _build_with_traversal(monkeypatch, _open_gate_probe())
+    toolsets = _role_toolsets(captured)
+
+    assert toolsets["risk"] == [
+        "transfer_to_orchestrator",
+        "query_knowledge_graph",
+        "get_obligation_chain",
+        "search_evidence",
+        "read_evidence_by_id",
+        "get_ingestion_state",
+        "cross_document_obligations",
+    ]
+    assert toolsets["compliance"] == [
+        "transfer_to_orchestrator",
+        "transfer_to_risk",
+        "search_evidence",
+        "read_evidence_by_id",
+        "get_ingestion_state",
+        "find_conflicting_clauses",
+        "party_obligation_map",
+    ]
+
+    registry = get_tool_registry()
+    for role, visible in toolsets.items():
+        grants = grants_for(role)
+        assert len(visible) <= 7, f"policy row {role!r} exceeds the ≤7 cap: {visible}"
+        for name in visible:
+            try:
+                capability = registry.authority(name).capability
+            except KeyError:
+                continue  # bundle tool: no declared authority in the catalog
+            assert capability is None or capability in grants, (
+                f"policy row {role!r} (grants {sorted(grants)}) does not authorize "
+                f"visible tool {name!r} declaring capability {capability!r}"
+            )
+
+
+def test_traversal_binding_without_edges_fails_the_build_naming_the_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A graphless corpus fails the build loudly; no traversal tool binds."""
+    with pytest.raises(TraversalGateError, match="relationship-edges"):
+        _build_with_traversal(
+            monkeypatch,
+            RelationshipEdgeProbe(
+                verdict=RelationshipEdgeVerdict.NO_EDGES,
+                edges_observed=0,
+                documents_probed=2,
+            ),
+        )
+
+
+def test_traversal_binding_without_a_probe_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No probe means a scopeless corpus: fail closed, never bind."""
+    with pytest.raises(TraversalGateError, match="verdict no_scope"):
+        _build_with_traversal(monkeypatch, None)
+
+
+def test_backendless_build_binds_no_traversal_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a graph backend the build behaves exactly as before the change."""
+    captured = _build_with_traversal(monkeypatch, _open_gate_probe(), with_backend=False)
+    toolsets = _role_toolsets(captured)
+    for name in (*PORTFOLIO_TRAVERSAL_TOOL_NAMES,):
+        for visible in toolsets.values():
+            assert name not in visible
+        # The catalog still carries the (backend-less) tool so the policy's
+        # portfolio.traversal grants name a declared capability.
+        assert name in get_tool_registry().names()
+
+
+def _build_with_traversal(
+    monkeypatch: pytest.MonkeyPatch,
+    probe: RelationshipEdgeProbe | None,
+    *,
+    with_backend: bool = True,
+) -> dict[str, Any]:
+    """Build the registry with the real factory, capturing per-role toolsets."""
+    captured: dict[str, Any] = {}
+
+    def _fake_create_agent(*_args: Any, **kwargs: Any) -> Any:
+        captured[kwargs["system_prompt"][:24]] = kwargs
+        return object()
+
+    monkeypatch.setattr(saul_factory, "create_agent", _fake_create_agent)
+    register_default_tools()
+    saul_factory.build_agent_registry(
+        _StubLLM(),
+        _StubLLM(),  # type: ignore[arg-type]
+        tools=_bundle(),  # type: ignore[arg-type]
+        traversal_graphiti_service=object() if with_backend else None,
+        traversal_gate_probe=probe,
+    )
+    return captured

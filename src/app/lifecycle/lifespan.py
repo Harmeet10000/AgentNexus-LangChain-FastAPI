@@ -346,7 +346,7 @@ async def _setup_saul_graph_state(app: FastAPI, settings: Any) -> None:
         redis=redis_client,
         handle_ttl_seconds=settings.EVIDENCE_HANDLE_TTL_SECONDS,
     )
-    app.state.saul_graph = provide_saul_graph(
+    app.state.saul_graph = await provide_saul_graph(
         settings=settings,
         checkpointer=checkpointer,
         redis=redis_client,

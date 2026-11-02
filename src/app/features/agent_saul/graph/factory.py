@@ -11,6 +11,7 @@ from app.ai.tools.registry import (
     get_tool_registry,
     register_deep_research_tool,
     register_default_tools,
+    register_portfolio_traversal_tools,
 )
 from app.features.agent_saul.domain.state import (
     ComplianceOutput,
@@ -22,6 +23,13 @@ from app.features.agent_saul.domain.state import (
 )
 from app.features.documents.application.tools.authorization import ToolRuntimeContext
 from app.features.documents.application.tools.bundle import AgentToolBundle
+from app.features.documents.application.tools.portfolio import (
+    RelationshipEdgeProbe,
+    RelationshipEdgeVerdict,
+    make_portfolio_traversal_tools,
+    require_traversal_gate,
+)
+from app.retrieval.graphiti.client import BoundGraphitiService
 
 from .deep_research import make_deep_research_tool
 from .nodes import (
@@ -117,10 +125,13 @@ class SaulGraphNodes(BaseModel):
     deep_research: Any
 
 
-def build_agent_registry(
+def build_agent_registry(  # noqa: PLR0914 — one readable composition of agents, tools, and chains
     pro_llm: BaseChatModel,
     flash_llm: BaseChatModel,
     tools: AgentToolBundle | None = None,
+    *,
+    traversal_graphiti_service: BoundGraphitiService | None = None,
+    traversal_gate_probe: RelationshipEdgeProbe | None = None,
 ) -> AgentRegistry:
     """
     Instantiate all agents + LLM chains once.
@@ -129,6 +140,18 @@ def build_agent_registry(
     Model assignment:
       Pro  (thinking_level=high)  → deep reasoning: orchestrator, risk, compliance
       Flash (thinking_level=none) → fast structural: qna, planner, pipeline nodes
+
+    Portfolio traversal binding (openspec ``agent-portfolio-traversal-tools``,
+    design D2): the binding-time gate. Traversal tools are bound to the
+    specialist projections only when ``traversal_graphiti_service`` is
+    provided AND ``traversal_gate_probe`` — obtained by the async caller via
+    ``relationship_edges_available(...)`` before this sync builder — reports
+    ``edges_present``. A missing probe is treated as a scopeless corpus and a
+    graphless (edge-less) corpus fails the build loudly with a
+    ``TraversalGateError`` naming the gate; no role's toolset ever contains a
+    traversal tool otherwise. The catalog itself always carries the three
+    tools (registered backend-less by ``register_default_tools``), so the
+    policy's ``portfolio.traversal`` grants always name a declared capability.
     """
     # --- create_agent nodes (Pro LLM + bound tools) ------------------------
     # Each role binds the tools its spec assigns (agent-tool-registry):
@@ -141,6 +164,12 @@ def build_agent_registry(
     register_default_tools()
     handoff = get_tool_registry()
 
+    # Portfolio traversal catalog seats (task 3.1): backend-less instances so
+    # the policy's portfolio.traversal grants name declared capabilities from
+    # the first validation. The features-side import is legal here; the
+    # registry itself never imports app.features (shared-runtime contract).
+    register_portfolio_traversal_tools(make_portfolio_traversal_tools(None), validate=False)
+
     # D5: the deep-research subgraph wrapper registers once in the single
     # registry, compiled here at graph-build time, with read-only authority
     # tags. The deep_research role's projection stays at exactly its transfer
@@ -149,6 +178,19 @@ def build_agent_registry(
     if tools is not None and tools.evidence_service is not None:
         deep_research_tool = make_deep_research_tool(tools.evidence_service)
         register_deep_research_tool(deep_research_tool)
+
+    # Gated portfolio traversal (task 3.3): backend-bound instances replace
+    # the catalog's backend-less registrations only behind the binding-time
+    # gate; a scopeless probe (no probe supplied) fails closed here too.
+    traversal_tools: tuple[Any, ...] = ()
+    if traversal_graphiti_service is not None:
+        require_traversal_gate(
+            traversal_gate_probe
+            if traversal_gate_probe is not None
+            else RelationshipEdgeProbe(verdict=RelationshipEdgeVerdict.NO_SCOPE)
+        )
+        traversal_tools = make_portfolio_traversal_tools(traversal_graphiti_service)
+        register_portfolio_traversal_tools(traversal_tools)
 
     def _transfer(name: str) -> Any:
         return handoff.get(name)
@@ -184,6 +226,17 @@ def build_agent_registry(
             if tools.get_ingestion_state is not None:
                 compliance_tools.append(tools.get_ingestion_state)
                 risk_tools.append(tools.get_ingestion_state)
+
+    # Portfolio traversal bindings (task 3.3): reached only when the
+    # binding-time gate passed above. risk was already at 6 tools with
+    # readiness parity, so it gains the cross-document obligations sweep;
+    # compliance gains the conflict finder plus the party web. Both
+    # projections land at exactly the ≤7 cap without a same-role removal —
+    # the no-swap decision recorded in the change's design.md addendum.
+    if traversal_tools:
+        cross_document_obligations, find_conflicting_clauses, party_obligation_map = traversal_tools
+        risk_tools.append(cross_document_obligations)
+        compliance_tools.extend([find_conflicting_clauses, party_obligation_map])
 
     risk_agent = create_agent(
         model=pro_llm,

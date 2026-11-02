@@ -17,6 +17,8 @@ from .policy import validate_policy
 from .web_search import CAP_WEB_SEARCH, get_web_search_tool
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from langchain_core.tools import BaseTool
 
 _registry: ToolRegistry | None = None
@@ -89,6 +91,15 @@ def register_default_tools() -> ToolRegistry:
         capability=_shell.CAP_FS_READ,
         side_effect="read",
     )
+    # Portfolio traversal (openspec agent-portfolio-traversal-tools) is NOT
+    # registered here: its tool factory lives under ``app.features`` and this
+    # module may not import that layer (lint-imports shared-runtime contract).
+    # The graph-factory side — which legally imports features — registers the
+    # backend-less catalog instances before policy validation and replaces
+    # them with backend-bound instances behind the binding-time gate, both
+    # via :func:`register_portfolio_traversal_tools`. The capability constant
+    # and authority tags below stay here so the catalog vocabulary remains
+    # importable from the shared layer.
     return r
 
 
@@ -115,6 +126,24 @@ _DEEP_RESEARCH_TAGS = [
 ]
 #: Capability identifier the deep-research registration declares (D5).
 CAP_DEEP_RESEARCH = "deep-research"
+
+#: Capability identifier the portfolio traversal registrations declare
+#: (openspec agent-portfolio-traversal-tools): read-only graph traversal,
+#: never egress, content only through the evidence seam.
+CAP_PORTFOLIO_TRAVERSAL = "portfolio.traversal"
+#: Registry names of the three traversal tools, in binding order.
+PORTFOLIO_TRAVERSAL_TOOL_NAMES: tuple[str, str, str] = (
+    "cross_document_obligations",
+    "find_conflicting_clauses",
+    "party_obligation_map",
+)
+#: Authority tags for the read-only, non-egress traversal registrations.
+_PORTFOLIO_TRAVERSAL_TAGS = [
+    "portfolio",
+    "traversal",
+    "side-effect:read",
+    f"capability:{CAP_PORTFOLIO_TRAVERSAL}",
+]
 
 
 def register_deep_research_tool(tool: BaseTool) -> ToolRegistry:
@@ -143,6 +172,38 @@ def register_deep_research_tool(tool: BaseTool) -> ToolRegistry:
     return r
 
 
+def register_portfolio_traversal_tools(
+    tools: Sequence[BaseTool], *, validate: bool = True
+) -> ToolRegistry:
+    """Register portfolio traversal tools (openspec
+    ``agent-portfolio-traversal-tools`` task 3.1).
+
+    Two callers, one intake. The graph factory registers *backend-less*
+    instances (``make_portfolio_traversal_tools(None)``) with
+    ``validate=False`` as catalog seats so the policy's
+    ``portfolio.traversal`` grants name declared capabilities from the first
+    policy validation — the factory side performs this import because this
+    module may not import ``app.features`` (shared-runtime lint contract).
+    Behind the binding-time gate the same function registers *backend-bound*
+    instances (same names, idempotent by key, ``validate=True``), so a grant
+    drift cannot survive a traversal binding. The registration carries
+    read-only, non-egress structured authority; the executor's deny-by-default
+    gate is the server-owned document scope and the runtime relationship-edge
+    probe.
+    """
+    r = get_tool_registry()
+    for traversal_tool in tools:
+        r.register(
+            traversal_tool,
+            tags=_PORTFOLIO_TRAVERSAL_TAGS,
+            capability=CAP_PORTFOLIO_TRAVERSAL,
+            side_effect="read",
+        )
+    if validate:
+        validate_policy(r)
+    return r
+
+
 def deep_research_role_projection() -> list[BaseTool]:
     """The deep_research role's model-visible toolset: exactly two tools.
 
@@ -154,10 +215,13 @@ def deep_research_role_projection() -> list[BaseTool]:
 
 
 __all__ = [
+    "CAP_PORTFOLIO_TRAVERSAL",
+    "PORTFOLIO_TRAVERSAL_TOOL_NAMES",
     "deep_research_role_projection",
     "get_all_tools",
     "get_tool_registry",
     "get_web_tools",
     "register_deep_research_tool",
     "register_default_tools",
+    "register_portfolio_traversal_tools",
 ]

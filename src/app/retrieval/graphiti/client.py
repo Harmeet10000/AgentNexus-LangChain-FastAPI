@@ -94,6 +94,7 @@ class BoundGraphitiService:
         document_versions: Sequence[tuple[str, int, str | None]] = (),
         document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
         num_results: int = 32,
+        strict: bool = False,
     ) -> tuple[LegalEdgeRecord, ...]:
         return await fetch_relationship_edges(
             self._graphiti,
@@ -104,6 +105,7 @@ class BoundGraphitiService:
             document_versions=document_versions,
             document_contracts=document_contracts,
             num_results=num_results,
+            strict=strict,
         )
 
     async def search_for_risk_context(
@@ -668,6 +670,7 @@ async def fetch_relationship_edges(
     document_versions: Sequence[tuple[str, int, str | None]] = (),
     document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
     num_results: int = 32,
+    strict: bool = False,
 ) -> tuple[LegalEdgeRecord, ...]:
     """Read typed relationship edges scoped to the authorized graph partitions.
 
@@ -682,6 +685,12 @@ async def fetch_relationship_edges(
     load-bearing here.  A transport failure degrades to an empty tuple —
     expansion is additive and must never turn a healthy ask into a failed
     one.
+
+    ``strict`` opts a caller OUT of that degradation: a transport failure or
+    timeout is re-raised instead of returning an empty tuple. Callers whose
+    decision depends on the read actually having run (the portfolio
+    binding-time gate probe) must be strict — an empty result there is a
+    corpus verdict, and a swallowed backend error would masquerade as one.
     """
     if not allowed_doc_ids:
         return ()
@@ -738,11 +747,15 @@ async def fetch_relationship_edges(
                     group_ids=group_ids,
                 ).warning("Graphiti relationship edge fetch hit the page cap")
     except _GRAPHITI_TRANSPORT_ERRORS as exc:
+        if strict:
+            raise
         exc.add_note(f"query={query[:80]}, task=relationship_edges")
         exc.add_note(traceback.format_exc())
         logger.bind(service="graphiti").exception("Graphiti relationship edge fetch failed")
         return ()
     except TimeoutError as exc:
+        if strict:
+            raise
         exc.add_note(f"query={query[:80]}, seconds={_EDGE_FETCH_TIMEOUT_SECONDS}")
         logger.bind(service="graphiti").warning("Graphiti relationship edge fetch timed out")
         return ()

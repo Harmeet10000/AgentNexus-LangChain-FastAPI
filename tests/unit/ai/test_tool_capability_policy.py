@@ -26,11 +26,14 @@ from app.ai.tools import web_search as web_search_module
 from app.ai.tools.policy import ROLE_CAPABILITY_GRANTS, grants_for, validate_policy
 from app.ai.tools.registry import (
     DEEP_RESEARCH_TOOL_NAME,
+    PORTFOLIO_TRAVERSAL_TOOL_NAMES,
     get_tool_registry,
     register_deep_research_tool,
     register_default_tools,
+    register_portfolio_traversal_tools,
 )
 from app.ai.tools.web_search import CAP_WEB_SEARCH, WebSearchInput, web_search
+from app.features.documents.application.tools.portfolio import make_portfolio_traversal_tools
 from app.resilience.idempotency import ToolResult
 
 if TYPE_CHECKING:
@@ -41,12 +44,21 @@ if TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def _populated_registry() -> Iterator[None]:
-    """Register the default tools, then leave the singleton registry as found."""
+    """Register the default tools plus the portfolio catalog seats, then leave
+    the singleton registry as found.
+
+    The registry never imports ``app.features`` (shared-runtime lint
+    contract), so the backend-less portfolio seats — exactly as the graph
+    factory does — are registered here from the test side via the intake
+    function with validation deferred to the stub deep-research registration.
+    """
     register_default_tools()
+    register_portfolio_traversal_tools(make_portfolio_traversal_tools(None), validate=False)
     yield
     r = get_tool_registry()
     for attr in ("_tools", "_tags", "_authority"):
-        getattr(r, attr).pop(DEEP_RESEARCH_TOOL_NAME, None)
+        for name in (*PORTFOLIO_TRAVERSAL_TOOL_NAMES, DEEP_RESEARCH_TOOL_NAME):
+            getattr(r, attr).pop(name, None)
 
 
 def _register_stub_deep_research() -> object:
@@ -77,6 +89,11 @@ def test_registrations_carry_structured_authority_matching_tags() -> None:
         "write_file": ("filesystem.write", "write", False),
         "list_directory": ("filesystem.read", "read", False),
         "file_search": ("filesystem.read", "read", False),
+        # Portfolio traversal (openspec agent-portfolio-traversal-tools):
+        # read-only, non-egress graph traversal.
+        "cross_document_obligations": ("portfolio.traversal", "read", False),
+        "find_conflicting_clauses": ("portfolio.traversal", "read", False),
+        "party_obligation_map": ("portfolio.traversal", "read", False),
     }
     for name, (capability, side_effect, egress) in expected.items():
         authority = registry.authority(name)
@@ -102,6 +119,7 @@ def test_registrations_carry_structured_authority_matching_tags() -> None:
         "system.shell.execute",
         "filesystem.read",
         "filesystem.write",
+        "portfolio.traversal",
     }
 
 
@@ -149,8 +167,9 @@ def test_policy_unknown_role_and_unbound_context_grant_nothing() -> None:
 def test_initial_policy_encodes_current_effective_grants() -> None:
     """No role holds a system/filesystem capability; web.search is ungranted.
 
-    Only the deep-research subgraph role reaches its own catalog entry — the
-    catalog's day-one effective sets (PLAN-agent-tools.md § D4).
+    The deep-research role reaches its own catalog entry and the risk/
+    compliance specialists share the read-only portfolio traversal
+    capability (PLAN-agent-tools.md § D4 effective sets).
     """
     for role, grants in ROLE_CAPABILITY_GRANTS.items():
         assert "system.shell.execute" not in grants, role
@@ -158,8 +177,11 @@ def test_initial_policy_encodes_current_effective_grants() -> None:
         assert "filesystem.write" not in grants, role
         assert "web.search" not in grants, role
     assert ROLE_CAPABILITY_GRANTS["deep_research"] == frozenset({"deep-research"})
-    assert ROLE_CAPABILITY_GRANTS["risk"] == frozenset()
-    assert ROLE_CAPABILITY_GRANTS["compliance"] == frozenset()
+    # The specialists' only non-operation capability is the read-only,
+    # non-egress portfolio traversal (openspec agent-portfolio-traversal-tools
+    # task 3.2).
+    assert ROLE_CAPABILITY_GRANTS["risk"] == frozenset({"portfolio.traversal"})
+    assert ROLE_CAPABILITY_GRANTS["compliance"] == frozenset({"portfolio.traversal"})
 
 
 def test_policy_unknown_capability_identifier_fails_startup() -> None:

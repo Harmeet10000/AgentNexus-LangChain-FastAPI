@@ -15,9 +15,11 @@ Loading rules:
 The initial rows encode each role's *current effective* grants exactly
 (PLAN-agent-tools.md § D4 migration plan): no role holds any
 system/filesystem capability, nothing grants shell or filesystem access,
-``web.search`` is ungranted, and only the deep-research subgraph role's
-catalog entry is reachable by its own projection. Narrowing or widening is a
-reviewed diff to this file alone.
+``web.search`` is ungranted, and the only capabilities reachable beyond the
+evidence-bundle operation grants are the deep-research subgraph's own catalog
+entry and the read-only portfolio traversal capability shared by the risk and
+compliance specialists. Narrowing or widening is a reviewed diff to this file
+alone.
 """
 
 from __future__ import annotations
@@ -35,12 +37,15 @@ if TYPE_CHECKING:
 ROLE_CAPABILITY_GRANTS: Final[Mapping[str, frozenset[str]]] = {
     # The orchestrator runs structured-output nodes only — no tools by design.
     "orchestrator": frozenset(),
-    # Specialists bind handoff + evidence-bundle tools; none of the
-    # system/filesystem/web capabilities is granted to either (P5: web search
+    # Specialists bind handoff + evidence-bundle tools. Both gain the
+    # portfolio traversal capability (openspec agent-portfolio-traversal-tools
+    # task 3.2): read-only, non-egress graph traversal whose executor gates are
+    # the server-owned document scope and the runtime relationship-edge probe.
+    # No system/filesystem/web capability is granted to either (P5: web search
     # sends model-chosen text to a third party — ungranted until a reviewed
     # policy diff says otherwise).
-    "risk": frozenset(),
-    "compliance": frozenset(),
+    "risk": frozenset({"portfolio.traversal"}),
+    "compliance": frozenset({"portfolio.traversal"}),
     # The bounded deep-research subgraph is the deep_research role's single
     # catalog tool (D5). Its registration declares ``deep-research``.
     "deep_research": frozenset({"deep-research"}),

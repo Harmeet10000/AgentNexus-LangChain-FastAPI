@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
     from app.features.documents.application.tools.bundle import AgentToolBundle
+    from app.features.documents.application.tools.portfolio import RelationshipEdgeProbe
+    from app.retrieval.graphiti.client import BoundGraphitiService
 
     from .factory import SaulGraphNodes
 
@@ -127,9 +129,24 @@ def build_saul_graph(
     flash_llm: BaseChatModel,
     memory_service: Any,
     tool_registry: AgentToolBundle,
+    *,
+    traversal_graphiti_service: BoundGraphitiService | None = None,
+    traversal_gate_probe: RelationshipEdgeProbe | None = None,
 ) -> CompiledStateGraph[Any]:
-    """Build and compile the Agent Saul LangGraph."""
-    registry = build_agent_registry(pro_llm, flash_llm, tools=tool_registry)
+    """Build and compile the Agent Saul LangGraph.
+
+    ``traversal_graphiti_service`` / ``traversal_gate_probe`` forward the
+    portfolio traversal binding seam to ``build_agent_registry`` (openspec
+    ``agent-portfolio-traversal-tools``): the lifespan probes the corpus and
+    passes both, or omits the probe (None) to skip bindings entirely.
+    """
+    registry = build_agent_registry(
+        pro_llm,
+        flash_llm,
+        tools=tool_registry,
+        traversal_graphiti_service=traversal_graphiti_service,
+        traversal_gate_probe=traversal_gate_probe,
+    )
     nodes = _build_graph_nodes(
         registry=registry,
         pro_llm=pro_llm,
