@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never, override
 
 from returns.result import Failure, Success
+
+from app.kernel.models import StrictModel
 
 from .protocol import (
     BillingProvider,
@@ -28,6 +29,7 @@ from .protocol import (
     ProviderCustomer,
     ProviderManualReviewRequiredError,
     ProviderNotFoundError,
+    ProviderOperation,  # noqa: TC001 — runtime build: pydantic resolves field annotations
     ProviderOperationKind,
     ProviderPaymentBatch,
     ProviderPaymentLink,
@@ -42,15 +44,13 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from .protocol import (
-        ProviderOperation,
         ProviderPaymentState,
         ProviderResult,
         ProviderValue,
     )
 
 
-@dataclass(frozen=True, slots=True)
-class InMemoryCall:
+class InMemoryCall(StrictModel):
     """Recorded operation supplied to the provider port."""
 
     operation: ProviderOperation
@@ -84,7 +84,7 @@ class InMemoryBillingProvider(BillingProvider):
 
     @override
     async def execute(self, operation: ProviderOperation) -> ProviderResult[ProviderValue]:
-        self._calls.append(InMemoryCall(operation))
+        self._calls.append(InMemoryCall(operation=operation))
         scripted = self._script.get(operation.kind)
         if scripted:
             return scripted.popleft()

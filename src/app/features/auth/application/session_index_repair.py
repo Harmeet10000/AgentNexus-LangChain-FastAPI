@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import math
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 from redis.exceptions import RedisError, ResponseError
 
 from app.features.auth.adapters.persistence.mongodb.account_repository import (
@@ -23,6 +22,7 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import (
     _USER_SESSIONS_KEY,
     SessionData,
 )
+from app.kernel.models import MutableModel, StrictModel
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -80,8 +80,7 @@ return {1, current_ttl}
 """
 
 
-@dataclass(frozen=True)
-class IndexRepair:
+class IndexRepair(StrictModel):
     """The observed and proposed state for one user-session index."""
 
     key: str
@@ -98,8 +97,7 @@ class IndexRepair:
     error: str | None = None
 
 
-@dataclass
-class RepairSummary:
+class RepairSummary(MutableModel):
     """Serializable operational result for one bounded repair invocation."""
 
     dry_run: bool
@@ -116,29 +114,12 @@ class RepairSummary:
     complete: bool = False
     next_cursor: int = 0
     next_orphan_cursor: int = 0
-    indexes: list[IndexRepair] = field(default_factory=list)
-    orphan_session_ids: list[str] = field(default_factory=list)
+    indexes: list[IndexRepair] = Field(default_factory=list)
+    orphan_session_ids: list[str] = Field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-friendly report suitable for operators and CI."""
-        return {
-            "dry_run": self.dry_run,
-            "scanned_indexes": self.scanned_indexes,
-            "repaired_indexes": self.repaired_indexes,
-            "deferred_indexes": self.deferred_indexes,
-            "ttl_violations": self.ttl_violations,
-            "memberships_removed": self.memberships_removed,
-            "orphan_memberships_restored": self.orphan_memberships_restored,
-            "malformed_records": self.malformed_records,
-            "orphan_sessions": self.orphan_sessions,
-            "failures": self.failures,
-            "timed_out": self.timed_out,
-            "complete": self.complete,
-            "next_cursor": self.next_cursor,
-            "next_orphan_cursor": self.next_orphan_cursor,
-            "indexes": [item.__dict__ for item in self.indexes],
-            "orphan_session_ids": self.orphan_session_ids,
-        }
+        return self.model_dump(mode="json")
 
 
 class SessionIndexRepair:

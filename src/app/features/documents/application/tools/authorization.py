@@ -8,11 +8,12 @@ tenant, thread, or document allowlist used to execute that query.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Annotated, TypedDict
 
 from langchain.tools import ToolRuntime
 from langchain_core.tools import InjectedToolArg
+
+from app.kernel.models import StrictModel
 
 
 class ToolRuntimeContext(TypedDict, total=False):
@@ -39,8 +40,7 @@ class ToolRuntimeContext(TypedDict, total=False):
     capabilities: tuple[str, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class ToolAuthorizationContext:
+class ToolAuthorizationContext(StrictModel):
     user_id: str
     tenant_id: str
     allowed_doc_ids: tuple[str, ...]

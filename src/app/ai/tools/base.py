@@ -8,13 +8,13 @@ The registry enables dynamic tool lookup and middleware (LLMToolSelector).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from pydantic import BaseModel, ValidationError
 from pydantic.v1 import ValidationError as ValidationErrorV1
 
+from app.kernel.models import StrictModel
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -39,8 +39,7 @@ _CAPABILITY_TAG_PREFIX = "capability:"
 _SIDE_EFFECT_TAG_PREFIX = "side-effect:"
 
 
-@dataclass(frozen=True, slots=True)
-class ToolAuthority:
+class ToolAuthority(StrictModel):
     """Structured authority declaration for one registered tool."""
 
     #: Capability identifier the executor enforces, if the tool is gated.

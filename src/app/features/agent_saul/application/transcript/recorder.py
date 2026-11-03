@@ -19,12 +19,12 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, override
 
 from langchain_core.callbacks import BaseCallbackHandler
+from pydantic import ConfigDict, Field, model_validator
 from returns.result import Failure, Success
 
 from app.features.agent_saul.application.transcript.errors import (
@@ -38,6 +38,7 @@ from app.features.agent_saul.application.transcript.projection import (
 )
 from app.features.agent_saul.application.transcript.sync import apply_snapshot, prepare_snapshot
 from app.features.agent_saul.domain.state import HITLInterruptType
+from app.kernel.models import MutableModel, StrictModel
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -70,47 +71,44 @@ _CHECKPOINT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _EVIDENCE_TOKEN = object()
 
 
-@dataclass(frozen=True, slots=True, init=False)
-class PlanResumeEvidence:
+class PlanResumeEvidence(StrictModel):
     """Content-free proof that a resume answers the current plan prompt.
 
-    The private construction path is :meth:`_from_interrupt`, which checks
-    the fresh checkpoint interrupt before a fact can reach SQL. Runtime
-    checks are intentionally strict because this value crosses the
+    The only trusted construction path is :meth:`_from_interrupt`, which
+    checks the fresh checkpoint interrupt before a fact can reach SQL.
+    Runtime checks are intentionally strict because this value crosses the
     service/recorder boundary and must never accept truthy strings or
     arbitrary source keys.
     """
 
+    model_config = ConfigDict(strict=True)
+
     decision_key: str
     modified: bool
     checkpoint_id: str
-    _token: object
+    # Constructor gate: required explicitly, repr-hidden and excluded from any
+    # serialization. It is a proof-of-origin, never a fact of the model.
+    token: object = Field(repr=False, exclude=True)
 
-    def __init__(
-        self,
-        *,
-        decision_key: str,
-        modified: bool,
-        checkpoint_id: str,
-        _token: object,
-    ) -> None:
-        if _token is not _EVIDENCE_TOKEN:
+    @model_validator(mode="before")
+    @classmethod
+    def _require_sentinel(cls, data: object) -> object:
+        """Reject evidence forged without the module-private sentinel."""
+        if not (isinstance(data, Mapping) and data.get("token") is _EVIDENCE_TOKEN):
             raise TypeError(_INVALID_EVIDENCE_TYPE)
-        object.__setattr__(self, "decision_key", decision_key)
-        object.__setattr__(self, "modified", modified)
-        object.__setattr__(self, "checkpoint_id", checkpoint_id)
-        object.__setattr__(self, "_token", _token)
-        self.__post_init__()
-
-    def __post_init__(self) -> None:
-        if type(self.modified) is not bool:
+        if type(data.get("modified")) is not bool:
             raise TypeError(_INVALID_EVIDENCE_BOOL)
+        return data
+
+    @model_validator(mode="after")
+    def _validate_evidence(self) -> PlanResumeEvidence:
         if not self.decision_key.startswith("interrupt:") or len(self.decision_key) <= len(
             "interrupt:"
         ):
             raise ValueError(_INVALID_EVIDENCE_KEY)
         if _CHECKPOINT_ID_RE.fullmatch(self.checkpoint_id) is None:
             raise ValueError(_INVALID_EVIDENCE_CHECKPOINT)
+        return self
 
     @classmethod
     def _from_interrupt(
@@ -152,7 +150,7 @@ class PlanResumeEvidence:
             decision_key=f"interrupt:{interrupt_id}",
             modified=modified,
             checkpoint_id=checkpoint_id,
-            _token=_EVIDENCE_TOKEN,
+            token=_EVIDENCE_TOKEN,
         )
 
 
@@ -167,13 +165,12 @@ def _interrupts_of(snapshot: object) -> tuple[object, ...]:
     return tuple(interrupts)
 
 
-@dataclass
-class _SegmentUsage:
+class _SegmentUsage(MutableModel):
     """Tokens + tool calls gathered for ONE segment (start→pause / resume→X)."""
 
     input_tokens: int = 0
     output_tokens: int = 0
-    tool_calls: list[dict[str, object]] = field(default_factory=list)
+    tool_calls: list[dict[str, object]] = Field(default_factory=list)
 
     @property
     def total(self) -> int:

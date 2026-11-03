@@ -7,24 +7,27 @@ source so a sweep cannot derive different transcript rows from a live turn.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from collections.abc import Mapping  # noqa: TC003 — pydantic resolves field annotations at build
+from typing import TYPE_CHECKING, Any, Protocol  # noqa: TC003 — pydantic resolves model annotations
 
 from returns.result import Failure, Success
 
-from app.features.agent_saul.application.transcript.projection import project
-from app.features.agent_saul.application.transcript.repository import ApplyOutcome
+from app.features.agent_saul.application.transcript.projection import (  # noqa: TC001 — pydantic resolves field annotations at build
+    Projection,
+    project,
+)
+from app.features.agent_saul.application.transcript.repository import (
+    ApplyOutcome,
+)
+from app.kernel.models import StrictModel
 
 _ASSISTANT_ROW_KINDS = frozenset({"plan_prompt", "clarification_prompt", "final_summary"})
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from datetime import datetime
-    from typing import Any
 
     from app.features.agent_saul.application.transcript.errors import TranscriptResult
     from app.features.agent_saul.application.transcript.projection import (
-        Projection,
         SnapshotView,
         TurnRows,
     )
@@ -45,8 +48,7 @@ class ProjectionRepository(Protocol):
     ) -> TranscriptResult[ApplyOutcome]: ...
 
 
-@dataclass(frozen=True)
-class PreparedSnapshot:
+class PreparedSnapshot(StrictModel):
     """Pure projection plus the side-input maps that must be applied with it."""
 
     projection: Projection
@@ -54,8 +56,7 @@ class PreparedSnapshot:
     usage_metadata: Mapping[str, Mapping[str, Any]] | None = None
 
 
-@dataclass(frozen=True)
-class SnapshotSync:
+class SnapshotSync(StrictModel):
     projection: Projection
     applied: ApplyOutcome
 

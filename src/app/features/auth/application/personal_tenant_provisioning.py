@@ -27,7 +27,6 @@ already has a resumable repair driver.
 from __future__ import annotations
 
 import traceback
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from opentelemetry import metrics
@@ -43,6 +42,7 @@ from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
 from app.features.auth.domain.errors import AuthInfrastructureError
 from app.features.auth.domain.tenancy import LegalRole, personal_tenant_id
 from app.features.auth.domain.tenancy_models import Tenant, TenantMembership
+from app.kernel.models import StrictModel
 from app.observability.logging import logger, trace_layer
 
 if TYPE_CHECKING:
@@ -55,9 +55,7 @@ if TYPE_CHECKING:
 _PROVISIONING_METER = metrics.get_meter("app.auth.provisioning")
 _PROVISION_COMMITTED = _PROVISIONING_METER.create_counter("auth.provisioning.sql_committed")
 _PROVISION_FAILED = _PROVISIONING_METER.create_counter("auth.provisioning.sql_failed")
-_PROVISION_MIRROR_FAILED = _PROVISIONING_METER.create_counter(
-    "auth.provisioning.mirror_failed"
-)
+_PROVISION_MIRROR_FAILED = _PROVISIONING_METER.create_counter("auth.provisioning.mirror_failed")
 # ``app_tenants.display_name`` is ``String(length=255)`` while registration
 # accepts longer profile names.  The tenant label is derived display data, so
 # it is bounded here: any input registration accepted by the API must be able
@@ -65,8 +63,7 @@ _PROVISION_MIRROR_FAILED = _PROVISIONING_METER.create_counter(
 _TENANT_DISPLAY_NAME_MAX_LENGTH = 255
 
 
-@dataclass(frozen=True, slots=True)
-class ProvisioningResult:
+class ProvisioningResult(StrictModel):
     """Outcome of one idempotent personal-tenant provisioning call."""
 
     user_id: str
@@ -128,9 +125,9 @@ class PersonalTenantProvisioningRepository:
 
     async def count_memberships_for_user(self, user_id: str) -> int:
         statement: Select[tuple[int]] = (
-            select(func.count()).select_from(TenantMembership).where(
-                TenantMembership.user_id == user_id
-            )
+            select(func.count())
+            .select_from(TenantMembership)
+            .where(TenantMembership.user_id == user_id)
         )
         return int((await self._session.execute(statement)).scalar_one())
 
@@ -304,9 +301,7 @@ class PersonalTenantProvisioner:
             logger.bind(user_id=user_id, tenant_id=tenant_id).error(
                 "personal_tenant_mirror_sync_failed"
             )
-            await self._record_mirror_error(
-                tenant_id, user_id, error=result.failure().message
-            )
+            await self._record_mirror_error(tenant_id, user_id, error=result.failure().message)
             return False
         try:
             async with self._session_factory() as session, session.begin():

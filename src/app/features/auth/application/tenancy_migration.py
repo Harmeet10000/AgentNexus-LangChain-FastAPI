@@ -9,9 +9,9 @@ reported as a conflict rather than overwritten.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pydantic import Field
 from pymongo.errors import PyMongoError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,16 +23,17 @@ from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
 from app.features.auth.domain.tenancy import LegalRole, personal_tenant_id
 from app.features.auth.domain.tenancy_models import Tenant, TenantMembership
 from app.features.auth.domain.user import User
+from app.kernel.models import MutableModel
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from typing import Any
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
-@dataclass(slots=True)
-class TenantMigrationReport:
+class TenantMigrationReport(MutableModel):
     """Counters and conflict details emitted by one migration invocation."""
 
     scanned: int = 0
@@ -41,26 +42,16 @@ class TenantMigrationReport:
     disabled: int = 0
     tenants_created: int = 0
     memberships_created: int = 0
-    conflicts: list[dict[str, str]] = field(default_factory=list)
-    failures: list[dict[str, str]] = field(default_factory=list)
+    conflicts: list[dict[str, str]] = Field(default_factory=list)
+    failures: list[dict[str, str]] = Field(default_factory=list)
     pending_mirror_sync: int = 0
 
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "scanned": self.scanned,
-            "migrated": self.migrated,
-            "already_current": self.already_current,
-            "disabled": self.disabled,
-            "tenants_created": self.tenants_created,
-            "memberships_created": self.memberships_created,
-            "conflicts": list(self.conflicts),
-            "failures": list(self.failures),
-            "pending_mirror_sync": self.pending_mirror_sync,
-        }
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly mapping suitable for structured logs / CLI."""
+        return self.model_dump(mode="json")
 
 
-@dataclass(slots=True)
-class TenantReadinessReport:
+class TenantReadinessReport(MutableModel):
     """Rollout gate proving active accounts have valid SQL memberships.
 
     Team memberships are intentionally not a duplicate condition: an account
@@ -70,13 +61,13 @@ class TenantReadinessReport:
 
     active_accounts: int = 0
     valid_accounts: int = 0
-    missing_membership: list[str] = field(default_factory=list)
-    missing_personal_tenant: list[str] = field(default_factory=list)
-    duplicate_membership: list[str] = field(default_factory=list)
-    invalid_membership: list[str] = field(default_factory=list)
-    missing_tenant: list[str] = field(default_factory=list)
-    mirror_mismatch: list[str] = field(default_factory=list)
-    pending_mirror_sync: list[str] = field(default_factory=list)
+    missing_membership: list[str] = Field(default_factory=list)
+    missing_personal_tenant: list[str] = Field(default_factory=list)
+    duplicate_membership: list[str] = Field(default_factory=list)
+    invalid_membership: list[str] = Field(default_factory=list)
+    missing_tenant: list[str] = Field(default_factory=list)
+    mirror_mismatch: list[str] = Field(default_factory=list)
+    pending_mirror_sync: list[str] = Field(default_factory=list)
 
     @property
     def ready(self) -> bool:
@@ -92,19 +83,9 @@ class TenantReadinessReport:
             )
         )
 
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "ready": self.ready,
-            "active_accounts": self.active_accounts,
-            "valid_accounts": self.valid_accounts,
-            "missing_membership": list(self.missing_membership),
-            "missing_personal_tenant": list(self.missing_personal_tenant),
-            "duplicate_membership": list(self.duplicate_membership),
-            "invalid_membership": list(self.invalid_membership),
-            "missing_tenant": list(self.missing_tenant),
-            "mirror_mismatch": list(self.mirror_mismatch),
-            "pending_mirror_sync": list(self.pending_mirror_sync),
-        }
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly mapping suitable for operators and CI."""
+        return {**self.model_dump(mode="json"), "ready": self.ready}
 
 
 def migration_roles(user: User) -> tuple[LegalRole, ...]:

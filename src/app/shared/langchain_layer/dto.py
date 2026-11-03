@@ -6,9 +6,11 @@ Use these in FastAPI route handlers for validated, documented APIs.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any  # noqa: TC003 — runtime build: pydantic resolves field annotations
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.kernel.models import RequestModel, StrictModel
 
 # ---------------------------------------------------------------------------
 # Agent input
@@ -21,16 +23,16 @@ class MessageRole(StrEnum):
     system = "system"
 
 
-class ChatMessage(BaseModel):
+class ChatMessage(RequestModel):
     role: MessageRole
     content: str
 
 
-class AgentInvokeRequest(BaseModel):
+class AgentInvokeRequest(RequestModel):
     """Single-turn agent invocation request."""
 
-    message: str = Field(..., description="The user's message.")
-    thread_id: str = Field(..., description="Session/thread identifier for conversation history.")
+    message: str = Field(description="The user's message.")
+    thread_id: str = Field(description="Session/thread identifier for conversation history.")
     user_id: str = Field("default", description="User identifier for long-term memory.")
 
     # Optional runtime context (serialised; factory will reconstruct the dataclass)
@@ -43,14 +45,14 @@ class AgentInvokeRequest(BaseModel):
     stream: bool = Field(False, description="Whether to stream the response.")
 
 
-class AgentBatchRequest(BaseModel):
+class AgentBatchRequest(RequestModel):
     """Batch invocation request."""
 
     messages: list[str]
     thread_ids: list[str]
     user_id: str = "default"
     context: dict[str, Any] | None = None
-    max_concurrency: int = 5
+    max_concurrency: int = Field(default=5, ge=1)
 
 
 class MultimodalAgentRequest(AgentInvokeRequest):
@@ -65,10 +67,10 @@ class MultimodalAgentRequest(AgentInvokeRequest):
 # ---------------------------------------------------------------------------
 
 
-class AgentResponse(BaseModel):
+class AgentResponse(StrictModel):
     """Standard single-turn response."""
 
-    content: str = Field(..., description="The agent's text response.")
+    content: str = Field(description="The agent's text response.")
     thread_id: str
     structured_output: dict[str, Any] | None = None
     blocked: bool = False
@@ -77,13 +79,13 @@ class AgentResponse(BaseModel):
     model_name: str | None = None
 
 
-class AgentBatchResponse(BaseModel):
+class AgentBatchResponse(StrictModel):
     responses: list[AgentResponse]
     total: int
     failed: int = 0
 
 
-class StreamChunk(BaseModel):
+class StreamChunk(StrictModel):
     """Single SSE chunk."""
 
     type: str  # "token" | "tool_call" | "done" | "error"
@@ -96,7 +98,7 @@ class StreamChunk(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ToolCallRecord(BaseModel):
+class ToolCallRecord(StrictModel):
     tool_name: str
     input: dict[str, Any]
     output: Any
@@ -109,11 +111,11 @@ class ToolCallRecord(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class EmbedRequest(BaseModel):
-    texts: list[str] = Field(..., min_length=1)
+class EmbedRequest(RequestModel):
+    texts: list[str] = Field(min_length=1)
 
 
-class EmbedResponse(BaseModel):
+class EmbedResponse(StrictModel):
     embeddings: list[list[float]]
     model: str
     dimensions: int
@@ -124,18 +126,18 @@ class EmbedResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class MemorySearchRequest(BaseModel):
+class MemorySearchRequest(RequestModel):
     query: str
     user_id: str
-    limit: int = 10
+    limit: int = Field(default=10, ge=1)
 
 
-class MemoryEntry(BaseModel):
+class MemoryEntry(StrictModel):
     memory: str
     score: float
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class MemorySearchResponse(BaseModel):
+class MemorySearchResponse(StrictModel):
     results: list[MemoryEntry]
     user_id: str

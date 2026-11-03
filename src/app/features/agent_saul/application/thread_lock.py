@@ -26,13 +26,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Awaitable
-from dataclasses import dataclass, field
 from traceback import format_exc
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from pydantic import Field
 from redis.exceptions import RedisError
 
+from app.kernel.models import MutableModel
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -47,12 +48,11 @@ def lock_key(thread_id: str) -> str:
     return f"{_LOCK_KEY_PREFIX}:{thread_id}"
 
 
-@dataclass
-class Heartbeat:
+class Heartbeat(MutableModel):
     """The aliveness carrier the recorder reads for every projection."""
 
     fresh: bool = False
-    last_renewed_at: float | None = field(default=None, repr=True)
+    last_renewed_at: float | None = Field(default=None, repr=True)
 
 
 class ThreadLock:

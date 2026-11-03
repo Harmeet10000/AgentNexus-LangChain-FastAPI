@@ -10,7 +10,6 @@ the §6 [v3] Redis-outage guard (derive nothing when aliveness is unknowable).
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from neo4j import AsyncGraphDatabase, basic_auth
@@ -206,7 +205,7 @@ async def _transcript_sweep_async() -> dict[str, Any]:
             redis=redis_client,
             checkpointer=checkpointer,
         )
-        return asdict(report)
+        return report.model_dump(mode="json")
     except Exception as exc:  # noqa: BLE001 — backstop task never raises into Celery retries
         exc.add_note("task=chat_transcript_sweep")
         logger.bind(error=str(exc)).error("transcript_sweep_task_failed")

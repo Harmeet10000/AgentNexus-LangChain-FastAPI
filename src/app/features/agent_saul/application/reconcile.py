@@ -28,7 +28,6 @@ require no graph execution.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
@@ -43,6 +42,7 @@ from app.features.agent_saul.application.transcript.projection import (
 )
 from app.features.agent_saul.application.transcript.sync import apply_snapshot, prepare_snapshot
 from app.features.agent_saul.graph.graph import wire_saul_topology
+from app.kernel.models import StrictModel
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -121,8 +121,7 @@ def build_saul_read_graph(checkpointer: AsyncPostgresSaver) -> CompiledStateGrap
     return state_graph.compile(checkpointer=checkpointer)
 
 
-@dataclass(frozen=True)
-class SweepReport:
+class SweepReport(StrictModel):
     """Machine-parseable outcome of one sweep invocation (structured logs, §10)."""
 
     skipped: str | None
@@ -186,8 +185,7 @@ async def sweep_transcripts(
     )
 
 
-@dataclass(frozen=True)
-class _ThreadReconcileOutcome:
+class _ThreadReconcileOutcome(StrictModel):
     """What one pass of the projector did to a thread (never a euphemism).
 
     ``status``      — the freshly derived status value when a projection with

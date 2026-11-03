@@ -1,6 +1,5 @@
 """Dependency wiring for unified document feature."""
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, cast
 
 from fastapi import Depends, Request, WebSocket
@@ -136,9 +135,8 @@ async def get_document_authorization(
     from a tenant-scoped SQL query, so forged IDs can never widen authority.
     """
     thread_id = context.thread_id or f"http:{context.session_id or context.user_id}"
-    return replace(
-        context.for_thread(thread_id),
-        allowed_doc_ids=await _tenant_document_ids(repo, context.tenant_id),
+    return context.for_thread(thread_id).model_copy(
+        update={"allowed_doc_ids": await _tenant_document_ids(repo, context.tenant_id)},
     )
 
 
@@ -161,9 +159,12 @@ async def get_document_authorization_ws(
         str(websocket.path_params.get("thread_id") or "")
         or f"ws:{context.session_id or context.user_id}"
     )
-    return replace(
-        context.for_thread(thread_id),
-        allowed_doc_ids=await _tenant_document_ids_from_factory(session_factory, context.tenant_id),
+    return context.for_thread(thread_id).model_copy(
+        update={
+            "allowed_doc_ids": await _tenant_document_ids_from_factory(
+                session_factory, context.tenant_id
+            )
+        },
     )
 
 

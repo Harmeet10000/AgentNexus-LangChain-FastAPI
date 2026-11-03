@@ -14,11 +14,11 @@ import secrets
 import time
 from asyncio import timeout
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast
 
 from beanie import PydanticObjectId
+from pydantic import Field
 from returns.result import Failure
 
 from app.connections.mongodb import close_mongo_client, create_mongo_client
@@ -26,6 +26,7 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import Re
 from app.features.auth.application.token_audit_log import TokenAuditLog
 from app.features.auth.domain.user import User
 from app.features.users.repository import UserAdminRepository
+from app.kernel.models import ConfigModel, StrictModel
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -78,8 +79,7 @@ return 0
 """
 
 
-@dataclass(frozen=True, slots=True)
-class PendingRevocationConfig:
+class PendingRevocationConfig(ConfigModel):
     """Bounded operational policy for one reconciliation pass."""
 
     batch_size: int = 50
@@ -92,11 +92,10 @@ class PendingRevocationConfig:
     max_runtime_seconds: int = 45
 
 
-@dataclass(frozen=True, slots=True)
-class RetryState:
+class RetryState(StrictModel):
     revision: int
-    attempts: int = 0
-    next_attempt_at: float = 0
+    attempts: int = Field(default=0, ge=0)
+    next_attempt_at: float = Field(default=0, ge=0)
     last_error_category: str | None = None
     poisoned: bool = False
 
@@ -124,20 +123,11 @@ class RetryState:
             return cls(revision=revision)
 
     def encode(self) -> str:
-        return json.dumps(
-            {
-                "revision": self.revision,
-                "attempts": self.attempts,
-                "next_attempt_at": self.next_attempt_at,
-                "last_error_category": self.last_error_category,
-                "poisoned": self.poisoned,
-            },
-            separators=(",", ":"),
-        )
+        """JSON encoding for the Redis retry record."""
+        return self.model_dump_json()
 
 
-@dataclass(frozen=True, slots=True)
-class ReconciliationReport:
+class ReconciliationReport(StrictModel):
     scanned: int = 0
     attempted: int = 0
     succeeded: int = 0
@@ -152,22 +142,9 @@ class ReconciliationReport:
     cleaned_retry_records: int = 0
     preview: tuple[dict[str, object], ...] = ()
 
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "scanned": self.scanned,
-            "attempted": self.attempted,
-            "succeeded": self.succeeded,
-            "skipped": self.skipped,
-            "stale_revision": self.stale_revision,
-            "retryable_failure": self.retryable_failure,
-            "permanent_failure": self.permanent_failure,
-            "poisoned": self.poisoned,
-            "oldest_pending_age_seconds": self.oldest_pending_age_seconds,
-            "alert_oldest_pending": self.alert_oldest_pending,
-            "queue_depth": self.queue_depth,
-            "cleaned_retry_records": self.cleaned_retry_records,
-            "preview": list(self.preview),
-        }
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-friendly mapping suitable for structured logs / CLI."""
+        return self.model_dump(mode="json")
 
 
 class PendingRevocationReconciler:
@@ -272,17 +249,20 @@ class PendingRevocationReconciler:
                         ),
                     },
                 )
-                report = replace(report, preview=preview)
+                report = report.model_copy(update={"preview": preview})
             result = await self._process_user(user, dry_run=dry_run, force=force, deadline=deadline)
-            report = replace(
-                report,
-                attempted=report.attempted + result.get("attempted", 0),
-                succeeded=report.succeeded + result.get("succeeded", 0),
-                skipped=report.skipped + result.get("skipped", 0),
-                stale_revision=report.stale_revision + result.get("stale_revision", 0),
-                retryable_failure=report.retryable_failure + result.get("retryable_failure", 0),
-                permanent_failure=report.permanent_failure + result.get("permanent_failure", 0),
-                poisoned=report.poisoned + result.get("poisoned", 0),
+            report = report.model_copy(
+                update={
+                    "attempted": report.attempted + result.get("attempted", 0),
+                    "succeeded": report.succeeded + result.get("succeeded", 0),
+                    "skipped": report.skipped + result.get("skipped", 0),
+                    "stale_revision": report.stale_revision + result.get("stale_revision", 0),
+                    "retryable_failure": report.retryable_failure
+                    + result.get("retryable_failure", 0),
+                    "permanent_failure": report.permanent_failure
+                    + result.get("permanent_failure", 0),
+                    "poisoned": report.poisoned + result.get("poisoned", 0),
+                },
             )
         if user_id is None and not dry_run:
             # Mongo ``skip`` is not a stable cursor while successful users are
@@ -308,7 +288,7 @@ class PendingRevocationReconciler:
             except Exception as exc:  # noqa: BLE001 — cursor is advisory only
                 exc.add_note("operation=pending_reconcile, stage=cursor_write")
             cleaned = await self._cleanup_abandoned_retry_records(deadline)
-            report = replace(report, cleaned_retry_records=cleaned)
+            report = report.model_copy(update={"cleaned_retry_records": cleaned})
         logger.bind(**report.as_dict()).info("auth_pending_revocation_reconciliation_finished")
         return report.as_dict()
 

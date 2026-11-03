@@ -1,11 +1,11 @@
 import re
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Annotated, NoReturn, assert_never
 
 from fastapi import Depends, Path, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import SkipValidation
 from returns.result import Failure, Success
 from starlette.requests import HTTPConnection
 
@@ -35,6 +35,7 @@ from app.features.auth.domain.errors import (
 )
 from app.features.auth.domain.tenancy import LegalRole
 from app.features.auth.domain.user import Permission, UserRole
+from app.kernel.models import StrictModel
 from app.observability.logging import set_request_actor
 from app.security.tokens import TokenClaims, decode_token
 from app.utils import (
@@ -59,8 +60,7 @@ _TENANT_SUBPROTOCOL_PREFIXES = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class AuthorizationContext:
+class AuthorizationContext(StrictModel):
     """Live authorization state paired with the authenticated token.
 
     ``TokenClaims`` remains useful for identity and session correlation, but
@@ -70,7 +70,10 @@ class AuthorizationContext:
     """
 
     claims: TokenClaims
-    account: AuthAccount
+    # The account store is the validation/trust boundary. This carrier retains
+    # the AuthAccount static type without re-validating the nested model on
+    # every capability-context copy or rejecting structural test doubles.
+    account: SkipValidation[AuthAccount]
     authoritative_tenant_id: str
     authoritative_legal_roles: tuple[LegalRole, ...]
     authoritative_self_review_allowed: bool
@@ -124,7 +127,7 @@ class AuthorizationContext:
         if not thread_id:
             message = "thread_id must not be empty"
             raise ValueError(message)
-        return replace(self, thread_id=thread_id)
+        return self.model_copy(update={"thread_id": thread_id})
 
 
 def _allowed_operations(account: AuthAccount, roles: tuple[LegalRole, ...]) -> tuple[str, ...]:
