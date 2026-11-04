@@ -7,7 +7,6 @@ and contain the expected data structure.
 from __future__ import annotations
 
 import pytest
-
 from evals.fixtures import (
     FIXTURES_DIR,
     load_golden_set_fixture,
@@ -35,7 +34,7 @@ class TestGoldenSetFixtures:
 
         assert len(rows) == 3
         assert all("case_id" in row for row in rows)
-        assert all(row["quality_tier"] == "candidate" for row in rows)
+        assert all(row["provenance"]["quality_tier"] == "candidate" for row in rows)
 
     def test_load_nonexistent_golden_set_fixture_raises_error(self) -> None:
         """Test that loading a nonexistent fixture raises FileNotFoundError."""
@@ -143,3 +142,17 @@ class TestFixturesDirectory:
         """Test that fixtures README exists."""
         readme_path = FIXTURES_DIR / "README.md"
         assert readme_path.exists()
+
+
+class TestGoldenSetFixtureSchemaValidation:
+    """Fixture golden-set rows must validate against the golden-set schema."""
+
+    @pytest.mark.parametrize("fixture", ["ingestion_basic", "coverage_gap_examples"])
+    def test_rows_validate_against_golden_query(self, fixture: str) -> None:
+        from pydantic import TypeAdapter
+
+        from app.ai.evaluation.schema import GoldenQuery
+
+        rows = load_golden_set_fixture(fixture)
+        validated = TypeAdapter(list[GoldenQuery]).validate_python(rows)
+        assert len(validated) == len(rows)
