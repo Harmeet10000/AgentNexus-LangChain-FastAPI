@@ -634,7 +634,236 @@ def make_gateway_node() -> StateNode:
     return gateway_node
 
 
-def make_qna_node(qna_llm: Runnable[list[Any], QnAOutput]) -> StateNode:
+#: The retrieval engine's stage-usage stages mapped onto Saul's ledger
+#: dimensions (mount-retrieval-graph task 3.5). The graph reports per-stage
+#: counts; this table is the attribution policy: model-backed stages draw
+#: MODEL_CALLS, retrieval-backed stages draw RETRIEVAL_CALLS. A stage the
+#: table does not name is not billable to the agent run.
+_QNA_ENGINE_STAGE_DIMENSIONS: Mapping[str, BudgetDimension] = {
+    "plan": BudgetDimension.MODEL_CALLS,
+    "source_identifier": BudgetDimension.MODEL_CALLS,
+    "grade": BudgetDimension.MODEL_CALLS,
+    "generate": BudgetDimension.MODEL_CALLS,
+    "retrieve_fusion": BudgetDimension.RETRIEVAL_CALLS,
+    "rerank": BudgetDimension.RETRIEVAL_CALLS,
+    "edge_grounding": BudgetDimension.RETRIEVAL_CALLS,
+}
+
+
+def _engine_stage_spend(stage_usage: Sequence[Any]) -> dict[BudgetDimension, int]:
+    """Aggregate the graph's stage-usage entries into per-dimension spend."""
+    spend: dict[BudgetDimension, int] = {}
+    for entry in stage_usage:
+        dimension = _QNA_ENGINE_STAGE_DIMENSIONS.get(getattr(entry, "stage", ""))
+        if dimension is None:
+            continue
+        spend[dimension] = spend.get(dimension, 0) + int(getattr(entry, "calls", 0))
+    return spend
+
+
+def _engine_unaffordable_dimension(ledger: BudgetLedger) -> BudgetDimension | None:
+    """The first ledger dimension the engine cannot draw from, or None.
+
+    The pre-check (task 3.5): one model call (plan) and one retrieval call
+    (fusion) are the minimum any engine run spends, so an exhausted or fully
+    spent dimension blocks the invocation before it starts.
+    """
+    if ledger.exhausted:
+        return ledger.exhausted_dimension or BudgetDimension.MODEL_CALLS
+    if ledger.model_calls >= ledger.limits.model_calls:
+        return BudgetDimension.MODEL_CALLS
+    if ledger.retrieval_calls >= ledger.limits.retrieval_calls:
+        return BudgetDimension.RETRIEVAL_CALLS
+    return None
+
+
+def _qna_engine_query(state: LegalAgentState) -> str:
+    """The engine's query: the transcript's latest user turn."""
+    for message in reversed(state.get("messages", [])):
+        if isinstance(message, HumanMessage):
+            content = message.content
+            if isinstance(content, str) and content.strip():
+                return content
+    return state.get("user_query", "")
+
+
+def _retrieval_state_from_agent(state: LegalAgentState, *, query: str) -> dict[str, Any]:
+    """Map ``LegalAgentState`` → ``RetrievalState``. The only entry crossing.
+
+    Server-owned values only (V6): identity, tenant, document scope, and the
+    version/contract scope come from the agent's server-owned runtime state —
+    never from the transcript or any model output. Every field crossing the
+    boundary is named here; nothing crosses by key sharing. An explicitly
+    empty authorized scope drives the graph to its grounded fallback envelope
+    rather than an unscoped search.
+    """
+    # Local import (noqa: PLC0415): the shared scope helper lives with the
+    # ask service; the import is deferred to keep this module's load light.
+    from app.features.documents.application.queries.documents import (  # noqa: PLC0415
+        resolve_unavailable_scope_documents,
+    )
+
+    scope_ids = list(dict.fromkeys(state.get("allowed_doc_ids", [])))
+    document_versions = list(state.get("document_versions", []))
+    document_contracts = list(state.get("document_contracts", []))
+    return {
+        "user_id": state["user_id"],
+        "tenant_id": state.get("tenant_id", ""),
+        "allowed_doc_ids": scope_ids,
+        "document_versions": document_versions,
+        "document_contracts": document_contracts,
+        "scope_unavailable_documents": resolve_unavailable_scope_documents(
+            scope_ids=scope_ids,
+            scope_versions=document_versions,
+            scope_contracts=document_contracts,
+        ),
+        "scope_bound": True,
+        "query": query,
+        "doc_ids_filter": [],
+        "contract_index": None,
+        "jurisdiction": None,
+        "contract_type": None,
+        "clause_type": None,
+        "require_graphiti_verified": False,
+        "messages": [],
+        "iteration_count": 0,
+    }
+
+
+def _qna_engine_delta(
+    state: LegalAgentState,
+    engine_result: Mapping[str, Any],
+    score: QnAOutput,
+    ledger: BudgetLedger,
+) -> dict[str, Any]:
+    """Map the engine's result state onto the agent state delta (exit crossing).
+
+    Only the answer, evidence-handle citations, typed coverage, typed errors,
+    and the charged ledger enter the checkpoint — no hydrated chunk text or
+    retrieval working state (the deep-research precedent).
+    """
+    errors: list[AgentError] = []
+    # Per-stage spend attribution (task 3.5): charge exactly the stages the
+    # graph reports. A mid-charge exhaustion still delivers the already-paid
+    # answer with the typed budget error recorded.
+    for dimension, amount in _engine_stage_spend(engine_result.get("stage_usage", [])).items():
+        try:
+            ledger = ledger.consume(dimension, amount)
+        except BudgetExhaustedError as exc:
+            ledger = ledger.model_copy(
+                update={"exhausted": True, "exhausted_dimension": exc.dimension}
+            )
+            errors.extend(_fail("budget", "BUDGET_EXHAUSTED", str(exc), retryable=False)["errors"])
+            break
+
+    generated: Any = engine_result["generated_answer"]
+    run_id = state.get("run_id") or state.get("correlation_id") or state["thread_id"]
+    refs: dict[str, EvidenceRef] = {}
+    for citation in engine_result.get("resolved_citations", []):
+        if not citation.document_id:
+            # Without hydrated provenance the citation cannot be dereferenced
+            # through the evidence registry; it ships as answer text only,
+            # never as a fabricated handle.
+            continue
+        evidence_id = f"qna:{run_id}:{len(refs) + 1}"
+        refs[evidence_id] = EvidenceRef(
+            evidence_id=evidence_id,
+            chunk_id=citation.chunk_id,
+            document_id=citation.document_id,
+            document_version=citation.document_version or 1,
+            contract_index=citation.contract_index,
+            pipeline_version=citation.pipeline_version,
+            page_no=citation.page_no,
+            retrieval_method="retrieval_graph",
+            run_id=run_id,
+            thread_id=state["thread_id"],
+        )
+    merged_registry = dict(state.get("evidence_registry", {}))
+    merged_registry.update(refs)
+
+    coverage: dict[str, int] = dict(state.get("coverage", {}))
+    envelope: Any = engine_result.get("coverage")
+    if envelope is not None:
+        for key, value in envelope.model_dump().items():
+            if isinstance(value, int):
+                coverage[key] = max(coverage.get(key, 0), value)
+
+    working_memory = dict(state.get("working_memory", {}))
+    working_memory["clarified_intent"] = score.intent
+    if score.document_type_guess:
+        working_memory["document_type"] = score.document_type_guess
+
+    transcript: list[AIMessage] = [AIMessage(content=generated.answer)]
+    if refs:
+        # The bounded metadata envelope lands in the transcript (the
+        # deep-research precedent): handles and coverage only — never chunk
+        # text or retrieval working state.
+        transcript.append(
+            AIMessage(
+                content=json.dumps(
+                    {"tool": "retrieval_engine", "evidence": sorted(refs), "coverage": coverage},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+        )
+    return {
+        "messages": transcript,
+        "evidence_registry": merged_registry,
+        "coverage": coverage,
+        "errors": errors,
+        "budget_ledger": ledger,
+        "qna_confidence": score.confidence,
+        "working_memory": working_memory,
+        "status": WorkflowStatus.PLAN_PENDING,
+    }
+
+
+async def _invoke_retrieval_engine(
+    state: LegalAgentState,
+    engine: Any,
+    log: Any,
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    """One node-internal engine invocation; (result, {}) or (None, failure).
+
+    The engine is never a tool: the invocation happens inside the node with
+    the explicit server-owned state mapping as the only entry crossing.
+    """
+    try:
+        async with engine.invocation() as (engine_graph, context):
+            result: dict[str, Any] = await engine_graph.ainvoke(
+                _retrieval_state_from_agent(state, query=_qna_engine_query(state)),
+                context=context,
+            )
+    except Exception as exc:
+        exc.add_note("node=qna, operation=retrieval_engine")
+        log.exception("qna_retrieval_engine_failed")
+        return None, _fail(
+            "qna",
+            "QNA_ENGINE_UNAVAILABLE",
+            "The retrieval engine could not answer the grounded query.",
+            retryable=True,
+        )
+    return result, {}
+
+
+def make_qna_node(
+    qna_llm: Runnable[list[Any], QnAOutput],
+    retrieval_engine: Any | None = None,
+) -> StateNode:
+    """Grounded answering through the compile-once retrieval engine.
+
+    The engine (mount-retrieval-graph 3.x) is invoked node-internally — the
+    same node-wraps-bounded-subgraph pattern as the deep-research node, never
+    a tool: no toolset gains a retrieval surface and the registry is
+    unchanged. The clarification interrupt remains for low-confidence intents;
+    a confident grounded intent runs the engine, whose budget draws from this
+    run's ledger (pre-checked before invocation, charged per stage from the
+    graph's reported stage usage). An unprovisioned engine fails closed with
+    a typed unavailable outcome — there is no fallback answering path for a
+    grounded intent.
+    """
+
     async def qna_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(
             node="qna",
@@ -672,17 +901,50 @@ def make_qna_node(qna_llm: Runnable[list[Any], QnAOutput]) -> StateNode:
                 "status": WorkflowStatus.QNA_CLARIFICATION,
             }
 
-        working_memory = dict(state.get("working_memory", {}))
-        working_memory["clarified_intent"] = result.intent
-        if result.document_type_guess:
-            working_memory["document_type"] = result.document_type_guess
+        # --- Grounded intent: the retrieval engine (node-internal) -----------
+        if retrieval_engine is None or retrieval_engine.graph is None:
+            return {
+                **_fail(
+                    "qna",
+                    "QNA_ENGINE_UNAVAILABLE",
+                    "The retrieval engine is not provisioned in this process.",
+                    retryable=True,
+                ),
+                "budget_ledger": ledger,
+                "qna_confidence": result.confidence,
+            }
 
-        return {
-            "budget_ledger": ledger,
-            "qna_confidence": result.confidence,
-            "working_memory": working_memory,
-            "status": WorkflowStatus.PLAN_PENDING,
-        }
+        # Pre-check (task 3.5): an exhausted budget blocks the invocation.
+        unaffordable = _engine_unaffordable_dimension(ledger)
+        if unaffordable is not None:
+            exhausted = ledger.model_copy(
+                update={"exhausted": True, "exhausted_dimension": unaffordable}
+            )
+            return {
+                **_fail(
+                    "budget",
+                    "BUDGET_EXHAUSTED",
+                    f"Agent run {unaffordable.value} budget exhausted before the retrieval engine ran",
+                    retryable=False,
+                ),
+                "budget_ledger": exhausted,
+                "qna_confidence": result.confidence,
+            }
+
+        engine_result, failure = await _invoke_retrieval_engine(state, retrieval_engine, log)
+        if engine_result is None:
+            return {**failure, "budget_ledger": ledger, "qna_confidence": result.confidence}
+
+        delta = _qna_engine_delta(state, engine_result, result, ledger)
+        new_handles = sorted(
+            set(delta["evidence_registry"]) - set(state.get("evidence_registry", {}))
+        )
+        log.info(
+            "qna_engine_completed",
+            evidence_handles=new_handles,
+            documents_ready=delta["coverage"].get("documents_ready", 0),
+        )
+        return delta
 
     return qna_node
 
@@ -2113,12 +2375,12 @@ def make_grounding_verification_node(
         # D7: the verdict path's exit is emitted in the shared vocabulary. The
         # mapping is type-level only — the gate logic above is untouched.
         outcome = verdict_outcome(result, error_code=errors[0].code if errors else None)
-        if human_review_sink is not None and outcome.decision is ValidationDecision.ESCALATE:
+        escalated = outcome.decision is ValidationDecision.ESCALATE
+        if human_review_sink is not None and escalated:
             # A real grounding failure reaches the HITL review through the
-            # sink's thread-buffered enqueue — the deliveries the human-review
-            # node drains into its interrupt payload. The node's returned
-            # state is unchanged (the sink, not a state channel, is the
-            # delivery path).
+            # sink's thread-buffered enqueue; the outcome is also returned as
+            # pending_escalations state so the checkpoint carries it across a
+            # worker migration or restart.
             await human_review_sink.escalate(
                 outcome,
                 EvaluationContext.model_validate(
@@ -2143,6 +2405,10 @@ def make_grounding_verification_node(
             "status": WorkflowStatus.AWAITING_HUMAN_REVIEW,
             "errors": errors,
             "budget_ledger": ledger,
+            # Last-write-wins: the channel carries this node's outcomes and no
+            # stale ones from a previous run. Non-ESCALATE results clear it;
+            # the sink buffer is process-local, the checkpoint survives restart.
+            "pending_escalations": [outcome] if escalated else [],
         }
 
     return grounding_verification_node
@@ -2538,12 +2804,24 @@ def make_human_review_node(
         }
         # Checkpointed escalations first (they survive worker migration), then
         # this thread's process-local sink deliveries — never another
-        # thread's. Once rendered, the channel is cleared in the node's
-        # post-resume update below so a later replay cannot re-interrupt with
-        # stale escalations.
-        escalations = list(state.get("pending_escalations") or [])
+        # thread's. The same outcome may have travelled both paths; deduplicate
+        # by content so it renders once. Once rendered, the channel is cleared
+        # in the node's post-resume update below so a later replay cannot
+        # re-interrupt with stale escalations.
+        seen: set[str] = set()
+        escalations: list[ValidationOutcome[Any]] = []
+
+        def _collect(outcome: ValidationOutcome[Any]) -> None:
+            fingerprint = json.dumps(outcome.model_dump(mode="json"), sort_keys=True, default=str)
+            if fingerprint not in seen:
+                seen.add(fingerprint)
+                escalations.append(outcome)
+
+        for buffered in state.get("pending_escalations") or []:
+            _collect(buffered)
         if pending_escalations is not None:
-            escalations.extend(pending_escalations(_current_thread_id()))
+            for delivered in pending_escalations(_current_thread_id()):
+                _collect(delivered)
         if escalations:
             review_payload["escalations"] = [_escalation_payload(o) for o in escalations]
 
