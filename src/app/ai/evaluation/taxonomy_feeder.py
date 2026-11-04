@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .schema import TaxonomyCandidate
 
 _VALID_CASE_TYPES: frozenset[str] = frozenset(get_args(GoldenCaseType.__value__))
-_PAIR_METADATA_FIELDS = frozenset({"pair_id", "pair_variable", "pair_role"})
+_PAIR_METADATA_FIELDS = frozenset({"pair_id", "pair_variable", "pair_role", "case_id"})
 
 
 class TaxonomyCandidateFeeder(Protocol):
@@ -177,7 +177,7 @@ class DefaultTaxonomyCandidateFeeder:
             message = f"unknown GoldenQuery field: {variable_name!r}"
             raise GoldenSetValidationError(message)
         if variable_name in _PAIR_METADATA_FIELDS:
-            message = f"cannot A/B test pair metadata field: {variable_name!r}"
+            message = f"cannot A/B test identity or pair metadata field: {variable_name!r}"
             raise GoldenSetValidationError(message)
 
         # Hash in everything that distinguishes two experiments on the same base

@@ -26,6 +26,10 @@ from app.ai.tools.registry import (
     get_tool_registry,
     register_deep_research_tool,
     register_default_tools,
+    register_portfolio_traversal_tools,
+)
+from app.features.documents.application.tools.portfolio import (
+    make_portfolio_traversal_tools,
 )
 from app.features.agent_saul.domain.state import (
     OrchestratorAction,
@@ -439,7 +443,8 @@ async def test_refused_handle_read_names_the_run_scoping_rule() -> None:
         runtime=_runtime(),
     )
 
-    assert envelope["status"] == "completed"
+    assert envelope["status"] == "ingestion_incomplete"
+    assert envelope["summary"] is None
     assert service.read_calls[0]["run_id"] == "run-1"
     # The refusal names the run-scoping rule instead of vanishing.
     assert "run" in (envelope["message"] or "")
@@ -559,7 +564,7 @@ async def test_handle_from_run_n_fails_membership_in_run_n_plus_1(
         objective="termination obligations",
         runtime=_runtime(run_id="run-2", allowed_doc_ids=(REAL_DOC,)),
     )
-    assert second["status"] == "completed"
+    assert second["status"] == "ingestion_incomplete"
     assert "valid only within the run" in (second["message"] or "")
 
 
@@ -568,8 +573,18 @@ async def test_handle_from_run_n_fails_membership_in_run_n_plus_1(
 # ---------------------------------------------------------------------------
 
 
-def test_registry_registration_carries_read_only_authority_tags() -> None:
+def _register_startup_catalog() -> None:
+    """Mirror graph-factory startup: defaults plus portfolio seats, then D5."""
+
     register_default_tools()
+    register_portfolio_traversal_tools(
+        make_portfolio_traversal_tools(None),
+        validate=False,
+    )
+
+
+def test_registry_registration_carries_read_only_authority_tags() -> None:
+    _register_startup_catalog()
     tool = _scoped_tool(_RecordingSearchService(_search_response()))
     register_deep_research_tool(tool)
     registry = get_tool_registry()
@@ -581,7 +596,7 @@ def test_registry_registration_carries_read_only_authority_tags() -> None:
 
 
 def test_deep_research_role_projection_is_exactly_transfer_plus_research() -> None:
-    register_default_tools()
+    _register_startup_catalog()
     register_deep_research_tool(_scoped_tool(_RecordingSearchService(_search_response())))
 
     projection = deep_research_role_projection()
@@ -702,7 +717,7 @@ def _route_after_orchestrator(state: dict[str, Any]) -> str:
 
 
 async def test_plan_execution_reaches_deep_research_and_lands_envelope() -> None:
-    register_default_tools()
+    _register_startup_catalog()
     register_deep_research_tool(_scoped_tool(_RecordingSearchService(_search_response())))
     # Toolset identity holds at plan level: exactly transfer + deep_research.
     assert [tool.name for tool in deep_research_role_projection()] == [

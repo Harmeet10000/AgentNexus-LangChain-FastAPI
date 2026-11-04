@@ -253,3 +253,10 @@ def test_ab_pairs_over_same_base_row_are_distinct() -> None:
 
     assert first[0].pair_id != second[0].pair_id
     assert first[0].case_id != second[0].case_id
+
+
+def test_ab_pair_rejects_case_id_variable() -> None:
+    feeder = DefaultTaxonomyCandidateFeeder()
+
+    with pytest.raises(GoldenSetValidationError, match="case_id"):
+        feeder.generate_pair_for_ab_test(_answerable_row(), "case_id", "my-anything")

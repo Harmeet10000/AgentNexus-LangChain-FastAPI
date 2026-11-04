@@ -55,6 +55,8 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
     from langgraph.graph.state import CompiledStateGraph
 
+    from app.ai.evaluation.deep_research_integration import DeepResearchInstrumentation
+
 #: Stage-granularity step bound: search, read, and synthesize each consume one
 #: step; ``plan`` is deterministic and free. The default leaves one spare step.
 DEFAULT_MAX_STEPS = 4
@@ -213,6 +215,33 @@ def _make_plan_node() -> Any:
     return plan_node
 
 
+def _instrument_node(node: Any, stage: str, instrumentation: DeepResearchInstrumentation) -> Any:
+    async def instrumented_node(state: DeepResearchState) -> dict[str, Any]:
+        input_state = dict(state)
+        if stage == "plan":
+            instrumentation.start(state["objective"], node_limit=8)
+        instrumentation.record_stage(stage, input_state, {})
+        delta = await node(state)
+        tool_calls: list[str] = []
+        if stage == "search":
+            consumed = delta.get("steps_used", state["steps_used"]) - state["steps_used"]
+            tool_calls = ["search_evidence"] * consumed
+        elif stage == "read":
+            read_notes = delta.get("read_notes", state.get("read_notes", []))
+            refusals = delta.get("refusals", state.get("refusals", []))
+            attempts = (
+                len(read_notes)
+                + len(refusals)
+                - len(state.get("read_notes", []))
+                - len(state.get("refusals", []))
+            )
+            tool_calls = ["read_evidence_by_id"] * attempts
+        instrumentation.record_stage(stage, input_state, delta, tool_calls=tool_calls)
+        return delta
+
+    return instrumented_node
+
+
 def _make_search_node(service: Any) -> Any:
     async def search_node(state: DeepResearchState) -> dict[str, Any]:
         if state["steps_used"] >= state["max_steps"]:
@@ -234,7 +263,7 @@ def _make_search_node(service: Any) -> Any:
                 message = _exhausted_message(state)
                 break
             steps_used += 1
-            response = _normalize_search_response(
+            response: EvidenceSearchResponse | None = _normalize_search_response(
                 await service.search_evidence(
                     principal_id=state["user_id"],
                     tenant_id=state["tenant_id"],
@@ -331,6 +360,11 @@ def _make_read_node(service: Any) -> Any:
             # never render a confident partial answer.
             status = DeepResearchStatus.BUDGET_EXHAUSTED.value
             message = _exhausted_message(state)
+        elif state.get("pending_handles") and not read_notes:
+            # Every evidence read returned expired/unauthorized/transient_failure:
+            # report scope-unavailable, never a completed run.
+            status = DeepResearchStatus.INGESTION_INCOMPLETE.value
+            message = f"No evidence passages could be read: {'; '.join(refusals)}"
         return {
             "read_notes": read_notes,
             "refusals": refusals,
@@ -359,6 +393,13 @@ def _make_synthesize_node() -> Any:
             }
 
         read_notes = state.get("read_notes", [])
+        if state.get("status") == DeepResearchStatus.INGESTION_INCOMPLETE.value:
+            return {
+                "status": DeepResearchStatus.INGESTION_INCOMPLETE.value,
+                "summary": None,
+                "message": state.get("message")
+                or "Evidence passages could not be read for the research objective.",
+            }
         document_ids = sorted({str(ref.get("document_id")) for ref in evidence})
         lines = [
             f"Research objective: {state['objective']}",
@@ -397,7 +438,11 @@ def _route_after_read(state: DeepResearchState) -> str:
     return "synthesize"
 
 
-def compile_deep_research_subgraph(service: Any) -> CompiledStateGraph[Any]:
+def compile_deep_research_subgraph(
+    service: Any,
+    *,
+    instrumentation: DeepResearchInstrumentation | None = None,
+) -> CompiledStateGraph[Any]:
     """Compile the bounded plan → search → read → synthesize machine.
 
     Called once at graph-build time. No checkpointer (design Decision 1):
@@ -407,10 +452,17 @@ def compile_deep_research_subgraph(service: Any) -> CompiledStateGraph[Any]:
     # bind a ``total=False`` TypedDict through the StateGraph overload.
     state_graph_factory = cast("Any", StateGraph)
     graph: Any = state_graph_factory(DeepResearchState)
-    graph.add_node("plan", _make_plan_node())
-    graph.add_node("search", _make_search_node(service))
-    graph.add_node("read", _make_read_node(service))
-    graph.add_node("synthesize", _make_synthesize_node())
+    nodes = {
+        "plan": _make_plan_node(),
+        "search": _make_search_node(service),
+        "read": _make_read_node(service),
+        "synthesize": _make_synthesize_node(),
+    }
+    if instrumentation is not None:
+        for stage, node in nodes.items():
+            nodes[stage] = _instrument_node(node, stage, instrumentation)
+    for stage, node in nodes.items():
+        graph.add_node(stage, node)
     graph.add_edge(START, "plan")
     graph.add_edge("plan", "search")
     graph.add_conditional_edges("search", _route_after_search)
@@ -425,6 +477,7 @@ def make_deep_research_tool(
     max_steps: int = DEFAULT_MAX_STEPS,
     search_limit: int = DEFAULT_SEARCH_LIMIT,
     max_reads: int = DEFAULT_MAX_READS,
+    instrumentation: DeepResearchInstrumentation | None = None,
 ) -> BaseTool:
     """Build the single deep-research tool wrapping the compiled subgraph.
 
@@ -433,7 +486,7 @@ def make_deep_research_tool(
     no valid server-owned runtime context is present. Model-visible arguments
     are exactly ``objective`` and optional ``focus``.
     """
-    subgraph = compile_deep_research_subgraph(service)
+    subgraph = compile_deep_research_subgraph(service, instrumentation=instrumentation)
 
     @tool(args_schema=DeepResearchInput)
     async def deep_research(
