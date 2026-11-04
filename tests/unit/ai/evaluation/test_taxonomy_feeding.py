@@ -221,8 +221,8 @@ def test_ab_pair_rows_validate_together_without_duplicate_ids() -> None:
     )
 
     assert control.case_id != treatment.case_id
-    assert control.case_id == f"{source.case_id}-control"
-    assert treatment.case_id == f"{source.case_id}-treatment"
+    assert control.case_id.startswith(f"{control.case_type}-pair-")
+    assert treatment.case_id.startswith(f"{treatment.case_type}-pair-")
 
     validate_golden_set(
         GoldenSet(
@@ -231,3 +231,14 @@ def test_ab_pair_rows_validate_together_without_duplicate_ids() -> None:
             queries=[control, treatment],
         )
     )
+
+
+def test_ab_pair_type_change_keeps_valid_case_id_prefixes() -> None:
+    feeder = DefaultTaxonomyCandidateFeeder()
+    source = _answerable_row().model_copy(update={"case_id": "direct_answer-prefix-001"})
+
+    control, treatment = feeder.generate_pair_for_ab_test(source, "case_type", "multi_document")
+
+    assert control.case_id.startswith("direct_answer-pair-")
+    assert treatment.case_type == "multi_document"
+    assert treatment.case_id.startswith("multi_document-pair-")

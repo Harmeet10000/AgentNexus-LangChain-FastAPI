@@ -266,17 +266,18 @@ jobs:
             --report-path /tmp/spot_check_negative.json \
             --fixtures-dir evals/fixtures/research_outputs \
             --max-errors 1 && STATUS=0 || STATUS=$?
-          python3 - <<'PYEOF'
+          python3 - "$STATUS" <<'PYEOF'
           import json
           import sys
 
+          STATUS = sys.argv[1]
           try:
               report = json.load(open("/tmp/spot_check_negative.json"))
           except (OSError, json.JSONDecodeError) as exc:
               print(f"ERROR: negative control wrote no valid report: {exc}", file=sys.stderr)
               sys.exit(1)
 
-          if int(STATUS) != 1:
+          if STATUS != "1":
               print(f"ERROR: negative control expected exit 1, got {STATUS}", file=sys.stderr)
               sys.exit(1)
           if report.get("error_count", 0) < 1:
