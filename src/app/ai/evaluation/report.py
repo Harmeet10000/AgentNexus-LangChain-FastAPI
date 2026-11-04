@@ -10,6 +10,7 @@ from anyio import Path as AsyncPath
 from pydantic import BaseModel, ConfigDict, Field
 
 from .runner import (  # noqa: TC001 — resolved at runtime by Pydantic
+    BranchAttribution,
     RetrievalEvaluation,
     RetrievalMetrics,
     RetrievalQueryResult,
@@ -38,6 +39,7 @@ class EvaluationReport(BaseModel):
     golden_set_version: str
     rows: list[RetrievalQueryResult]
     aggregates: RetrievalMetrics
+    branch_attribution: list[BranchAttribution] = Field(default_factory=list)
     judged: JudgedMetrics | None = None
 
     @classmethod
@@ -55,6 +57,7 @@ class EvaluationReport(BaseModel):
             golden_set_version=golden_set_version,
             rows=evaluation.rows,
             aggregates=evaluation.aggregates,
+            branch_attribution=evaluation.branch_attribution,
         )
 
 

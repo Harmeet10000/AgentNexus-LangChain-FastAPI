@@ -16,6 +16,7 @@ import hashlib
 import json
 import re
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -79,9 +80,18 @@ type GoldenEvidenceStatus = Literal[
     "ok", "no_evidence", "index_not_ready", "ingestion_failed", "unauthorized", "stale_version"
 ]
 type GoldenEvidencePolicy = Literal["mechanically_verified", "graph_indexed_only"]
-type GoldenIngestionState = Literal[
-    "ready", "completed_with_warnings", "index_not_ready", "failed", "unauthorized"
-]
+
+
+class GoldenIngestionState(StrEnum):
+    """Ingestion state for a document in the evaluation golden set."""
+
+    READY = "ready"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
+    INDEX_NOT_READY = "index_not_ready"
+    FAILED = "failed"
+    UNAUTHORIZED = "unauthorized"
+
+
 type QualityTier = Literal["candidate", "release"]
 type AnnotationRole = Literal["engineer", "legal_sme"]
 type OcrQualityImpact = Literal["none", "meaning_preserved", "meaning_at_risk", "meaning_changed"]
@@ -567,6 +577,28 @@ class SmeRequirements(BaseModel):
         return self
 
 
+class CompositionExpectation(BaseModel):
+    """Declared composition minimums the golden set must satisfy.
+
+    Each field is a floor, not a ceiling: the count must reach the declared
+    minimum, every declared document kind must appear on at least one row, every
+    declared multi-contract document must be referenced by at least one row, and
+    at least one row must carry one of the declared scanned-OCR profiles.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    min_queries: int | None = Field(default=None, ge=1)
+    document_kinds: list[str] = Field(default_factory=list)
+    multi_contract_documents: list[str] = Field(default_factory=list)
+    scanned_ocr_profiles: list[str] = Field(default_factory=list)
+
+
+_COMPOSITION_COUNT_MISMATCH = (
+    "manifest declared_query_count {declared} does not match the actual row count {actual}"
+)
+
+
 class GoldenProvenanceManifest(BaseModel):
     """Manifest binding a golden set to its source artifacts and policies."""
 
@@ -578,6 +610,8 @@ class GoldenProvenanceManifest(BaseModel):
     source_policy: dict[str, object] = Field(default_factory=dict)
     annotation_policy: dict[str, object] = Field(default_factory=dict)
     sme_requirements: SmeRequirements | None = None
+    declared_query_count: int | None = Field(default=None, ge=1)
+    composition: CompositionExpectation | None = None
     per_artifact: list[ArtifactProvenance] = Field(default_factory=list)
     corpus_manifest_path: str | None = None
     notes: str | None = None
@@ -821,6 +855,58 @@ async def _sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _audit_composition(
+    manifest: GoldenProvenanceManifest,
+    golden_set: GoldenSet,
+) -> list[str]:
+    """Check the manifest's declared count and composition floors against the rows."""
+    issues: list[str] = []
+    if manifest.declared_query_count is not None and manifest.declared_query_count != len(
+        golden_set.queries
+    ):
+        issues.append(
+            _COMPOSITION_COUNT_MISMATCH.format(
+                declared=manifest.declared_query_count, actual=len(golden_set.queries)
+            )
+        )
+    composition = manifest.composition
+    if composition is None:
+        return issues
+    if composition.min_queries is not None and len(golden_set.queries) < composition.min_queries:
+        issues.append(
+            f"golden set has {len(golden_set.queries)} queries; composition declares a "
+            f"minimum of {composition.min_queries}"
+        )
+    if composition.document_kinds:
+        present = {query.document_kind for query in golden_set.queries}
+        missing = [kind for kind in composition.document_kinds if kind not in present]
+        if missing:
+            issues.append(f"declared document kinds absent from the corpus: {', '.join(missing)}")
+    if composition.multi_contract_documents:
+        referenced: set[str] = set()
+        for query in golden_set.queries:
+            referenced.update(query.expected_document_ids)
+            referenced.update(span.document_id for span in query.expected_spans)
+            referenced.update(state.document_id for state in query.expected_ingestion_states)
+        missing = [
+            document_id
+            for document_id in composition.multi_contract_documents
+            if document_id not in referenced
+        ]
+        if missing:
+            issues.append(
+                f"declared multi-contract documents not referenced by any row: {', '.join(missing)}"
+            )
+    if composition.scanned_ocr_profiles:
+        profiles = {query.ocr_profile for query in golden_set.queries}
+        if not profiles & set(composition.scanned_ocr_profiles):
+            issues.append(
+                "no row carries one of the declared scanned-OCR profiles: "
+                f"{', '.join(composition.scanned_ocr_profiles)}"
+            )
+    return issues
+
+
 async def audit_golden_manifest(
     manifest: GoldenProvenanceManifest,
     golden_set: GoldenSet,
@@ -844,6 +930,7 @@ async def audit_golden_manifest(
             f"manifest golden_set_version {manifest.golden_set_version!r} does not match "
             f"golden-set version {golden_set.version!r}"
         )
+    issues.extend(_audit_composition(manifest, golden_set))
     if not manifest.per_artifact:
         if golden_set.version == GOLDEN_SET_V2_VERSION:
             issues.append("v2 manifest has empty per_artifact; provenance audit disabled")
@@ -1019,3 +1106,81 @@ async def load_golden_set(path: Path) -> GoldenSetLoadResult:
             queries=queries,
         )
     )
+
+
+class IngestionValidationResult(BaseModel):
+    """Per-document ingestion state validation result."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    row_index: int
+    case_id: str | None
+    document_id: str
+    expected_state: GoldenIngestionState
+    actual_state: GoldenIngestionState | None
+    match: bool
+    policy: GoldenEvidencePolicy
+    details: dict[str, object] | None = None
+
+
+class IngestionValidationReport(BaseModel):
+    """Summary report for ingestion state validation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    golden_set_version: str
+    validation_timestamp: str
+    total_rows: int
+    passed_rows: int
+    failed_rows: int
+    results: list[IngestionValidationResult]
+    coverage_metrics: dict[GoldenEvidencePolicy, CoverageMetric]
+
+
+class CoverageMetric(BaseModel):
+    """Coverage metrics for a specific evidence policy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    total_documents: int
+    ready_documents: int
+    completed_with_warnings_documents: int
+    index_not_ready_documents: int
+    failed_documents: int
+    unauthorized_documents: int
+    coverage_ratio: float
+
+
+class CoverageGap(BaseModel):
+    """A coverage gap for a specific case type in the golden set."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    case_type: str
+    current_count: int
+    required_minimum: int
+    suggested_queries: list[str]
+
+
+class CoverageAuditReport(BaseModel):
+    """Report summarizing ingestion coverage gaps and recommendations."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    total_rows: int
+    case_type_coverage: dict[str, int]
+    gaps: list[CoverageGap]
+    missing_ingestion_states: list[str]
+    recommendations: list[str]
+
+
+class TaxonomyCandidate(BaseModel):
+    """A candidate for addition to the golden set, generated from support tickets."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    query_template: str
+    recommended_case_type: str
+    source_ticket_ids: list[str]
+    cluster_similarity_score: float
+    symptom_variations: list[str]

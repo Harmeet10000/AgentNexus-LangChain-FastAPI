@@ -1,0 +1,56 @@
+[
+  {
+    "ticket_id": "TICKET-101",
+    "customer_id": "CUST-A01",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Cannot locate indemnification provisions in MSA",
+    "resolution_note": "Indexing lag",
+    "created_at": "2024-03-01T09:00:00Z",
+    "resolved_at": "2024-03-01T12:00:00Z"
+  },
+  {
+    "ticket_id": "TICKET-102",
+    "customer_id": "CUST-A02",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Indemnity clause search returns empty results",
+    "resolution_note": "Indexing lag",
+    "created_at": "2024-03-03T10:15:00Z",
+    "resolved_at": "2024-03-03T14:30:00Z"
+  },
+  {
+    "ticket_id": "TICKET-103",
+    "customer_id": "CUST-A03",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Looking for indemnification terms but getting no matches",
+    "resolution_note": "Indexing lag",
+    "created_at": "2024-03-05T11:20:00Z",
+    "resolved_at": "2024-03-05T15:45:00Z"
+  },
+  {
+    "ticket_id": "TICKET-104",
+    "customer_id": "CUST-A04",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Search for indemnity obligations finds nothing",
+    "resolution_note": "Indexing lag",
+    "created_at": "2024-03-08T08:30:00Z",
+    "resolved_at": "2024-03-08T11:00:00Z"
+  },
+  {
+    "ticket_id": "TICKET-105",
+    "customer_id": "CUST-A05",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Cannot retrieve indemnification section from contract",
+    "resolution_note": "Indexing lag",
+    "created_at": "2024-03-12T13:45:00Z",
+    "resolved_at": "2024-03-12T16:20:00Z"
+  },
+  {
+    "ticket_id": "TICKET-106",
+    "customer_id": "CUST-A06",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Indemnity clause missing from search results",
+    "resolution_note": "Indexing lag",
+    "created_at": "2024-03-15T09:30:00Z",
+    "resolved_at": "2024-03-15T12:15:00Z"
+  }
+]

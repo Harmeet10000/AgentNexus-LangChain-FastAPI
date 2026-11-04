@@ -1,0 +1,92 @@
+[
+  {
+    "ticket_id": "TICKET-001",
+    "customer_id": "CUST-ABC-123",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Search for 'indemnification clause' returns no results, but the clause exists in the Master Services Agreement dated 2024-01-15",
+    "resolution_note": "Document was in ingestion queue but not yet indexed. Re-triggered indexing pipeline.",
+    "created_at": "2024-01-20T10:30:00Z",
+    "resolved_at": "2024-01-20T14:45:00Z"
+  },
+  {
+    "ticket_id": "TICKET-002",
+    "customer_id": "CUST-XYZ-456",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Cannot find termination notice period requirements. System says 'no evidence found' but the clause is clearly in Section 8.2",
+    "resolution_note": "OCR quality issue - text layer was corrupted during ingestion. Re-ingested with enhanced OCR profile.",
+    "created_at": "2024-01-22T09:15:00Z",
+    "resolved_at": "2024-01-23T11:20:00Z"
+  },
+  {
+    "ticket_id": "TICKET-003",
+    "customer_id": "CUST-DEF-789",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Query 'liability cap amount' returns irrelevant chunks about insurance coverage instead of the actual liability limitation clause",
+    "resolution_note": "Semantic chunking boundary issue. Liability clause was split mid-sentence. Updated chunking strategy.",
+    "created_at": "2024-01-25T14:00:00Z",
+    "resolved_at": "2024-01-26T16:30:00Z"
+  },
+  {
+    "ticket_id": "TICKET-004",
+    "customer_id": "CUST-ABC-123",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Search for indemnity provisions returns nothing. The indemnification section exists in contract SRC-DOC-205.",
+    "resolution_note": "Same root cause as TICKET-001 - indexing lag. Monitoring indexing pipeline health.",
+    "created_at": "2024-02-03T11:20:00Z",
+    "resolved_at": "2024-02-03T13:10:00Z"
+  },
+  {
+    "ticket_id": "TICKET-005",
+    "customer_id": "CUST-GHI-321",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Confidentiality clause search fails with 'unauthorized' error even though user has read access to the document",
+    "resolution_note": "Permission sync issue between document store and search index. Refreshed permissions.",
+    "created_at": "2024-02-05T08:45:00Z",
+    "resolved_at": "2024-02-05T15:00:00Z"
+  },
+  {
+    "ticket_id": "TICKET-006",
+    "customer_id": "CUST-JKL-654",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Looking for 'payment schedule' in vendor agreement but getting results from wrong contract (older version from 2022 instead of 2024)",
+    "resolution_note": "Stale version in index. Implemented version pruning logic to prioritize recent documents.",
+    "created_at": "2024-02-08T10:00:00Z",
+    "resolved_at": "2024-02-09T12:30:00Z"
+  },
+  {
+    "ticket_id": "TICKET-007",
+    "customer_id": "CUST-MNO-987",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Search for 'dispute resolution arbitration' returns chunks but they're from the wrong jurisdiction (California instead of Delaware)",
+    "resolution_note": "Metadata filtering not applied. Added jurisdiction filter to retrieval pipeline.",
+    "created_at": "2024-02-12T13:20:00Z",
+    "resolved_at": "2024-02-13T09:45:00Z"
+  },
+  {
+    "ticket_id": "TICKET-008",
+    "customer_id": "CUST-PQR-147",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Query for 'renewal terms' returns section headers but missing the actual renewal clause content",
+    "resolution_note": "Table extraction failure - renewal terms were in a table that wasn't parsed correctly. Enhanced table parsing.",
+    "created_at": "2024-02-15T11:30:00Z",
+    "resolved_at": "2024-02-16T14:00:00Z"
+  },
+  {
+    "ticket_id": "TICKET-009",
+    "customer_id": "CUST-STU-258",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Cannot find 'data protection obligations' - search returns 'no evidence' but GDPR clause is in Appendix B",
+    "resolution_note": "Annexure/appendix not linked to main document during ingestion. Fixed document relationship mapping.",
+    "created_at": "2024-02-18T09:00:00Z",
+    "resolved_at": "2024-02-19T10:15:00Z"
+  },
+  {
+    "ticket_id": "TICKET-010",
+    "customer_id": "CUST-VWX-369",
+    "issue_category": "retrieval_failure",
+    "symptom_description": "Search for 'force majeure events' returns footnote text instead of the operative clause in Section 12.1",
+    "resolution_note": "Footnote misclassified as primary content. Updated content hierarchy detection.",
+    "created_at": "2024-02-20T15:45:00Z",
+    "resolved_at": "2024-02-21T11:00:00Z"
+  }
+]

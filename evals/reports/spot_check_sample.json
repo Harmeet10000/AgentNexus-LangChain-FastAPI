@@ -1,0 +1,398 @@
+{
+  "generated_at": "2026-11-04T17:21:22.357001+00:00",
+  "total_outputs": 4,
+  "error_count": 3,
+  "warning_count": 8,
+  "outputs": [
+    {
+      "file": "complete_report.json",
+      "operation_id": "research-op-001",
+      "process_metrics": {
+        "start_time": "2024-03-20T10:00:00Z",
+        "end_time": "2024-03-20T10:15:00Z",
+        "total_iterations": 3,
+        "primary_queries": 1,
+        "follow_up_queries": 5,
+        "total_retrieved_chunks": 20,
+        "final_report_word_count": 285,
+        "node_transitions": 8
+      },
+      "error_count": 0,
+      "warning_count": 1,
+      "results": [
+        {
+          "check_name": "source_attribution",
+          "passed": true,
+          "issue_description": null,
+          "severity": "error",
+          "details": {
+            "unattributed_sections": []
+          }
+        },
+        {
+          "check_name": "topic_coverage",
+          "passed": true,
+          "issue_description": null,
+          "severity": "warning",
+          "details": {
+            "uncovered_topics": []
+          }
+        },
+        {
+          "check_name": "missing_citations",
+          "passed": true,
+          "issue_description": null,
+          "severity": "warning",
+          "details": {
+            "sections": [],
+            "claims": []
+          }
+        },
+        {
+          "check_name": "citation_density",
+          "passed": true,
+          "issue_description": null,
+          "severity": "error",
+          "details": {
+            "sections": []
+          }
+        },
+        {
+          "check_name": "claim_consistency",
+          "passed": false,
+          "issue_description": "Claim consistency score is 0.333, below 0.5",
+          "severity": "warning",
+          "details": {
+            "score": 0.3333333333333333,
+            "claim_pairs": 3
+          }
+        }
+      ]
+    },
+    {
+      "file": "contradictory_claims_report.json",
+      "operation_id": "research-op-004",
+      "process_metrics": {
+        "start_time": "2024-03-23T14:00:00Z",
+        "end_time": "2024-03-23T14:12:00Z",
+        "total_iterations": 2,
+        "primary_queries": 1,
+        "follow_up_queries": 3,
+        "total_retrieved_chunks": 15,
+        "final_report_word_count": 180,
+        "node_transitions": 6
+      },
+      "error_count": 0,
+      "warning_count": 1,
+      "results": [
+        {
+          "check_name": "source_attribution",
+          "passed": true,
+          "issue_description": null,
+          "severity": "error",
+          "details": {
+            "unattributed_sections": []
+          }
+        },
+        {
+          "check_name": "topic_coverage",
+          "passed": true,
+          "issue_description": null,
+          "severity": "warning",
+          "details": {
+            "uncovered_topics": []
+          }
+        },
+        {
+          "check_name": "missing_citations",
+          "passed": true,
+          "issue_description": null,
+          "severity": "warning",
+          "details": {
+            "sections": [],
+            "claims": []
+          }
+        },
+        {
+          "check_name": "citation_density",
+          "passed": true,
+          "issue_description": null,
+          "severity": "error",
+          "details": {
+            "sections": []
+          }
+        },
+        {
+          "check_name": "claim_consistency",
+          "passed": false,
+          "issue_description": "Claim consistency score is 0.000, below 0.5",
+          "severity": "warning",
+          "details": {
+            "score": 0.0,
+            "claim_pairs": 6
+          }
+        }
+      ]
+    },
+    {
+      "file": "low_quality_report.json",
+      "operation_id": "research-op-003",
+      "process_metrics": {
+        "start_time": "2024-03-22T09:00:00Z",
+        "end_time": "2024-03-22T09:05:00Z",
+        "total_iterations": 1,
+        "primary_queries": 1,
+        "follow_up_queries": 0,
+        "total_retrieved_chunks": 3,
+        "final_report_word_count": 120,
+        "node_transitions": 3
+      },
+      "error_count": 2,
+      "warning_count": 3,
+      "results": [
+        {
+          "check_name": "source_attribution",
+          "passed": false,
+          "issue_description": "Sections lack a citation to a retrieved chunk: intro, findings, conclusion",
+          "severity": "error",
+          "details": {
+            "unattributed_sections": [
+              "intro",
+              "findings",
+              "conclusion"
+            ]
+          }
+        },
+        {
+          "check_name": "topic_coverage",
+          "passed": false,
+          "issue_description": "Topics are absent from retrieved chunks: 30, 90, after, agreement, agreements, allow, allows, also, both, breaches, but, cause, clauses, common, component, conclusion, confidentiality, continued, contract, convenience, critical, data, days, effective, either, ends, exit, failures, final, findings, flexibility, have, immediate, immediately, important, include, introduction, lifecycle, material, may, notice, obligations, often, overview, parties, party, payments, perform, periods, post, proper, protect, protection, provide, provides, provisions, relationship, report, return, rights, service, shorter, termination, terminations, there, these, they, throughout, typically, usually, vary, when",
+          "severity": "warning",
+          "details": {
+            "uncovered_topics": [
+              "30",
+              "90",
+              "after",
+              "agreement",
+              "agreements",
+              "allow",
+              "allows",
+              "also",
+              "both",
+              "breaches",
+              "but",
+              "cause",
+              "clauses",
+              "common",
+              "component",
+              "conclusion",
+              "confidentiality",
+              "continued",
+              "contract",
+              "convenience",
+              "critical",
+              "data",
+              "days",
+              "effective",
+              "either",
+              "ends",
+              "exit",
+              "failures",
+              "final",
+              "findings",
+              "flexibility",
+              "have",
+              "immediate",
+              "immediately",
+              "important",
+              "include",
+              "introduction",
+              "lifecycle",
+              "material",
+              "may",
+              "notice",
+              "obligations",
+              "often",
+              "overview",
+              "parties",
+              "party",
+              "payments",
+              "perform",
+              "periods",
+              "post",
+              "proper",
+              "protect",
+              "protection",
+              "provide",
+              "provides",
+              "provisions",
+              "relationship",
+              "report",
+              "return",
+              "rights",
+              "service",
+              "shorter",
+              "termination",
+              "terminations",
+              "there",
+              "these",
+              "they",
+              "throughout",
+              "typically",
+              "usually",
+              "vary",
+              "when"
+            ]
+          }
+        },
+        {
+          "check_name": "missing_citations",
+          "passed": false,
+          "issue_description": "Sections or claims lack citations/evidence",
+          "severity": "warning",
+          "details": {
+            "sections": [
+              "intro",
+              "findings",
+              "conclusion"
+            ],
+            "claims": [
+              "intro-1",
+              "intro-2",
+              "findings-1",
+              "findings-2",
+              "findings-3",
+              "findings-4",
+              "findings-5",
+              "findings-6",
+              "findings-7",
+              "findings-8",
+              "conclusion-1",
+              "conclusion-2"
+            ]
+          }
+        },
+        {
+          "check_name": "citation_density",
+          "passed": false,
+          "issue_description": "More than three consecutive paragraphs lack citations",
+          "severity": "error",
+          "details": {
+            "sections": [
+              "findings"
+            ]
+          }
+        },
+        {
+          "check_name": "claim_consistency",
+          "passed": false,
+          "issue_description": "Claim consistency score is 0.000, below 0.5",
+          "severity": "warning",
+          "details": {
+            "score": 0.0,
+            "claim_pairs": 3
+          }
+        }
+      ]
+    },
+    {
+      "file": "missing_citations_report.json",
+      "operation_id": "research-op-002",
+      "process_metrics": {
+        "start_time": "2024-03-21T11:00:00Z",
+        "end_time": "2024-03-21T11:08:00Z",
+        "total_iterations": 2,
+        "primary_queries": 1,
+        "follow_up_queries": 2,
+        "total_retrieved_chunks": 8,
+        "final_report_word_count": 150,
+        "node_transitions": 5
+      },
+      "error_count": 1,
+      "warning_count": 3,
+      "results": [
+        {
+          "check_name": "source_attribution",
+          "passed": false,
+          "issue_description": "Sections lack a citation to a retrieved chunk: intro, recommendations",
+          "severity": "error",
+          "details": {
+            "unattributed_sections": [
+              "intro",
+              "recommendations"
+            ]
+          }
+        },
+        {
+          "check_name": "topic_coverage",
+          "passed": false,
+          "issue_description": "Topics are absent from retrieved chunks: across, both, carve, clauses, clear, confidential, consistent, covers, definitions, examines, explicit, framework, implementing, including, outs, overview, recommend, recommendations, report, should, standardized, we",
+          "severity": "warning",
+          "details": {
+            "uncovered_topics": [
+              "across",
+              "both",
+              "carve",
+              "clauses",
+              "clear",
+              "confidential",
+              "consistent",
+              "covers",
+              "definitions",
+              "examines",
+              "explicit",
+              "framework",
+              "implementing",
+              "including",
+              "outs",
+              "overview",
+              "recommend",
+              "recommendations",
+              "report",
+              "should",
+              "standardized",
+              "we"
+            ]
+          }
+        },
+        {
+          "check_name": "missing_citations",
+          "passed": false,
+          "issue_description": "Sections or claims lack citations/evidence",
+          "severity": "warning",
+          "details": {
+            "sections": [
+              "intro",
+              "recommendations"
+            ],
+            "claims": [
+              "intro-1",
+              "intro-2",
+              "recommendations-1",
+              "recommendations-2"
+            ]
+          }
+        },
+        {
+          "check_name": "citation_density",
+          "passed": true,
+          "issue_description": null,
+          "severity": "error",
+          "details": {
+            "sections": []
+          }
+        },
+        {
+          "check_name": "claim_consistency",
+          "passed": false,
+          "issue_description": "Claim consistency score is 0.000, below 0.5",
+          "severity": "warning",
+          "details": {
+            "score": 0.0,
+            "claim_pairs": 3
+          }
+        }
+      ]
+    }
+  ]
+}

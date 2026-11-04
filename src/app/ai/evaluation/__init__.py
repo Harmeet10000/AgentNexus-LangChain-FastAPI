@@ -1,5 +1,10 @@
 """Deterministic retrieval evaluation primitives."""
 
+from .coverage_report import (
+    generate_coverage_audit_report,
+    generate_coverage_report_from_audit,
+    generate_coverage_summary,
+)
 from .experiment import (
     AdapterOutput,
     AggregateMetrics,
@@ -28,22 +33,45 @@ from .experiment import (
     stratum_for,
     write_experiment_report,
 )
+from .golden_set_validator import (
+    GoldenSetValidator,
+    validate_golden_set_before_commit,
+)
+from .ingestion import (
+    GoldenSetValidationError,
+    IngestionValidationError,
+    MissingProvenanceError,
+    PolicyValidationError,
+    StateMismatchError,
+    audit_ingestion_coverage,
+    validate_ingestion_provenance,
+    validate_ingestion_states,
+)
 from .metrics import ndcg_at_k, precision_at_k, recall_at_k, reciprocal_rank
 from .report import EvaluationReport, write_report
 from .runner import RetrievalEvaluation, run_retrieval_eval
 from .schema import (
     ArtifactProvenance,
+    CoverageAuditReport,
+    CoverageGap,
+    CoverageMetric,
+    GoldenEvidencePolicy,
+    GoldenIngestionState,
     GoldenItemProvenance,
     GoldenProvenanceManifest,
     GoldenQuery,
     GoldenSet,
     GoldenSetProvenanceError,
+    IngestionValidationReport,
+    IngestionValidationResult,
+    TaxonomyCandidate,
     audit_golden_manifest,
     load_golden_set,
     load_validated_golden_set,
     manifest_path_for,
     validate_golden_set,
 )
+from .taxonomy_feeder import TaxonomyCandidateFeeder
 
 __all__ = [
     "AdapterOutput",
@@ -53,30 +81,48 @@ __all__ = [
     "CaseObservation",
     "ClaimObservation",
     "Coverage",
+    "CoverageAuditReport",
+    "CoverageGap",
+    "CoverageMetric",
     "EvaluationReport",
     "EvidenceRef",
     "ExperimentAdapter",
     "ExperimentManifest",
     "ExperimentReport",
     "ExperimentVerdict",
+    "GoldenEvidencePolicy",
+    "GoldenIngestionState",
     "GoldenItemProvenance",
     "GoldenProvenanceManifest",
     "GoldenQuery",
     "GoldenSet",
     "GoldenSetProvenanceError",
+    "GoldenSetValidationError",
+    "GoldenSetValidator",
+    "IngestionValidationError",
+    "IngestionValidationReport",
+    "IngestionValidationResult",
     "JudgeSpec",
-    "PolicyComparison",
+    "MissingProvenanceError",
+    "PolicyValidationError",
     "RetrievalEvaluation",
     "RuntimeStats",
+    "StateMismatchError",
     "SyntheticSeedAdapter",
+    "TaxonomyCandidate",
+    "TaxonomyCandidateFeeder",
     "ThresholdResult",
     "ThresholdRule",
     "VariantComparison",
     "VariantConfig",
     "VariantEvaluation",
     "audit_golden_manifest",
+    "audit_ingestion_coverage",
     "compare_policies",
     "evaluate_thresholds",
+    "generate_coverage_audit_report",
+    "generate_coverage_report_from_audit",
+    "generate_coverage_summary",
     "load_golden_set",
     "load_validated_golden_set",
     "manifest_path_for",
@@ -89,6 +135,9 @@ __all__ = [
     "stratify_queries",
     "stratum_for",
     "validate_golden_set",
+    "validate_golden_set_before_commit",
+    "validate_ingestion_provenance",
+    "validate_ingestion_states",
     "write_experiment_report",
     "write_report",
 ]

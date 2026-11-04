@@ -1,0 +1,54 @@
+{
+  "operation_id": "research-op-001",
+  "initial_query": "Analyze liability limitations across all vendor contracts",
+  "report_sections": [
+    {
+      "section_id": "intro",
+      "title": "Executive Summary",
+      "content": "This analysis reviews liability limitation clauses across 15 vendor contracts in the SRC corpus. The review identifies three distinct liability cap structures and highlights jurisdictional variations.",
+      "citations": [
+        {"chunk_id": "SRC-DOC-201-chunk-03", "relevance": "context"},
+        {"chunk_id": "SRC-DOC-202-chunk-08", "relevance": "supporting"}
+      ]
+    },
+    {
+      "section_id": "findings",
+      "title": "Key Findings",
+      "content": "1. Standard Cap Structure: Most contracts (10 of 15) limit liability to 12 months of fees paid under the agreement. This is consistent with industry practice for B2B SaaS contracts.\n\n2. Enhanced Caps for High-Risk Services: Three contracts (SRC-DOC-205, SRC-DOC-207, SRC-DOC-210) include higher caps (24 months of fees) for services involving sensitive data processing.\n\n3. Uncapped Liability Categories: All contracts exclude certain obligations from liability caps, including indemnification for IP infringement, data breaches, and willful misconduct.",
+      "citations": [
+        {"chunk_id": "SRC-DOC-201-chunk-12", "relevance": "primary"},
+        {"chunk_id": "SRC-DOC-205-chunk-15", "relevance": "primary"},
+        {"chunk_id": "SRC-DOC-207-chunk-09", "relevance": "primary"},
+        {"chunk_id": "SRC-DOC-210-chunk-18", "relevance": "primary"},
+        {"chunk_id": "SRC-DOC-203-chunk-06", "relevance": "supporting"}
+      ]
+    },
+    {
+      "section_id": "recommendations",
+      "title": "Recommendations",
+      "content": "Based on the analysis, we recommend standardizing liability cap language across all vendor contracts. The 12-month standard cap provides adequate protection while remaining commercially reasonable. For high-risk services, the 24-month enhanced cap should be consistently applied.",
+      "citations": [
+        {"chunk_id": "SRC-DOC-201-chunk-12", "relevance": "supporting"},
+        {"chunk_id": "SRC-DOC-205-chunk-15", "relevance": "supporting"}
+      ]
+    }
+  ],
+  "retrieved_documents": [
+    {"document_id": "SRC-DOC-201", "chunk_count": 3},
+    {"document_id": "SRC-DOC-202", "chunk_count": 1},
+    {"document_id": "SRC-DOC-203", "chunk_count": 1},
+    {"document_id": "SRC-DOC-205", "chunk_count": 1},
+    {"document_id": "SRC-DOC-207", "chunk_count": 1},
+    {"document_id": "SRC-DOC-210", "chunk_count": 1}
+  ],
+  "process_metrics": {
+    "start_time": "2024-03-20T10:00:00Z",
+    "end_time": "2024-03-20T10:15:00Z",
+    "total_iterations": 3,
+    "primary_queries": 1,
+    "follow_up_queries": 5,
+    "total_retrieved_chunks": 20,
+    "final_report_word_count": 285,
+    "node_transitions": 8
+  }
+}

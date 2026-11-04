@@ -1,0 +1,55 @@
+{
+  "operation_id": "research-op-004",
+  "initial_query": "Analyze warranty terms across product licensing agreements",
+  "report_sections": [
+    {
+      "section_id": "intro",
+      "title": "Warranty Overview",
+      "content": "This analysis examines warranty provisions in product licensing agreements to identify patterns and variations.",
+      "citations": [
+        {"chunk_id": "SRC-DOC-501-chunk-01", "relevance": "context"}
+      ]
+    },
+    {
+      "section_id": "limited_warranties",
+      "title": "Limited Warranty Provisions",
+      "content": "All reviewed agreements include limited warranties covering product functionality for 90 days from delivery. The warranties guarantee that products will substantially conform to published specifications during this period.",
+      "citations": [
+        {"chunk_id": "SRC-DOC-501-chunk-05", "relevance": "primary"},
+        {"chunk_id": "SRC-DOC-502-chunk-08", "relevance": "primary"}
+      ]
+    },
+    {
+      "section_id": "disclaimer",
+      "title": "Warranty Disclaimers",
+      "content": "The licensing agreements disclaim all warranties, express or implied, including merchantability and fitness for a particular purpose. Products are provided 'as-is' with no representations about quality or suitability.",
+      "citations": [
+        {"chunk_id": "SRC-DOC-501-chunk-12", "relevance": "primary"},
+        {"chunk_id": "SRC-DOC-503-chunk-06", "relevance": "supporting"}
+      ]
+    },
+    {
+      "section_id": "remedies",
+      "title": "Warranty Remedies",
+      "content": "If products fail to meet warranty terms, the sole remedy is replacement or repair at the vendor's option. No refunds or monetary damages are available for warranty breaches.",
+      "citations": [
+        {"chunk_id": "SRC-DOC-502-chunk-10", "relevance": "primary"}
+      ]
+    }
+  ],
+  "retrieved_documents": [
+    {"document_id": "SRC-DOC-501", "chunk_count": 3},
+    {"document_id": "SRC-DOC-502", "chunk_count": 2},
+    {"document_id": "SRC-DOC-503", "chunk_count": 1}
+  ],
+  "process_metrics": {
+    "start_time": "2024-03-23T14:00:00Z",
+    "end_time": "2024-03-23T14:12:00Z",
+    "total_iterations": 2,
+    "primary_queries": 1,
+    "follow_up_queries": 3,
+    "total_retrieved_chunks": 15,
+    "final_report_word_count": 180,
+    "node_transitions": 6
+  }
+}

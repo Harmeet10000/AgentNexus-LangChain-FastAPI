@@ -1,0 +1,37 @@
+{
+  "operation_id": "research-op-003",
+  "initial_query": "Summarize termination rights in service agreements",
+  "report_sections": [
+    {
+      "section_id": "intro",
+      "title": "Introduction",
+      "content": "This report provides an overview of termination rights. Termination clauses are important for both parties in service agreements.",
+      "citations": []
+    },
+    {
+      "section_id": "findings",
+      "title": "Findings",
+      "content": "Service agreements typically include termination for convenience clauses. These allow either party to exit the agreement with proper notice.\n\nTermination for cause is also common. This allows immediate termination when there are material breaches or failures to perform.\n\nNotice periods vary but are usually 30 to 90 days for convenience terminations. For cause terminations may have shorter notice periods or be effective immediately.\n\nPost-termination obligations often include data return, final payments, and continued confidentiality. These provisions protect both parties after the relationship ends.",
+      "citations": []
+    },
+    {
+      "section_id": "conclusion",
+      "title": "Conclusion",
+      "content": "Termination rights are a critical component of service agreements. They provide flexibility and protection for both parties throughout the contract lifecycle.",
+      "citations": []
+    }
+  ],
+  "retrieved_documents": [
+    {"document_id": "SRC-DOC-401", "chunk_count": 0}
+  ],
+  "process_metrics": {
+    "start_time": "2024-03-22T09:00:00Z",
+    "end_time": "2024-03-22T09:05:00Z",
+    "total_iterations": 1,
+    "primary_queries": 1,
+    "follow_up_queries": 0,
+    "total_retrieved_chunks": 3,
+    "final_report_word_count": 120,
+    "node_transitions": 3
+  }
+}

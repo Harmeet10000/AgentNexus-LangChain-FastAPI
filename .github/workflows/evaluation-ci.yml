@@ -1,0 +1,250 @@
+name: Evaluation Infrastructure CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  validate-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Validate golden set provenance
+        run: |
+          uv run python -m app.ai.evaluation.validate evals/golden/legal_retrieval_v1.jsonl
+          if [ -f evals/golden/legal_retrieval_v2.manifest.json ]; then
+            uv run python -m app.ai.evaluation.validate evals/golden/legal_retrieval_v2.jsonl
+          else
+            echo "Skipping v2 validation - manifest not found"
+          fi
+
+      - name: Validate ingestion golden set provenance gate
+        run: |
+          if [ -f evals/golden/ingestion_v1.jsonl ] && [ -f evals/golden/ingestion_v1.manifest.json ]; then
+            uv run python - <<'EOF'
+          import asyncio, json, sys
+          from pathlib import Path
+          from returns.result import Failure
+          from app.ai.evaluation.ingestion import validate_ingestion_provenance
+          from app.ai.evaluation.schema import load_validated_golden_set, GoldenProvenanceManifest
+
+          async def main() -> None:
+              golden_path = Path("evals/golden/ingestion_v1.jsonl")
+              manifest_path = Path("evals/golden/ingestion_v1.manifest.json")
+
+              load_result = await load_validated_golden_set(golden_path)
+              if isinstance(load_result, Failure):
+                  print(f"ERROR: {load_result.failure().message}", file=sys.stderr)
+                  sys.exit(1)
+
+              golden_set = load_result.unwrap()
+              manifest = GoldenProvenanceManifest.model_validate(
+                  json.loads(manifest_path.read_text(encoding="utf-8"))
+              )
+
+              result = validate_ingestion_provenance(golden_set=golden_set, manifest=manifest)
+              if isinstance(result, Failure):
+                  for issue in result.failure():
+                      print(f"ERROR: {issue}", file=sys.stderr)
+                  sys.exit(1)
+
+              # Coverage threshold gate: minimum 20 rows, 5 per major ingestion case type
+              queries = golden_set.queries
+              if len(queries) < 20:
+                  print(f"ERROR: ingestion_v1 has {len(queries)} rows; minimum is 20", file=sys.stderr)
+                  sys.exit(1)
+
+              from collections import Counter
+              counts = Counter(q.case_type for q in queries)
+              ingestion_types = {"no_evidence_vs_ingestion_failure", "index_not_ready", "partial_coverage_answer"}
+              for ct in ingestion_types:
+                  if counts.get(ct, 0) < 5:
+                      print(
+                          f"ERROR: case_type '{ct}' has {counts.get(ct, 0)} rows; minimum is 5",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+
+              print(f"Provenance gate passed: {len(queries)} rows, all thresholds met.")
+
+          asyncio.run(main())
+          EOF
+          else
+            echo "ingestion_v1 golden set or manifest not found - skipping provenance gate"
+          fi
+
+  coverage-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Audit coverage of legal_retrieval_v2
+        run: |
+          uv run python - <<'EOF'
+          import asyncio
+          from pathlib import Path
+          from app.ai.evaluation.ingestion import audit_ingestion_coverage
+          from app.ai.evaluation.schema import load_validated_golden_set
+
+          async def main():
+              golden_path = Path('evals/golden/legal_retrieval_v2.jsonl')
+              manifest_path = golden_path.with_name(f'{golden_path.stem}.manifest.json')
+              
+              load_result = await load_validated_golden_set(golden_path)
+              if isinstance(load_result, Failure):
+                  print(f'Failed to load golden set: {load_result.failure().message}')
+                  exit(1)
+              
+              golden_set = load_result.unwrap()
+              
+              # Load manifest for corpus path
+              if manifest_path.is_file():
+                  import json
+                  async with aiofiles.open(manifest_path, 'r') as f:
+                      manifest_data = json.loads(await f.read())
+                  
+                  from app.ai.evaluation.schema import GoldenProvenanceManifest
+                  manifest = GoldenProvenanceManifest.model_validate(manifest_data)
+                  
+                  report = await audit_ingestion_coverage(
+                      golden_rows=golden_set.queries,
+                      corpus_manifest=manifest,
+                      minimum_per_type=5
+                  )
+                  
+                  print(f'Total rows analyzed: {report.total_rows}')
+                  print(f'Case type coverage: {report.case_type_coverage}')
+                  
+                  if report.gaps:
+                      print('\nCoverage gaps found:')
+                      for gap in report.gaps:
+                          print(f'  - {gap.case_type}: {gap.current_count}/{gap.required_minimum}')
+                  
+                  if report.recommendations:
+                      print('\nRecommendations:')
+                      for rec in report.recommendations:
+                          print(f'  - {rec}')
+              else:
+                  print('Manifest not found, skipping detailed audit')
+
+          from returns.result import Failure
+          import aiofiles
+          asyncio.run(main())
+          EOF
+
+  ingestion-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run ingestion validation
+        run: |
+          uv run python - <<'EOF'
+          import asyncio
+          from pathlib import Path
+          from app.ai.evaluation.ingestion import validate_ingestion_states
+          from app.ai.evaluation.schema import load_validated_golden_set
+
+          async def get_ingestion_state(document_id: str) -> str:
+              """Mock ingestion state provider - would call actual service in CI."""
+              # In real CI, this would query the ingestion service
+              # For now, we'll assume all documents are ready
+              return "ready"
+
+          async def main():
+              golden_path = Path('evals/golden/ingestion_v1.jsonl')
+              
+              if not golden_path.is_file():
+                  print(f'Ingestion golden set not found at {golden_path}')
+                  return
+              
+              load_result = await load_validated_golden_set(golden_path)
+              if isinstance(load_result, Failure):
+                  print(f'Failed to load golden set: {load_result.failure().message}')
+                  exit(1)
+              
+              golden_set = load_result.unwrap()
+              
+              report = await validate_ingestion_states(
+                  golden_rows=golden_set.queries,
+                  ingestion_state_provider=get_ingestion_state,
+                  policy="mechanically_verified"
+              )
+              
+              print(f'Total validation results: {report.total_rows}')
+              print(f'Passed: {report.passed_rows}')
+              print(f'Failed: {report.failed_rows}')
+              
+              if report.coverage_metrics:
+                  for policy, metrics in report.coverage_metrics.items():
+                      print(f'\nCoverage metrics ({policy}):')
+                      print(f'  Total documents: {metrics.total_documents}')
+                      print(f'  Ready: {metrics.ready_documents}')
+                      print(f'  Coverage ratio: {metrics.coverage_ratio:.2%}')
+
+          from returns.result import Failure
+          asyncio.run(main())
+          EOF
+
+  spot-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run spot checks on deep research outputs
+        run: uv run python -m app.ai.evaluation.spot_check --report-path evals/reports/spot_check.json --fixtures-dir evals/fixtures/research_outputs --max-errors 3
