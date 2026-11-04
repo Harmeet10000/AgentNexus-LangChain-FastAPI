@@ -91,9 +91,7 @@ async def test_match_iff_states_equal(
         awaiting_sme_expansion=False,
         expected_chunk_ids=[],
         expected_document_ids=[],
-        expected_ingestion_states=[
-            ExpectedIngestionState(document_id="doc-1", state=expected)
-        ],
+        expected_ingestion_states=[ExpectedIngestionState(document_id="doc-1", state=expected)],
         expected_evidence_policy="mechanically_verified",
         policy_overrides={},
         expected_claims=[],

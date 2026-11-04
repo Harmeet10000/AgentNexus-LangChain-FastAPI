@@ -70,7 +70,9 @@ def _minimal_row(case_type: str) -> GoldenQuery:
         expected_evidence_status=None,
         expected_coverage=None,
         expected_coverage_ratio_min=None,
-        retrieval_relevance="not_applicable" if case_type in _INGESTION_FAILURE_TYPES else "relevant",
+        retrieval_relevance="not_applicable"
+        if case_type in _INGESTION_FAILURE_TYPES
+        else "relevant",
         claim_entailment="not_applicable" if case_type in _INGESTION_FAILURE_TYPES else "entailed",
         ocr_profile="clean",
         pair_id=None,
