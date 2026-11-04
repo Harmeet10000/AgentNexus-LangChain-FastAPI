@@ -317,10 +317,13 @@ def _fixture_output(path: Path) -> tuple[list[ReportSection], list[RetrievedChun
         message = f"Fixture {path} must contain a JSON object"
         raise SpotCheckError(message)
 
-    raw_sections = payload.get("report_sections", [])
-    raw_documents = payload.get("retrieved_documents", [])
-    if not isinstance(raw_sections, list) or not isinstance(raw_documents, list):
-        message = f"Fixture {path} has invalid report_sections or retrieved_documents"
+    raw_sections = payload.get("report_sections")
+    raw_documents = payload.get("retrieved_documents")
+    if not isinstance(raw_sections, list) or not raw_sections:
+        message = f"Fixture {path} must declare at least one report section"
+        raise SpotCheckError(message)
+    if not isinstance(raw_documents, list) or not raw_documents:
+        message = f"Fixture {path} must declare at least one retrieved document"
         raise SpotCheckError(message)
 
     sections = [ReportSection.model_validate(section) for section in raw_sections]

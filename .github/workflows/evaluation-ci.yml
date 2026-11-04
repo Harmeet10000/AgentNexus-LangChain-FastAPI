@@ -254,4 +254,15 @@ jobs:
           uv run python -m app.ai.evaluation.spot_check
           --report-path evals/reports/spot_check.json
           --fixtures-dir evals/fixtures/research_outputs_passing
-          --max-errors 3
+          --max-errors 1
+
+      # Negative control: the deliberately degraded harness probes must trip the
+      # same gate, proving the command above can actually fail.
+      - name: Negative control on degraded fixtures
+        run: |
+          if uv run python -m app.ai.evaluation.spot_check             --report-path /tmp/spot_check_negative.json             --fixtures-dir evals/fixtures/research_outputs             --max-errors 1
+          then
+            echo "ERROR: degraded fixtures unexpectedly passed the spot-check gate" >&2
+            exit 1
+          fi
+          echo "Negative control OK: degraded fixtures correctly fail the gate."

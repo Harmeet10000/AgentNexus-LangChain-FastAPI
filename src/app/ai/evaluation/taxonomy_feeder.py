@@ -64,6 +64,14 @@ class DefaultTaxonomyCandidateFeeder:
             raise GoldenSetValidationError(message)
         case_type = cast("GoldenCaseType", case_type_name)
         no_evidence = case_type in NO_EVIDENCE_CASE_TYPES
+        # Every candidate gets its own identity: the source row's case_id would
+        # duplicate the set and break the case-type slug prefix when the
+        # recommended case type differs. Deterministic from the candidate so
+        # reruns are stable.
+        candidate_material = "\0".join([candidate.query_template, *candidate.source_ticket_ids])
+        candidate_case_id = (
+            f"{case_type}-candidate-{hashlib.sha256(candidate_material.encode()).hexdigest()[:16]}"
+        )
 
         # Source rows carry the SME-curated expectation labels. Where the candidate is
         # derived from one, those labels ride along; where they are required and missing,
@@ -94,7 +102,6 @@ class DefaultTaxonomyCandidateFeeder:
                     "forbidden_chunk_ids",
                     "expected_contract_indexes",
                     "expected_document_versions",
-                    "case_id",
                     "grader",
                     "ocr_profile",
                     "adversarial",
@@ -139,6 +146,7 @@ class DefaultTaxonomyCandidateFeeder:
 
         payload = {
             "query": candidate.query_template,
+            "case_id": candidate_case_id,
             "document_kind": source_golden_row.document_kind if source_golden_row else "contracts",
             "difficulty": source_golden_row.difficulty if source_golden_row else "medium",
             "notes": (
