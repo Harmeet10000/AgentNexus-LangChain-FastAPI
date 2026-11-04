@@ -180,7 +180,18 @@ class DefaultTaxonomyCandidateFeeder:
             message = f"cannot A/B test pair metadata field: {variable_name!r}"
             raise GoldenSetValidationError(message)
 
-        pair_id = hashlib.sha256(f"{base_row.query}\0{variable_name}".encode()).hexdigest()[:16]
+        # Hash in everything that distinguishes two experiments on the same base
+        # row: the tested variable, its treatment value, and the row's identity,
+        # so different treatments of the same query never share a pair_id.
+        pair_material = "\0".join(
+            [
+                base_row.case_id or base_row.query,
+                base_row.query,
+                variable_name,
+                str(treatment_value),
+            ]
+        )
+        pair_id = hashlib.sha256(pair_material.encode()).hexdigest()[:16]
         pair_id = f"pair-{pair_id}"
         # Pair rows are new rows and must carry their own distinct ids, each
         # with a slug prefix matching its own final case_type (case types can

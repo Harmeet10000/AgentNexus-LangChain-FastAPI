@@ -242,3 +242,14 @@ def test_ab_pair_type_change_keeps_valid_case_id_prefixes() -> None:
     assert control.case_id.startswith("direct_answer-pair-")
     assert treatment.case_type == "multi_document"
     assert treatment.case_id.startswith("multi_document-pair-")
+
+
+def test_ab_pairs_over_same_base_row_are_distinct() -> None:
+    feeder = DefaultTaxonomyCandidateFeeder()
+    source = _answerable_row().model_copy(update={"case_id": "direct_answer-multi-001"})
+
+    first = feeder.generate_pair_for_ab_test(source, "query", "variant A")
+    second = feeder.generate_pair_for_ab_test(source, "query", "variant B")
+
+    assert first[0].pair_id != second[0].pair_id
+    assert first[0].case_id != second[0].case_id
