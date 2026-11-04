@@ -156,8 +156,8 @@ def test_ab_pair_shape_is_valid_and_differs_only_by_variable() -> None:
     assert treatment.pair_role == "treatment"
     assert control.query == base.query
     assert treatment.query == "Why can't I find the indemnification clause?"
-    assert control.model_dump(exclude={"pair_role", "query"}) == treatment.model_dump(
-        exclude={"pair_role", "query"}
+    assert control.model_dump(exclude={"pair_role", "query", "case_id"}) == treatment.model_dump(
+        exclude={"pair_role", "query", "case_id"}
     )
 
 
@@ -185,3 +185,49 @@ def test_validate_before_commit_rejects_invalid_rows() -> None:
 
     with pytest.raises((GoldenSetValidationError, ValidationError)):
         feeder.validate_before_commit([invalid])
+
+
+def test_ab_pair_rows_validate_together_without_duplicate_ids() -> None:
+    """The pair must pass the set-level gate with distinct case_ids."""
+    from app.ai.evaluation.schema import (
+        AnnotatorRoles,
+        GoldenItemProvenance,
+        GoldenSet,
+        validate_golden_set,
+    )
+
+    feeder = DefaultTaxonomyCandidateFeeder()
+    source = _answerable_row().model_copy(
+        update={
+            "case_id": "direct_answer-feed-x-001",
+            "provenance": GoldenItemProvenance(
+                source_type="synthetic",
+                source_reference="unit-test fixture",
+                permission_status="synthetic_owned",
+                license_terms_status="not_required",
+                is_public=False,
+                is_synthetic=True,
+                human_review_status="pending",
+                annotators=AnnotatorRoles(
+                    engineer_relevance="unit-test",
+                    legal_sme_entailment="sme-pending",
+                ),
+                quality_tier="candidate",
+            ),
+        }
+    )
+    control, treatment = feeder.generate_pair_for_ab_test(
+        source, "query", "Where is the indemnification clause?"
+    )
+
+    assert control.case_id != treatment.case_id
+    assert control.case_id == f"{source.case_id}-control"
+    assert treatment.case_id == f"{source.case_id}-treatment"
+
+    validate_golden_set(
+        GoldenSet(
+            version="ingestion_v1",
+            provenance_schema_version="golden_provenance_v1",
+            queries=[control, treatment],
+        )
+    )

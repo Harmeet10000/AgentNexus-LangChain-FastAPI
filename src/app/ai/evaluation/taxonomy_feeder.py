@@ -182,9 +182,14 @@ class DefaultTaxonomyCandidateFeeder:
 
         pair_id = hashlib.sha256(f"{base_row.query}\0{variable_name}".encode()).hexdigest()[:16]
         pair_id = f"pair-{pair_id}"
+        # Pair rows are new rows and must carry their own distinct ids; copying
+        # the base row's id would duplicate it in the set. Both derive from the
+        # base id so the case_type prefix rule keeps holding.
+        base_id = base_row.case_id or f"{base_row.case_type}-pair-{pair_id[5:]}"
         control_payload = base_row.model_dump()
         control_payload.update(
             {
+                "case_id": f"{base_id}-control",
                 "pair_id": pair_id,
                 "pair_variable": variable_name,
                 "pair_role": "control",
@@ -193,6 +198,7 @@ class DefaultTaxonomyCandidateFeeder:
         treatment_payload = {
             **control_payload,
             variable_name: treatment_value,
+            "case_id": f"{base_id}-treatment",
             "pair_role": "treatment",
         }
         try:

@@ -257,12 +257,36 @@ jobs:
           --max-errors 1
 
       # Negative control: the deliberately degraded harness probes must trip the
-      # same gate, proving the command above can actually fail.
+      # same gate, proving the command above can actually fail. The report must
+      # exist and record at least one error -- a checker crash alone must not
+      # satisfy the control.
       - name: Negative control on degraded fixtures
         run: |
-          if uv run python -m app.ai.evaluation.spot_check             --report-path /tmp/spot_check_negative.json             --fixtures-dir evals/fixtures/research_outputs             --max-errors 1
-          then
-            echo "ERROR: degraded fixtures unexpectedly passed the spot-check gate" >&2
-            exit 1
-          fi
-          echo "Negative control OK: degraded fixtures correctly fail the gate."
+          uv run python -m app.ai.evaluation.spot_check \
+            --report-path /tmp/spot_check_negative.json \
+            --fixtures-dir evals/fixtures/research_outputs \
+            --max-errors 1 && STATUS=0 || STATUS=$?
+          python3 - <<'PYEOF'
+          import json
+          import sys
+
+          try:
+              report = json.load(open("/tmp/spot_check_negative.json"))
+          except (OSError, json.JSONDecodeError) as exc:
+              print(f"ERROR: negative control wrote no valid report: {exc}", file=sys.stderr)
+              sys.exit(1)
+
+          if int(STATUS) != 1:
+              print(f"ERROR: negative control expected exit 1, got {STATUS}", file=sys.stderr)
+              sys.exit(1)
+          if report.get("error_count", 0) < 1:
+              print(
+                  "ERROR: negative control report records no errors; the checker did not run",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print(
+              f"Negative control OK: checker ran and recorded {report['error_count']} errors "
+              f"across {report.get('total_outputs', '?')} outputs (exit {STATUS})."
+          )
+          PYEOF
