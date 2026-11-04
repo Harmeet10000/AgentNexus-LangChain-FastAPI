@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-11-04T17:21:22.357001+00:00",
+  "generated_at": "2026-11-04T19:26:12.723346+00:00",
   "total_outputs": 4,
   "error_count": 3,
-  "warning_count": 8,
+  "warning_count": 9,
   "outputs": [
     {
       "file": "complete_report.json",
@@ -31,11 +31,12 @@
         },
         {
           "check_name": "topic_coverage",
-          "passed": true,
-          "issue_description": null,
+          "passed": false,
+          "issue_description": "Topics cannot be verified because no retrieved chunk carries source text",
           "severity": "warning",
           "details": {
-            "uncovered_topics": []
+            "uncovered_topics": null,
+            "reason": "no_source_content"
           }
         },
         {
@@ -59,12 +60,12 @@
         },
         {
           "check_name": "claim_consistency",
-          "passed": false,
-          "issue_description": "Claim consistency score is 0.333, below 0.5",
+          "passed": true,
+          "issue_description": null,
           "severity": "warning",
           "details": {
-            "score": 0.3333333333333333,
-            "claim_pairs": 3
+            "score": 0.696969696969697,
+            "claim_pairs": 66
           }
         }
       ]
@@ -83,7 +84,7 @@
         "node_transitions": 6
       },
       "error_count": 0,
-      "warning_count": 1,
+      "warning_count": 2,
       "results": [
         {
           "check_name": "source_attribution",
@@ -96,11 +97,12 @@
         },
         {
           "check_name": "topic_coverage",
-          "passed": true,
-          "issue_description": null,
+          "passed": false,
+          "issue_description": "Topics cannot be verified because no retrieved chunk carries source text",
           "severity": "warning",
           "details": {
-            "uncovered_topics": []
+            "uncovered_topics": null,
+            "reason": "no_source_content"
           }
         },
         {
@@ -125,11 +127,11 @@
         {
           "check_name": "claim_consistency",
           "passed": false,
-          "issue_description": "Claim consistency score is 0.000, below 0.5",
+          "issue_description": "Claim consistency score is 0.143, below 0.5",
           "severity": "warning",
           "details": {
-            "score": 0.0,
-            "claim_pairs": 6
+            "score": 0.14285714285714285,
+            "claim_pairs": 21
           }
         }
       ]
@@ -166,83 +168,11 @@
         {
           "check_name": "topic_coverage",
           "passed": false,
-          "issue_description": "Topics are absent from retrieved chunks: 30, 90, after, agreement, agreements, allow, allows, also, both, breaches, but, cause, clauses, common, component, conclusion, confidentiality, continued, contract, convenience, critical, data, days, effective, either, ends, exit, failures, final, findings, flexibility, have, immediate, immediately, important, include, introduction, lifecycle, material, may, notice, obligations, often, overview, parties, party, payments, perform, periods, post, proper, protect, protection, provide, provides, provisions, relationship, report, return, rights, service, shorter, termination, terminations, there, these, they, throughout, typically, usually, vary, when",
+          "issue_description": "Topics cannot be verified because no retrieved chunk carries source text",
           "severity": "warning",
           "details": {
-            "uncovered_topics": [
-              "30",
-              "90",
-              "after",
-              "agreement",
-              "agreements",
-              "allow",
-              "allows",
-              "also",
-              "both",
-              "breaches",
-              "but",
-              "cause",
-              "clauses",
-              "common",
-              "component",
-              "conclusion",
-              "confidentiality",
-              "continued",
-              "contract",
-              "convenience",
-              "critical",
-              "data",
-              "days",
-              "effective",
-              "either",
-              "ends",
-              "exit",
-              "failures",
-              "final",
-              "findings",
-              "flexibility",
-              "have",
-              "immediate",
-              "immediately",
-              "important",
-              "include",
-              "introduction",
-              "lifecycle",
-              "material",
-              "may",
-              "notice",
-              "obligations",
-              "often",
-              "overview",
-              "parties",
-              "party",
-              "payments",
-              "perform",
-              "periods",
-              "post",
-              "proper",
-              "protect",
-              "protection",
-              "provide",
-              "provides",
-              "provisions",
-              "relationship",
-              "report",
-              "return",
-              "rights",
-              "service",
-              "shorter",
-              "termination",
-              "terminations",
-              "there",
-              "these",
-              "they",
-              "throughout",
-              "typically",
-              "usually",
-              "vary",
-              "when"
-            ]
+            "uncovered_topics": null,
+            "reason": "no_source_content"
           }
         },
         {
@@ -290,7 +220,7 @@
           "severity": "warning",
           "details": {
             "score": 0.0,
-            "claim_pairs": 3
+            "claim_pairs": 66
           }
         }
       ]
@@ -326,33 +256,11 @@
         {
           "check_name": "topic_coverage",
           "passed": false,
-          "issue_description": "Topics are absent from retrieved chunks: across, both, carve, clauses, clear, confidential, consistent, covers, definitions, examines, explicit, framework, implementing, including, outs, overview, recommend, recommendations, report, should, standardized, we",
+          "issue_description": "Topics cannot be verified because no retrieved chunk carries source text",
           "severity": "warning",
           "details": {
-            "uncovered_topics": [
-              "across",
-              "both",
-              "carve",
-              "clauses",
-              "clear",
-              "confidential",
-              "consistent",
-              "covers",
-              "definitions",
-              "examines",
-              "explicit",
-              "framework",
-              "implementing",
-              "including",
-              "outs",
-              "overview",
-              "recommend",
-              "recommendations",
-              "report",
-              "should",
-              "standardized",
-              "we"
-            ]
+            "uncovered_topics": null,
+            "reason": "no_source_content"
           }
         },
         {
@@ -385,11 +293,11 @@
         {
           "check_name": "claim_consistency",
           "passed": false,
-          "issue_description": "Claim consistency score is 0.000, below 0.5",
+          "issue_description": "Claim consistency score is 0.382, below 0.5",
           "severity": "warning",
           "details": {
-            "score": 0.0,
-            "claim_pairs": 3
+            "score": 0.38181818181818183,
+            "claim_pairs": 55
           }
         }
       ]

@@ -1,0 +1,8 @@
+{
+  "manifest_version": "ingestion_v1_manifest_v1",
+  "golden_set_version": "ingestion_v1",
+  "artifact": "evals/golden/ingestion_v1.jsonl",
+  "declared_query_count": 20,
+  "per_artifact": [],
+  "notes": "Minimal provenance shell for the ingestion_v1 evaluation set (evaluation-infrastructure-extension spec, Iteration 1). The set carries retrieval/ingestion expectations for the ingestion-family case types only; corpus artifacts are the same ones audited by evals/golden/legal_retrieval_v2.manifest.json. No artifact-level provenance claims of its own; not a v2 set."
+}

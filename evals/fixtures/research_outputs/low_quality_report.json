@@ -22,7 +22,10 @@
     }
   ],
   "retrieved_documents": [
-    {"document_id": "SRC-DOC-401", "chunk_count": 0}
+    {
+      "document_id": "SRC-DOC-401",
+      "chunk_count": 1
+    }
   ],
   "process_metrics": {
     "start_time": "2024-03-22T09:00:00Z",

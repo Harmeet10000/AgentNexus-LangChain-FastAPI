@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from returns.result import Failure, Success
@@ -60,14 +61,13 @@ class GoldenSetValidationError(Exception):
 
 
 def _build_coverage_metric(
-    policy: GoldenEvidencePolicy,
-    total_documents: dict[GoldenEvidencePolicy, set[str]],
-    state_counts: dict[GoldenEvidencePolicy, dict[GoldenIngestionState, int]],
+    states_by_document: dict[str, GoldenIngestionState],
 ) -> CoverageMetric:
-    """Compute a CoverageMetric from accumulated tracking dicts."""
-    policy_docs = total_documents[policy]
-    total = len(policy_docs) if policy_docs else 1
-    counts = state_counts[policy]
+    """Compute a CoverageMetric from per-document states."""
+    total = len(states_by_document) or 1
+    counts = dict.fromkeys(GoldenIngestionState, 0)
+    for state in states_by_document.values():
+        counts[state] += 1
     ready = counts[GoldenIngestionState.READY]
     return CoverageMetric(
         total_documents=total,
@@ -85,6 +85,7 @@ async def validate_ingestion_states(
     golden_rows: list[GoldenQuery],
     ingestion_state_provider: Callable[[str], Awaitable[GoldenIngestionState]],
     policy: GoldenEvidencePolicy = "mechanically_verified",
+    golden_set_version: str = "unknown",
 ) -> IngestionValidationReport:
     """Validate each row's declared ingestion states against actual state.
 
@@ -93,30 +94,23 @@ async def validate_ingestion_states(
         ingestion_state_provider: Async function that takes a document_id
             and returns the actual ingestion state for that document
         policy: Evidence policy to use for validation
+        golden_set_version: Version label recorded on the report; callers that know
+            the golden-set version should pass it so saved reports stay attributable.
 
     Returns:
         IngestionValidationReport with validation results and metrics
     """
     results: list[IngestionValidationResult] = []
-    total_documents: dict[GoldenEvidencePolicy, set[str]] = {
-        "mechanically_verified": set(),
-        "graph_indexed_only": set(),
-    }
-    state_counts: dict[GoldenEvidencePolicy, dict[GoldenIngestionState, int]] = {
-        "mechanically_verified": dict.fromkeys(GoldenIngestionState, 0),
-        "graph_indexed_only": dict.fromkeys(GoldenIngestionState, 0),
+    state_by_document: dict[GoldenEvidencePolicy, dict[str, GoldenIngestionState]] = {
+        "mechanically_verified": {},
+        "graph_indexed_only": {},
     }
 
     for row_index, row in enumerate(golden_rows, start=1):
-        if row.case_type not in {"no_evidence_vs_ingestion_failure", "index_not_ready"}:
-            continue
-        for state_info in row.expected_ingestion_states:
-            total_documents[policy].add(state_info.document_id)
         for state_info in row.expected_ingestion_states:
             actual_state = await ingestion_state_provider(state_info.document_id)
-            state_counts[policy][
-                actual_state if actual_state is not None else GoldenIngestionState.FAILED
-            ] += 1
+            observed = actual_state if actual_state is not None else GoldenIngestionState.FAILED
+            state_by_document[policy].setdefault(state_info.document_id, observed)
             results.append(
                 IngestionValidationResult(
                     row_index=row_index,
@@ -130,14 +124,20 @@ async def validate_ingestion_states(
                 )
             )
 
+    coverage_metrics: dict[GoldenEvidencePolicy, CoverageMetric] = {
+        policy: _build_coverage_metric(states)
+        for policy, states in state_by_document.items()
+        if states
+    }
+
     return IngestionValidationReport(
-        golden_set_version="ingestion_v1",
-        validation_timestamp="2024-01-01T00:00:00Z",  # Placeholder
+        golden_set_version=golden_set_version,
+        validation_timestamp=datetime.now(UTC).isoformat(),
         total_rows=len(results),
         passed_rows=sum(1 for r in results if r.match),
         failed_rows=sum(1 for r in results if not r.match),
         results=results,
-        coverage_metrics={policy: _build_coverage_metric(policy, total_documents, state_counts)},
+        coverage_metrics=coverage_metrics,
     )
 
 
@@ -255,7 +255,8 @@ async def audit_ingestion_coverage(
     Returns:
         CoverageAuditReport with coverage analysis and recommendations
     """
-    case_type_counts: dict[str, int] = {}
+    required_case_types = set(_INGESTION_QUERY_TEMPLATES)
+    case_type_counts: dict[str, int] = dict.fromkeys(required_case_types, 0)
     for row in golden_rows:
         case_type_counts[row.case_type] = case_type_counts.get(row.case_type, 0) + 1
 
@@ -277,11 +278,18 @@ async def audit_ingestion_coverage(
                 )
             )
 
+    # Rows that reference documents or assert ingestion-failure evidence statuses must
+    # declare the states those artifacts should be in. Abstain-only rows referencing
+    # nothing (pure missing-evidence cases) are expected to carry no states.
     missing_ingestion_states: list[str] = [
         row.case_id or row.query[:50]
         for row in golden_rows
         if row.case_type in {"no_evidence_vs_ingestion_failure", "index_not_ready"}
         and not row.expected_ingestion_states
+        and (
+            row.expected_document_ids
+            or row.expected_evidence_status in {"ingestion_failed", "index_not_ready"}
+        )
     ]
 
     recommendations: list[str] = []

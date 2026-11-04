@@ -14,13 +14,20 @@ evals/fixtures/
 ├── tickets/                             # Sample support tickets
 │   ├── retrieval_failures.json         # Diverse retrieval failure patterns (10 tickets)
 │   └── clustered_failures.json         # Similar failures for clustering tests (6 tickets)
-└── research_outputs/                    # Sample deep research reports
-    ├── complete_report.json            # High-quality report with citations
-    ├── missing_citations_report.json   # Report with citation gaps
-    ├── low_quality_report.json         # Shallow report without evidence
-    └── contradictory_claims_report.json # Report with contradictory claims
+├── research_outputs/                    # Sample deep research reports
+│   ├── complete_report.json            # High-quality report with citations
+│   ├── missing_citations_report.json   # Report with citation gaps
+│   ├── low_quality_report.json         # Shallow report without evidence
+│   └── contradictory_claims_report.json # Report with contradictory claims
+└── research_outputs_passing/           # Designated passing fixture for the CI gate
+    └── complete_report.json            # Copy of the high-quality report
 
 ```
+
+The four `research_outputs/` fixtures are deliberately degraded harness probes: each is
+known to produce spot-check failures and is exercised by unit tests. They are not used
+as the CI gate. The CI gate runs against `research_outputs_passing/`, which contains only
+fixtures whose spot-check error count is below the gate threshold.
 
 ## Golden Sets
 

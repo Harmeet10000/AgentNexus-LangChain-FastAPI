@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from .golden_set_validator import GoldenSetValidationError
 from .schema import (
+    COVERAGE_CASE_TYPES,
     NO_EVIDENCE_CASE_TYPES,
     AnnotatorRoles,
     GoldenCaseType,
@@ -64,46 +65,95 @@ class DefaultTaxonomyCandidateFeeder:
         case_type = cast("GoldenCaseType", case_type_name)
         no_evidence = case_type in NO_EVIDENCE_CASE_TYPES
 
-        expected_document_ids = (
-            list(source_golden_row.expected_document_ids) if source_golden_row else []
+        # Source rows carry the SME-curated expectation labels. Where the candidate is
+        # derived from one, those labels ride along; where they are required and missing,
+        # the error names the missing label instead of constructing a row that would fail
+        # the golden-set contract later and less clearly.
+        preserved = (
+            source_golden_row.model_dump(
+                include={
+                    "expected_document_ids",
+                    "expected_chunk_ids",
+                    "expected_spans",
+                    "retrieval_relevance",
+                    "claim_entailment",
+                    "jurisdiction",
+                    "expected_coverage",
+                    "expected_coverage_ratio_min",
+                    "expected_evidence_status",
+                    "expected_abstention",
+                    "expected_ingestion_states",
+                    "policy_overrides",
+                    "expected_evidence_policy",
+                    "measurement_family",
+                    "expected_claims",
+                    "expected_answer_must_include",
+                    "expected_answer_must_not_include",
+                    "stale_document_ids",
+                    "forbidden_document_ids",
+                    "forbidden_chunk_ids",
+                    "expected_contract_indexes",
+                    "expected_document_versions",
+                    "case_id",
+                    "grader",
+                    "ocr_profile",
+                    "adversarial",
+                    "adversarial_markers",
+                },
+                mode="json",
+            )
+            if source_golden_row is not None
+            else {}
         )
-        expected_chunk_ids = list(source_golden_row.expected_chunk_ids) if source_golden_row else []
-        expected_spans = list(source_golden_row.expected_spans) if source_golden_row else []
-        retrieval_relevance = (
-            source_golden_row.retrieval_relevance if source_golden_row else "relevant"
+        coverage_expectation = preserved.get("expected_coverage") or preserved.get(
+            "expected_coverage_ratio_min"
         )
-        claim_entailment = source_golden_row.claim_entailment if source_golden_row else "entailed"
 
         if no_evidence:
-            expected_document_ids = []
-            expected_chunk_ids = []
-            expected_spans = []
-            retrieval_relevance = "not_applicable"
-            claim_entailment = "not_applicable"
-        elif not expected_chunk_ids:
-            message = f"{case_type} candidates require expected_chunk_ids from a source golden row"
-            raise GoldenSetValidationError(message)
+            preserved["expected_chunk_ids"] = []
+            preserved["expected_document_ids"] = []
+            preserved["expected_spans"] = []
+            preserved["expected_claims"] = []
+            preserved["expected_answer_must_include"] = []
+            preserved["expected_answer_must_not_include"] = []
+            preserved["retrieval_relevance"] = "not_applicable"
+            preserved["claim_entailment"] = "not_applicable"
+            if coverage_expectation is None and case_type in COVERAGE_CASE_TYPES:
+                message = (
+                    f"{case_type} candidates need a coverage expectation from the source "
+                    "row (expected_coverage or expected_coverage_ratio_min)"
+                )
+                raise GoldenSetValidationError(message)
+        else:
+            if not preserved.get("expected_chunk_ids"):
+                message = (
+                    f"{case_type} candidates require expected_chunk_ids from a source golden row"
+                )
+                raise GoldenSetValidationError(message)
+            if case_type in COVERAGE_CASE_TYPES and coverage_expectation is None:
+                message = (
+                    f"{case_type} candidates need a coverage expectation from the source "
+                    "row (expected_coverage or expected_coverage_ratio_min)"
+                )
+                raise GoldenSetValidationError(message)
 
+        payload = {
+            "query": candidate.query_template,
+            "document_kind": source_golden_row.document_kind if source_golden_row else "contracts",
+            "difficulty": source_golden_row.difficulty if source_golden_row else "medium",
+            "notes": (
+                f"Generated from taxonomy candidate with "
+                f"{len(candidate.source_ticket_ids)} source tickets: "
+                f"{', '.join(candidate.source_ticket_ids)}; cluster similarity "
+                f"{candidate.cluster_similarity_score:.3f}."
+            ),
+            "awaiting_sme_expansion": False,
+            "case_type": case_type,
+            "provenance": self._build_provenance(candidate, source_golden_row),
+        }
+        payload.update(preserved)
         try:
-            return GoldenQuery(
-                query=candidate.query_template,
-                expected_chunk_ids=expected_chunk_ids,
-                expected_document_ids=expected_document_ids,
-                document_kind=source_golden_row.document_kind if source_golden_row else "contracts",
-                difficulty=source_golden_row.difficulty if source_golden_row else "medium",
-                notes=(
-                    f"Generated from taxonomy candidate with "
-                    f"{len(candidate.source_ticket_ids)} source tickets: "
-                    f"{', '.join(candidate.source_ticket_ids)}; cluster similarity "
-                    f"{candidate.cluster_similarity_score:.3f}."
-                ),
-                awaiting_sme_expansion=False,
-                case_type=case_type,
-                retrieval_relevance=retrieval_relevance,
-                claim_entailment=claim_entailment,
-                expected_spans=expected_spans,
-                provenance=self._build_provenance(candidate, source_golden_row),
-            )
+            return GoldenQuery.model_validate(payload)
         except ValidationError as exc:
             message = f"candidate produced an invalid golden row: {exc}"
             raise GoldenSetValidationError(message) from exc

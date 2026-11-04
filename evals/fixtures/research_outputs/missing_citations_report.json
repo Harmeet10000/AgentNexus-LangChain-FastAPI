@@ -13,7 +13,10 @@
       "title": "Confidentiality Terms Analysis",
       "content": "Most partnership agreements include comprehensive confidentiality provisions. These provisions typically cover business information, technical data, and customer lists. The standard duration for confidentiality obligations is 3-5 years post-termination.\n\nPermitted disclosures generally include legal requirements, court orders, and disclosures to professional advisors. Some agreements also permit disclosures to affiliated entities.\n\nEnforcement mechanisms vary significantly. While all agreements include injunctive relief provisions, only half explicitly mention liquidated damages for breaches.",
       "citations": [
-        {"chunk_id": "SRC-DOC-301-chunk-04", "relevance": "primary"}
+        {
+          "chunk_id": "SRC-DOC-301-chunk-04",
+          "relevance": "primary"
+        }
       ]
     },
     {
@@ -24,9 +27,18 @@
     }
   ],
   "retrieved_documents": [
-    {"document_id": "SRC-DOC-301", "chunk_count": 1},
-    {"document_id": "SRC-DOC-302", "chunk_count": 0},
-    {"document_id": "SRC-DOC-303", "chunk_count": 0}
+    {
+      "document_id": "SRC-DOC-301",
+      "chunk_count": 4
+    },
+    {
+      "document_id": "SRC-DOC-302",
+      "chunk_count": 1
+    },
+    {
+      "document_id": "SRC-DOC-303",
+      "chunk_count": 1
+    }
   ],
   "process_metrics": {
     "start_time": "2024-03-21T11:00:00Z",

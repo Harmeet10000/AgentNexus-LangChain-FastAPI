@@ -596,12 +596,16 @@ class TicketClusterer:
             clusters.setdefault(cluster_ids[root], []).append(ticket)
         return clusters
 
-    def compute_cluster_centroid(self, ticket_group: list[SupportTicket]) -> dict[str, object]:
+    def compute_cluster_centroid(
+        self, ticket_group: list[SupportTicket], *, cluster_id: str | None = None
+    ) -> dict[str, object]:
         """Compute summary statistics for one homogeneous cluster.
 
         ``centroid_similarity_score`` is the mean pairwise similarity inside the
         group and is ``1.0`` for a singleton. ``first_seen``/``last_seen`` are
         the original ISO ``created_at`` values with the minimum/maximum instant.
+        Callers that already know the cluster id (such as ``cluster_to_models``)
+        pass ``cluster_id`` so models keep the ids assigned by ``cluster``.
         """
         if not ticket_group:
             message = "cannot compute a centroid for an empty ticket group"
@@ -632,7 +636,10 @@ class TicketClusterer:
             )
         )
 
-        cluster_id = next(iter(self.cluster(ticket_group)))
+        # When the caller already knows the group's cluster id, keep it; otherwise
+        # derive a stable id from the group itself.
+        if cluster_id is None:
+            cluster_id = next(iter(self.cluster(ticket_group)))
         return {
             "cluster_id": cluster_id,
             "ticket_ids": [ticket["ticket_id"] for ticket in ticket_group],
@@ -646,8 +653,8 @@ class TicketClusterer:
     def cluster_to_models(self, tickets: list[SupportTicket]) -> list[TicketCluster]:
         """Return validated ``TicketCluster`` models for a ticket collection."""
         models: list[TicketCluster] = []
-        for group in self.cluster(tickets).values():
-            centroid = self.compute_cluster_centroid(group)
+        for assigned_cluster_id, group in self.cluster(tickets).items():
+            centroid = self.compute_cluster_centroid(group, cluster_id=assigned_cluster_id)
             models.append(
                 TicketCluster(
                     cluster_id=cast("str", centroid["cluster_id"]),

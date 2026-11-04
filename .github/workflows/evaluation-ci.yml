@@ -34,15 +34,28 @@ jobs:
             echo "Skipping v2 validation - manifest not found"
           fi
 
-      - name: Validate ingestion golden set provenance gate
+      - name: Validate ingestion_v1 provenance and thresholds
         run: |
-          if [ -f evals/golden/ingestion_v1.jsonl ] && [ -f evals/golden/ingestion_v1.manifest.json ]; then
-            uv run python - <<'EOF'
-          import asyncio, json, sys
+          test -f evals/golden/ingestion_v1.jsonl || {
+            echo "ERROR: evals/golden/ingestion_v1.jsonl is missing; the ingestion_v1 gate fails closed" >&2
+            exit 1
+          }
+          test -f evals/golden/ingestion_v1.manifest.json || {
+            echo "ERROR: evals/golden/ingestion_v1.jsonl has no sibling .manifest.json; the ingestion_v1 gate fails closed" >&2
+            exit 1
+          }
+          uv run python - <<'EOF'
+          import asyncio
+          import json
+          import sys
+          from collections import Counter
           from pathlib import Path
           from returns.result import Failure
           from app.ai.evaluation.ingestion import validate_ingestion_provenance
-          from app.ai.evaluation.schema import load_validated_golden_set, GoldenProvenanceManifest
+          from app.ai.evaluation.schema import (
+              GoldenProvenanceManifest,
+              load_validated_golden_set,
+          )
 
           async def main() -> None:
               golden_path = Path("evals/golden/ingestion_v1.jsonl")
@@ -58,36 +71,38 @@ jobs:
                   json.loads(manifest_path.read_text(encoding="utf-8"))
               )
 
-              result = validate_ingestion_provenance(golden_set=golden_set, manifest=manifest)
-              if isinstance(result, Failure):
-                  for issue in result.failure():
+              provenance = validate_ingestion_provenance(golden_set=golden_set, manifest=manifest)
+              if isinstance(provenance, Failure):
+                  for issue in provenance.failure():
                       print(f"ERROR: {issue}", file=sys.stderr)
                   sys.exit(1)
 
-              # Coverage threshold gate: minimum 20 rows, 5 per major ingestion case type
               queries = golden_set.queries
               if len(queries) < 20:
                   print(f"ERROR: ingestion_v1 has {len(queries)} rows; minimum is 20", file=sys.stderr)
                   sys.exit(1)
 
-              from collections import Counter
               counts = Counter(q.case_type for q in queries)
-              ingestion_types = {"no_evidence_vs_ingestion_failure", "index_not_ready", "partial_coverage_answer"}
-              for ct in ingestion_types:
-                  if counts.get(ct, 0) < 5:
+              ingestion_types = {
+                  "no_evidence_vs_ingestion_failure",
+                  "index_not_ready",
+                  "partial_coverage_answer",
+              }
+              for case_type in sorted(ingestion_types):
+                  if counts.get(case_type, 0) < 5:
                       print(
-                          f"ERROR: case_type '{ct}' has {counts.get(ct, 0)} rows; minimum is 5",
+                          f"ERROR: case_type '{case_type}' has {counts.get(case_type, 0)} rows; minimum is 5",
                           file=sys.stderr,
                       )
                       sys.exit(1)
 
-              print(f"Provenance gate passed: {len(queries)} rows, all thresholds met.")
+              print(
+                  f"Provenance gate passed: {len(queries)} rows, "
+                  f"all ingestion case-type thresholds met ({dict(counts)})."
+              )
 
           asyncio.run(main())
           EOF
-          else
-            echo "ingestion_v1 golden set or manifest not found - skipping provenance gate"
-          fi
 
   coverage-audit:
     runs-on: ubuntu-latest
@@ -107,57 +122,45 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
+      # Informational: the ingestion_v1 fail-closed gate lives in the
+      # validate-provenance job; this audit reports legal_retrieval_v2 coverage
+      # so gaps stay visible without blocking merges.
       - name: Audit coverage of legal_retrieval_v2
         run: |
           uv run python - <<'EOF'
           import asyncio
+          import sys
           from pathlib import Path
+          from returns.result import Failure
           from app.ai.evaluation.ingestion import audit_ingestion_coverage
           from app.ai.evaluation.schema import load_validated_golden_set
 
-          async def main():
-              golden_path = Path('evals/golden/legal_retrieval_v2.jsonl')
-              manifest_path = golden_path.with_name(f'{golden_path.stem}.manifest.json')
-              
+          async def main() -> None:
+              golden_path = Path("evals/golden/legal_retrieval_v2.jsonl")
+
               load_result = await load_validated_golden_set(golden_path)
               if isinstance(load_result, Failure):
-                  print(f'Failed to load golden set: {load_result.failure().message}')
-                  exit(1)
-              
-              golden_set = load_result.unwrap()
-              
-              # Load manifest for corpus path
-              if manifest_path.is_file():
-                  import json
-                  async with aiofiles.open(manifest_path, 'r') as f:
-                      manifest_data = json.loads(await f.read())
-                  
-                  from app.ai.evaluation.schema import GoldenProvenanceManifest
-                  manifest = GoldenProvenanceManifest.model_validate(manifest_data)
-                  
-                  report = await audit_ingestion_coverage(
-                      golden_rows=golden_set.queries,
-                      corpus_manifest=manifest,
-                      minimum_per_type=5
-                  )
-                  
-                  print(f'Total rows analyzed: {report.total_rows}')
-                  print(f'Case type coverage: {report.case_type_coverage}')
-                  
-                  if report.gaps:
-                      print('\nCoverage gaps found:')
-                      for gap in report.gaps:
-                          print(f'  - {gap.case_type}: {gap.current_count}/{gap.required_minimum}')
-                  
-                  if report.recommendations:
-                      print('\nRecommendations:')
-                      for rec in report.recommendations:
-                          print(f'  - {rec}')
-              else:
-                  print('Manifest not found, skipping detailed audit')
+                  print(f"ERROR: Failed to load golden set: {load_result.failure().message}", file=sys.stderr)
+                  sys.exit(1)
 
-          from returns.result import Failure
-          import aiofiles
+              report = await audit_ingestion_coverage(
+                  golden_rows=load_result.unwrap().queries,
+                  minimum_per_type=5,
+              )
+
+              print(f"Total rows analyzed: {report.total_rows}")
+              print(f"Case type coverage: {report.case_type_coverage}")
+
+              if report.gaps:
+                  print("\nCoverage gaps found:")
+                  for gap in report.gaps:
+                      print(f"  - {gap.case_type}: {gap.current_count}/{gap.required_minimum}")
+
+              if report.recommendations:
+                  print("\nRecommendations:")
+                  for recommendation in report.recommendations:
+                      print(f"  - {recommendation}")
+
           asyncio.run(main())
           EOF
 
@@ -179,52 +182,49 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run ingestion validation
+      # Fail-closed gates on the ingestion_v1 artifact. A live ingestion-state
+      # provider is intentionally out of scope for this job; CI proves the
+      # set loads cleanly and meets the declared coverage contract. State-level
+      # comparison vs a real ingestion system is wired behind the provider
+      # seam in src/app/ai/evaluation/ingestion.py, not mocked here.
+      - name: Validate ingestion_v1 golden set
         run: |
+          test -f evals/golden/ingestion_v1.jsonl || {
+            echo "ERROR: evals/golden/ingestion_v1.jsonl is missing; failing closed" >&2
+            exit 1
+          }
           uv run python - <<'EOF'
           import asyncio
+          import sys
           from pathlib import Path
-          from app.ai.evaluation.ingestion import validate_ingestion_states
+          from returns.result import Failure
+          from app.ai.evaluation.ingestion import audit_ingestion_coverage
           from app.ai.evaluation.schema import load_validated_golden_set
 
-          async def get_ingestion_state(document_id: str) -> str:
-              """Mock ingestion state provider - would call actual service in CI."""
-              # In real CI, this would query the ingestion service
-              # For now, we'll assume all documents are ready
-              return "ready"
+          async def main() -> None:
+              golden_path = Path("evals/golden/ingestion_v1.jsonl")
 
-          async def main():
-              golden_path = Path('evals/golden/ingestion_v1.jsonl')
-              
-              if not golden_path.is_file():
-                  print(f'Ingestion golden set not found at {golden_path}')
-                  return
-              
               load_result = await load_validated_golden_set(golden_path)
               if isinstance(load_result, Failure):
-                  print(f'Failed to load golden set: {load_result.failure().message}')
-                  exit(1)
-              
-              golden_set = load_result.unwrap()
-              
-              report = await validate_ingestion_states(
-                  golden_rows=golden_set.queries,
-                  ingestion_state_provider=get_ingestion_state,
-                  policy="mechanically_verified"
-              )
-              
-              print(f'Total validation results: {report.total_rows}')
-              print(f'Passed: {report.passed_rows}')
-              print(f'Failed: {report.failed_rows}')
-              
-              if report.coverage_metrics:
-                  for policy, metrics in report.coverage_metrics.items():
-                      print(f'\nCoverage metrics ({policy}):')
-                      print(f'  Total documents: {metrics.total_documents}')
-                      print(f'  Ready: {metrics.ready_documents}')
-                      print(f'  Coverage ratio: {metrics.coverage_ratio:.2%}')
+                  print(f"ERROR: failed to load golden set: {load_result.failure().message}", file=sys.stderr)
+                  sys.exit(1)
 
-          from returns.result import Failure
+              report = await audit_ingestion_coverage(
+                  golden_rows=load_result.unwrap().queries,
+                  minimum_per_type=5,
+              )
+              print(f"Total rows analyzed: {report.total_rows}")
+              print(f"Case type coverage: {report.case_type_coverage}")
+              if report.gaps:
+                  print("Coverage gaps remain:", file=sys.stderr)
+                  for gap in report.gaps:
+                      print(
+                          f"  - {gap.case_type}: {gap.current_count}/{gap.required_minimum}",
+                          file=sys.stderr,
+                      )
+                  sys.exit(1)
+              print("Ingestion golden-set gate passed: no coverage gaps.")
+
           asyncio.run(main())
           EOF
 
@@ -246,5 +246,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Run spot checks on deep research outputs
-        run: uv run python -m app.ai.evaluation.spot_check --report-path evals/reports/spot_check.json --fixtures-dir evals/fixtures/research_outputs --max-errors 3
+      # Fail-closed gate over the designated passing fixture. The four fixtures in
+      # evals/fixtures/research_outputs are intentionally degraded harness probes;
+      # they are exercised by unit tests, not by this CI gate.
+      - name: Spot-check the passing deep-research fixture
+        run: >-
+          uv run python -m app.ai.evaluation.spot_check
+          --report-path evals/reports/spot_check.json
+          --fixtures-dir evals/fixtures/research_outputs_passing
+          --max-errors 3

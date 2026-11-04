@@ -107,6 +107,19 @@ async def _run(
     golden_set = result.unwrap()
     index = OfflineCorpusIndex(args.corpus)
     cutoff = args.k
+    if thresholds is not None:
+        if thresholds.golden_set_version != golden_set.version:
+            sys.stderr.write(
+                f"threshold set mismatch: {thresholds.golden_set_version!r} recorded vs "
+                f"{golden_set.version!r} loaded ({golden_path}); refusing to gate this run\n"
+            )
+            return 2
+        if thresholds.cutoff != cutoff:
+            sys.stderr.write(
+                f"threshold cutoff mismatch: {thresholds.cutoff} recorded vs "
+                f"{cutoff} for this run (--k {cutoff}); refusing to gate this run\n"
+            )
+            return 2
 
     async def retrieve(query: GoldenQuery) -> BranchAwareRetrieval:
         branch_ranks = index.branch_ranks(query.query, cutoff, branches=tuple(branch_names))
@@ -122,6 +135,7 @@ async def _run(
         queries=golden_set.queries,
         retrieve=retrieve,
         cutoff=cutoff,
+        branch_weights=branch_weights,
     )
     report = EvaluationReport.from_evaluation(
         evaluation,

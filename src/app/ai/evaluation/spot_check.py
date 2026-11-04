@@ -211,27 +211,40 @@ async def run_spot_checks(
     ]
 
     chunk_tokens = {token for chunk in retrieved_chunks for token in _tokens(chunk.content)}
-    uncovered = sorted(
-        {
-            token
-            for section in report_sections
-            for token in _tokens(f"{section.title} {section.content}")
-            if token not in chunk_tokens
-        }
-    )
-    results.append(
-        SpotCheckResult(
-            check_name="topic_coverage",
-            passed=not uncovered,
-            issue_description=(
-                "Topics are absent from retrieved chunks: " + ", ".join(uncovered)
-                if uncovered
-                else None
-            ),
-            severity="warning",
-            details={"uncovered_topics": uncovered},
+    if retrieved_chunks and not chunk_tokens:
+        results.append(
+            SpotCheckResult(
+                check_name="topic_coverage",
+                passed=False,
+                issue_description=(
+                    "Topics cannot be verified because no retrieved chunk carries source text"
+                ),
+                severity="warning",
+                details={"uncovered_topics": None, "reason": "no_source_content"},
+            )
         )
-    )
+    else:
+        uncovered = sorted(
+            {
+                token
+                for section in report_sections
+                for token in _tokens(f"{section.title} {section.content}")
+                if token not in chunk_tokens
+            }
+        )
+        results.append(
+            SpotCheckResult(
+                check_name="topic_coverage",
+                passed=not uncovered,
+                issue_description=(
+                    "Topics are absent from retrieved chunks: " + ", ".join(uncovered)
+                    if uncovered
+                    else None
+                ),
+                severity="warning",
+                details={"uncovered_topics": uncovered},
+            )
+        )
 
     missing_sections = [section.section_id for section in report_sections if not section.citations]
     missing_claims = [
@@ -253,8 +266,6 @@ async def run_spot_checks(
 
     citation_density_issues: list[str] = []
     for section in report_sections:
-        if section.citations:
-            continue
         consecutive = 0
         for paragraph in re.split(r"\n\s*\n", section.content.strip()):
             if re.search(r"\[[^\]]+\]", paragraph):
@@ -313,40 +324,32 @@ def _fixture_output(path: Path) -> tuple[list[ReportSection], list[RetrievedChun
         raise SpotCheckError(message)
 
     sections = [ReportSection.model_validate(section) for section in raw_sections]
-    document_ids: dict[str, str] = {}
-    for document in raw_documents:
-        if isinstance(document, dict):
-            document_id = document.get("document_id")
-            if isinstance(document_id, str):
-                document_ids[document_id] = document_id
 
-    chunk_contents: dict[str, list[str]] = {}
-    claims: list[Claim] = []
-    for section in sections:
-        cited_ids = [citation.chunk_id for citation in section.citations]
-        for chunk_id in cited_ids:
-            chunk_contents.setdefault(chunk_id, []).append(section.title + " " + section.content)
-        claims.extend(
-            Claim(
-                claim_id=f"{section.section_id}-{index}",
-                text=sentence.strip(),
-                section_id=section.section_id,
-                evidence_chunk_ids=cited_ids,
+    # The report's own claims may not stand in as their own evidence: chunks come
+    # from the fixture's declared retrieval results only, and their content is left
+    # empty because the fixtures declare document-level metadata, not passage text.
+    declared_ids: set[str] = set()
+    for document in raw_documents:
+        if not isinstance(document, dict):
+            continue
+        document_id = document.get("document_id")
+        if not isinstance(document_id, str) or not document_id:
+            continue
+        chunk_count = document.get("chunk_count")
+        if isinstance(chunk_count, int) and chunk_count > 0:
+            declared_ids.update(
+                f"{document_id}-chunk-{index:02d}" for index in range(1, chunk_count + 1)
             )
-            for index, sentence in enumerate(re.split(r"(?<=[.!?])\\s+", section.content), start=1)
-            if sentence.strip()
-        )
 
     chunks = [
         RetrievedChunk(
             chunk_id=chunk_id,
-            document_id=document_ids.get(
-                chunk_id.split("-chunk-")[0], chunk_id.split("-chunk-")[0]
-            ),
-            content=" ".join(contents),
+            document_id=chunk_id.split("-chunk-")[0],
+            content="",
         )
-        for chunk_id, contents in sorted(chunk_contents.items())
+        for chunk_id in sorted(declared_ids)
     ]
+    claims = _derived_claims(sections)
     return sections, chunks, claims
 
 
@@ -368,13 +371,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_errors < 0 or (args.max_warnings is not None and args.max_warnings < 0):
         parser.error("error and warning thresholds must be non-negative")
     fixture_paths = sorted(args.fixtures_dir.glob("*.json"))
+    if not fixture_paths:
+        parser.error(
+            f"no fixtures found in {args.fixtures_dir} (expected at least one .json fixture)"
+        )
     outputs: list[dict[str, object]] = []
     for path in fixture_paths:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        sections, chunks, claims = _fixture_output(path)
+        sections, chunks, _claims = _fixture_output(path)
         checks = asyncio.run(run_spot_checks(report_sections=sections, retrieved_chunks=chunks))
-        # Recompute the consistency check against explicitly adapted claims.
-        consistency = asyncio.run(compute_claim_consistency(claims=claims, retrieved_chunks=chunks))
+        # Recompute the consistency check against the same claims the other rules use.
+        consistency = asyncio.run(
+            compute_claim_consistency(claims=_derived_claims(sections), retrieved_chunks=chunks)
+        )
         checks[-1] = checks[-1].model_copy(
             update={
                 "passed": consistency.score >= 0.5,
