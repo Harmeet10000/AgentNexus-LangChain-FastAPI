@@ -119,26 +119,22 @@ async def test_instrumented_graph_tracks_transitions_tools_and_metrics() -> None
 
     assert [transition.node_name for transition in tracker.transitions] == [
         "plan",
-        "plan",
-        "search",
         "search",
         "read",
-        "read",
-        "synthesize",
         "synthesize",
     ]
-    assert snapshot.total_iterations == 8
+    assert snapshot.total_iterations == 4
     assert sum(len(transition.tool_calls) for transition in tracker.transitions) == 2
     assert snapshot.total_retrieved_documents == 1
     assert snapshot.primary_query_count == 1
-    assert snapshot.unique_documents_per_iteration == [0, 0, 0, 1, 0, 0, 0, 0]
+    assert snapshot.unique_documents_per_iteration == [0, 1, 0, 0]
     assert snapshot.brief_to_report_coverage_ratio == pytest.approx(
         1 / snapshot.final_report_word_count
     )
     assert snapshot.follow_up_depth == 0
-    assert tracker.compute_metrics().total_duration_seconds == 7
+    assert tracker.compute_metrics().total_duration_seconds == 3
     assert snapshot.start_time == base
-    assert snapshot.end_time == base + timedelta(seconds=8)
+    assert snapshot.end_time == base + timedelta(seconds=4)
 
 
 async def test_spot_check_adapter_builds_checks_from_subgraph_state() -> None:

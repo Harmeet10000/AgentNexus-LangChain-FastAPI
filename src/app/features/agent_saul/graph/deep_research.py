@@ -220,7 +220,6 @@ def _instrument_node(node: Any, stage: str, instrumentation: DeepResearchInstrum
         input_state = dict(state)
         if stage == "plan":
             instrumentation.start(state["objective"], node_limit=8)
-        instrumentation.record_stage(stage, input_state, {})
         delta = await node(state)
         tool_calls: list[str] = []
         if stage == "search":
