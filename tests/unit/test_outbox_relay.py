@@ -259,9 +259,7 @@ async def test_dead_letter_stages_idempotent_terminal_event_and_notifies_relay()
     assert terminal_insert["id"] == terminal_event_id(terminal_payload)
     assert terminal_payload["status"] == "failed"
     assert terminal_payload["task_id"] == "source-event"
-    notify_calls = [
-        parameters for sql, parameters in session.calls if "pg_notify" in sql
-    ]
+    notify_calls = [parameters for sql, parameters in session.calls if "pg_notify" in sql]
     assert notify_calls == [{"channel": "outbox_channel", "event_id": terminal_insert["id"]}]
     assert any("dead_letter_events" in sql for sql, _ in session.calls)
     assert session.commits == 1

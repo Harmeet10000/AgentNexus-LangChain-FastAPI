@@ -1,62 +1,104 @@
 schema: spec-gated
 
-# Project context (optional)
 # Injected into every artifact instruction so the AI plans against real
-# conventions instead of generic ones.
+# conventions. Full details live in .opencode/instructions/ (source of truth:
+# ARCHITECTURE-RULES, PYTHON-TYPING-RULES, RESULT-PATTERN, EXCEPTION-RULES,
+# TOOLING-COMMANDS). This block only pins the invariants artifact authors must
+# respect and the current spine locations.
 context: |
-  langchain-fastapi-production: production-grade async FastAPI + LangChain
-  backend. Python 3.12, uv package manager, modular monolith, async-first.
+  langchain-fastapi-production: async FastAPI + LangChain modular monolith.
+  Python 3.12, uv for all tooling, async-first.
 
-  Stack: FastAPI, Pydantic v2, LangChain 1.x, LangGraph, SQLAlchemy 2 + asyncpg,
-  Beanie (MongoDB/motor), Neo4j, Redis (redis.asyncio), Celery, loguru.
+  Stack: FastAPI, Pydantic v2, LangChain/LangGraph, SQLAlchemy 2 + asyncpg,
+  Beanie (Mongo/motor), Neo4j, Redis, Celery, loguru.
 
   Conventions (authoritative: .opencode/instructions/):
-  - Layering: thin FastAPI routers, service layer, repository layer. No HTTP
-    concerns in repos. Classes only for stateful components.
-  - Dependencies use typing.Annotated (Depends/Query/Header); shared clients
-    live in lifespan and are read from connection.app.state.
-  - Async-first: all I/O through async clients (asyncpg, motor, redis.asyncio);
-    bounded fan-out via asyncio.gather; no blocking calls in async functions.
-  - Errors: per-feature typed union in src/app/features/<name>/errors.py (FeatureError flat siblings, Code StrEnum, ErrorKind 7, closed union with assert_never). Shared spine in src/app/shared/result/: ErrorKind, FeatureError, STATUS_BY_KIND, render_result. Service unwraps SubscriptionResult with isinstance(result, Failure) then log_expected_failure + http_error/render_result; never match/case on Success/Failure (ADR-002), kind/code/retryable are ClassVar.
-  - Secrets: Pydantic SecretStr; always call .get_secret_value(), never str()
-    or repr on a SecretStr.
-  - Response envelope: APIResponse from src/app/utils/response_type.py;
-    routers return http_response(...). Uniform error shape success/statusCode/
-    error/request.
-  - Typing: ruff + ty gate the merge; PEP 695 generics on Python 3.12; no
-    blanket type ignores; always use uv run for tooling.
-
-  Tooling: uv sync --extra dev, then uv run ruff format src/ tests/ and uv run ruff check src/ tests/, uv run ty check src/.
+  - Features live in src/app/features/<name>/ (api/application/domain/adapters
+    slices); thin routers, service orchestrates, repositories persist only.
+    Shared clients initialize in src/app/lifecycle/lifespan.py and are read
+    from app.state; dependencies compose via typing.Annotated Depends.
+  - All I/O async; bounded fan-out via asyncio.gather.
+  - Errors: per-feature typed union in src/app/features/<name>/errors.py
+    (Code StrEnum, flat FeatureError siblings, closed union + assert_never).
+    Spine now lives in src/app/kernel/ (errors.py: ErrorKind 7 members,
+    kind/code/retryable as ClassVar; result.py: STATUS_BY_KIND, http_response,
+    http_error, render_result). Unwrap with isinstance(result, Failure) then
+    log_expected_failure + render_result; never match/case on Success/Failure.
+  - Envelope: APIResponse from src/app/api/envelope.py; uniform
+    success/statusCode/error/request shape.
+  - Secrets: Pydantic SecretStr; .get_secret_value(), never str().
+  - Gates: uv run ruff format src/ tests/, ruff check src/ tests/, uv run
+    ty check src/ — clean before merge; ast-grep scan src/ + pytest for
+    behavior changes.
 
 # Per-artifact rules
 rules:
   proposal:
-    - Why goal in 1-2 sentences; What Changes as a specific bullet list.
-    - Capabilities section names kebab-case specs, checking openspec/specs/ for
-      existing names first. Mark BREAKING changes explicitly.
-    - Keep it 1-2 pages; no implementation detail.
+    - Name kebab-case capabilities, checking openspec/specs/ first; mark
+      BREAKING explicitly.
+    - "Declare at least one capability or set skip_specs=true in the change's
+      .openspec.yaml; never invent a requirement to satisfy validation."
+  discovery:
+    - Skip with one line for S-class or no-async-touching changes; otherwise
+      event-storm BEFORE specs for M/L.
+    - Name every event payload's stable identity up front; unresolved identity
+      goes to Hotspots, never assumptions.
+    - Every named domain event appears in a spec scenario and asyncapi channel
+      map, or is dropped with a reason.
   specs:
-    - One spec file per capability named in the proposal.
-    - Requirements use SHALL/MUST (avoid should/may); each has a scenario.
-    - Scenarios MUST use exactly 4 hashtags (####) followed by WHEN/THEN.
-    - MODIFIED requirements copy the ENTIRE existing requirement block.
+    - One spec file per proposal capability; requirements SHALL/MUST with a
+      scenario each; scenarios use exactly four hashtags (####) then
+      WHEN/THEN.
+    - MODIFIED requirements copy the ENTIRE existing block.
+    - Measurable attributes use Planguage (Scale | Meter | MUST); state
+      machines use decision tables, every row a covered test case.
+    - Behavior contract only — no internal names, framework choices, or
+      implementation steps.
+  design:
+    - Durable decisions stay in the owning change's adr.md; supersession names
+      the prior change and ADR id instead of editing an archived decision.
+    - Blast radius from the code index, not memory.
+    - Async flows decide delivery semantics, ordering, expiry/retry, payload
+      versioning, stale reads — feed contracts/asyncapi.yaml.
+    - Open Questions are deferrable unknowns only; anything that changes
+      specs/approach/tasks gets resolved with the user first.
+  contracts:
+    - AsyncAPI 3.x for this change only; discovery events trace to spec
+      scenarios; payloads carry stable identity fields; breaking changes
+      declare subscriber migration.
+    - Skip with `No async interfaces in this change.` when no async surface.
+  review:
+    - Review as a reviewer, not the author; depth matches S/M/L class.
+    - End with one VERDICT line (APPROVED / CHANGES-REQUESTED with numbered
+      must-fixes / INFO); CHANGES-REQUESTED blocks tasks.md.
+  adr:
+    - Durable ADRs live only at openspec/changes/<change>/adr.md; never create
+      or depend on a repository-level adr/ directory.
+    - Immutable after archive — supersede in a later change's adr.md by naming
+      `<prior-change>#ADR-NNN` in Supersedes.
+    - Long-term architectural commitments only; do not invent ADRs.
   tasks:
-    - Checkboxes - [ ] N.M Description - under ## N section headings.
-    - Small enough to complete in one session; ordered by dependency.
-    - Each task must be verifiable.
+    - Checkboxes - N.M Description under numbered section headings; one-session
+      size; dependency-ordered; each verifiable.
+    - Every task cites Requirement/Scenario IDs and ends with an explicit
+      verify command; async tasks cite the AsyncAPI channel/operation.
+    - When specs changed, a near-final task runs
+      "openspec validate <change> --type change --strict" and must pass.
+    - Close with a Task Dependency Graph wave list; every task ID in exactly
+      one wave.
 
-# Operation guidance - advisory advice for apply and archive work
+# Operation guidance
 operations:
   apply:
     guidance:
-      - Run uv sync --extra dev then uv run ruff format src/ tests/ and uv run ruff check src/ tests/.
-      - Run uv run ty check src/ and fix type errors before finishing.
-      - Run ast-grep scan src/ and fix any rule violations; verify each rule's fixture pair (ADR-005).
-      - Check tasks off in tasks.md as they are completed.
+      - Run the gates from context (ruff format/check, ty check) and
+        ast-grep scan src/; verify each rule's fixture pair (ADR-005).
+      - Check tasks off in tasks.md as they complete.
   archive:
     guidance:
-      - Keep the completion summary concise — state what shipped and what
-        changed.
-      - Confirm all tasks are complete before archiving.
+      - Concise completion summary — what shipped, what changed; all tasks
+        complete before archiving.
+      - Verify durable decisions are complete in the change-local adr.md before
+        archive; never move them to a repository-level adr/ directory.
 githubCopilot:
   cloudAgent: false

@@ -49,6 +49,7 @@ from app.features.documents.retrieval.graph import (
     RetrievalEngine,
     RetrievalGraphContext,
 )
+from app.features.documents.retrieval.graph.budgets import build_stage_budget_tracker
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
@@ -884,6 +885,8 @@ class DocumentQueryService:
                     redis=None if payload.bypass_cache else self.redis,
                     graphiti=self.graphiti,
                     grader=self.grader,
+                    # Per-ask stage budgets (G6 task 4.1); None when disabled.
+                    budgets=build_stage_budget_tracker(),
                 ),
             )
         except InfrastructureException as exc:

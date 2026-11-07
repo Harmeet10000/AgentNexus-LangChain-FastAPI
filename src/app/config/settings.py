@@ -462,6 +462,33 @@ class Settings(BaseSettings):
     # Disabled is a normal serving state, never a provisioning failure.
     DOCUMENTS_GRAPHITI_FUSION_ENABLED: bool = Field(default=False)
 
+    # --- Documents ingest-time contextual preambles (contextual-chunk-retrieval) ---
+    # DEFAULT OFF until a recorded baseline comparison per document class
+    # supports default-on (the spec's measured-adoption requirement). When
+    # disabled, ingested chunks are explicitly marked context-free in
+    # metadata rather than silently carrying context-less preambles.
+    DOCUMENTS_CONTEXTUAL_PREAMBLE_ENABLED: bool = Field(default=False)
+    # Per-stage budgets for the retrieval loop (agentic-retrieval-loop G6).
+    # Enabled by default with generous, behaviour-preserving defaults; the
+    # maps override the module defaults per stage (latency in ms, billable
+    # calls per ask). Exhaustion produces the typed degraded outcome naming
+    # the stage — never an unbounded run.
+    DOCUMENTS_STAGE_BUDGETS_ENABLED: bool = Field(default=True)
+    DOCUMENTS_STAGE_BUDGET_LATENCY_MS: dict[str, int] = Field(default_factory=dict)
+    DOCUMENTS_STAGE_BUDGET_MAX_CALLS: dict[str, int] = Field(default_factory=dict)
+    # Standing degradation alert (task 4.2): fired when budget degradations
+    # persist across this many events inside the window — deliberately earlier
+    # and distinct from the harden change's pilot-kill criteria (9.8), which
+    # consume this alert as an input to a separate, later decision.
+    DOCUMENTS_STAGE_BUDGET_ALERT_THRESHOLD: int = Field(default=5, ge=1)
+    DOCUMENTS_STAGE_BUDGET_ALERT_WINDOW_SECONDS: int = Field(default=300, ge=1)
+    # Section-level context hydration for generation (small-to-big, G5):
+    # DEFAULT OFF — adopted only when the measurement baseline attributes
+    # recall loss to context starvation. Citations stay clause-precise by
+    # construction (they resolve from hydrated chunk rows, never from the
+    # hydrated section text).
+    DOCUMENTS_SECTION_HYDRATION_ENABLED: bool = Field(default=False)
+
     # --- Redis Cache for Crawler ---
     REDIS_CRAWL_CACHE_TTL: int = Field(default=3600)  # 1 hour
 

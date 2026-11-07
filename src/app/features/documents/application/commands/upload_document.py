@@ -92,6 +92,7 @@ from app.features.documents.ingestion.chunking.classification import (
     establish_contract_boundaries,
     segment_chunks,
 )
+from app.features.documents.ingestion.chunking.context_summary import apply_document_context
 from app.features.documents.ingestion.chunking.fidelity import (
     BoundaryFidelityInputs,
     build_fidelity_metrics,
@@ -809,6 +810,16 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
     # Fidelity is measured where the information exists: after chunk annotation
     # (source spans) and before embedding (so degradation warnings land on the
     # persisted chunk warnings).  Threshold breaches degrade the terminal state.
+    # Context summaries (G2) land in the same window: after segmentation and
+    # enrichment finalized the preambles, before embedding — so the context
+    # rides both the embedding input and the generated search text. Disabled
+    # or failed runs mark the chunks explicitly context-free.
+    prepared_chunks, context_warnings = await apply_document_context(
+        chunks=prepared_chunks,
+        parsed=parsed,
+        classified=classified,
+        llm=runtime.llm,
+    )
     fidelity_metrics = build_fidelity_metrics(
         parsed=parsed,
         boundaries=[
@@ -832,6 +843,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
             + segmentation_warnings
             + classified.warnings
             + legal.warnings
+            + context_warnings
             + fidelity_warnings
         ),
         extraction_outcome=extraction_outcome,

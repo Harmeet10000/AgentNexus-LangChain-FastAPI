@@ -40,9 +40,7 @@ def test_contract_and_version_changes_never_share_a_group() -> None:
 
 
 def test_tenant_and_document_isolation_are_encoded() -> None:
-    first = build_graphiti_group_id(
-        tenant_id="tenant-a", document_id="doc-a", document_version=1
-    )
+    first = build_graphiti_group_id(tenant_id="tenant-a", document_id="doc-a", document_version=1)
     different_tenant = build_graphiti_group_id(
         tenant_id="tenant-b", document_id="doc-a", document_version=1
     )

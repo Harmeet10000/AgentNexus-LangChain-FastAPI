@@ -90,8 +90,15 @@ async def test_mongo_failure_is_retryable_without_rollback(monkeypatch: pytest.M
         message = "mongo unavailable"
         raise PyMongoError(message)
 
-    monkeypatch.setattr("app.features.auth.adapters.persistence.mongodb.account_repository.User.email", "email", raising=False)
-    monkeypatch.setattr("app.features.auth.adapters.persistence.mongodb.account_repository.User.find_one", fail_find_one)
+    monkeypatch.setattr(
+        "app.features.auth.adapters.persistence.mongodb.account_repository.User.email",
+        "email",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.features.auth.adapters.persistence.mongodb.account_repository.User.find_one",
+        fail_find_one,
+    )
 
     result = await UserRepository.find_by_email("user@example.com")
 

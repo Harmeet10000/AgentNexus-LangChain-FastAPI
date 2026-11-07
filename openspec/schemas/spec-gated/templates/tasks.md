@@ -1,12 +1,25 @@
-> Change class: **S** (1-3 tasks) · **M** (grouped sections) · **L** (grouped sections, each task verifiable).
-> Never start with tasks until review.md has a `VERDICT:` that is not `CHANGES-REQUESTED`.
+# Tasks: <change>
 
-## 1. <!-- Task Group Name -->
+<!-- Read review.md first: VERDICT CHANGES-REQUESTED → fix artifacts before writing tasks. Check design.md Open Questions: anything that changes what gets built gets resolved with the user FIRST. Checkbox format is parsed by apply - only `- [ ] X.Y ...` tasks track. -->
 
-- [ ] 1.1 <!-- Task description - state verification: what command or check proves it's done? -->
-- [ ] 1.2 <!-- Task description -->
+## 1. <Section>
 
-## 2. <!-- Task Group Name -->
+- [ ] 1.1 <Task>
+      Implements: <Requirement/Scenario> · Channel: <asyncapi operation, if async>
+      verify: <command> — <expected outcome>
+- [ ] 1.2 <Task>
+      verify: <command> — <expected outcome>
 
-- [ ] 2.1 <!-- Task description -->
-- [ ] 2.2 <!-- Task description -->
+## N. Acceptance Gate
+
+- [ ] N.1 Validate the change's spec deltas strictly
+      verify: openspec validate <change> --type change --strict — all deltas pass, exit 0
+
+<!-- Rules: small enough for one session; ordered by dependency. Every task cites Requirement/Scenario IDs and ends with an explicit verify line. Async tasks ALSO cite the channel/operation from contracts/asyncapi.yaml. A task without scenario citation or verify is not ready for apply. The validate --strict task is ALWAYS present when specs changed. -->
+
+## Task Dependency Graph
+
+<!-- Waves: same wave = no dependencies between them, safe to parallelize. Waves run strictly in order. Every task ID appears in exactly one wave. -->
+
+- **Wave 1:** 1.1, 1.2
+- **Wave 2:** 2.1, 2.2

@@ -44,3 +44,17 @@ None — pure planning. Each item's implementation task names its trigger and la
 ## Open Questions
 
 None. (Whether G2's implementation deserves its own L-class change is decided at trigger time, per Decision 1.)
+
+## Implementation Addendum (2026-11-08 — G4, G2, G6, G5 as fired)
+
+### G4 — the branch was a registration, the weight a measurement
+`retrieval-measurement-gate` delivered tasks 3.1's substance (registration at `fused_branches()`, flag, `RRF_WEIGHT_GRAPHITI = 0.1` from the recorded sweep). What the gate did not write were two of the contract's named tests, closed here: enabled-but-empty fuses identically to three-branch behaviour with the branch recorded participating-but-empty, and the weight constant is pinned to the `measured_weight` field of the measurements report — a changed weight fails the suite until the report is regenerated.
+
+### G2 — amortization is structural, adoption is two-sided
+The context summary is one structured call per document (not per chunk) whose output prepends to the chunk preamble — the preamble already rides the embedding input and the generated `search_text` column, so the integration is real by construction. The honest split the offline harness forces: the **retrieval effect** is measurable now (recorded fixture overlay: `evals/reports/contextual_preamble_legal_retrieval_v2_wave4.comparison.json` — contracts gain, other classes regress), but **generation quality** is not, so the default stays off and task 2.2 stays open until one live run completes the decision.
+
+### G6 — budgets are honest by default and generous by default
+Enforcement is on (`DOCUMENTS_STAGE_BUDGETS_ENABLED`) with call/latency defaults far above any healthy ask (the grade loop caps iterations at two), so enabling budgets changes nothing until something is actually wrong — which is the point: exhaustion then degrades the ask with a typed warning naming stage and budget instead of running unbounded. The standing alert is a separate, earlier signal (`retrieval_budget_degradation_alert`) than the harden change's 9.8 kill criteria; the kill evaluation consumes it, it does not perform it.
+
+### G5 — the attribution is recorded, the effect is not yet
+The offline attribution (46/59 missed chunks below-cut-retrievable) clears the necessary condition for hydration — the text signal reaches the missed chunks — but cannot demonstrate the hydration effect itself, because hydration acts at generation, which the deterministic harness does not run. The implementation landed flag-off with citation precision pinned by test; the recorded-effect half of task 4.3 awaits the same live run G2 needs.

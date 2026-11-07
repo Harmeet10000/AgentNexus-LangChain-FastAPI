@@ -268,14 +268,18 @@ class _UnknownThenFoundProvider(InMemoryBillingProvider):
     def __init__(self) -> None:
         super().__init__()
         self.mutation_attempts = 0
-        self.receipt = ProviderReceipt(provider_refund_id="rfnd-recovered", payment_id="pay-1", amount=500)
+        self.receipt = ProviderReceipt(
+            provider_refund_id="rfnd-recovered", payment_id="pay-1", amount=500
+        )
 
     async def execute(self, operation: Any):  # type: ignore[no-untyped-def]
         if operation.kind is ProviderOperationKind.CREATE_REFUND:
             self.mutation_attempts += 1
             if self.mutation_attempts == 1:
                 return Failure(
-                    ProviderOutcomeUnknownError(operation=operation.kind, correlation_id=operation.correlation_id)
+                    ProviderOutcomeUnknownError(
+                        operation=operation.kind, correlation_id=operation.correlation_id
+                    )
                 )
         if operation.kind is ProviderOperationKind.FIND_REFUND_BY_CORRELATION:
             return Success(

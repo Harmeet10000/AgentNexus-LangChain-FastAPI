@@ -87,9 +87,7 @@ def test_otlp_reader_receives_exporter_as_named_argument(monkeypatch) -> None:
             captured["readers"] = metric_readers
 
     monkeypatch.setattr(metrics_module, "OTLPMetricExporter", FakeExporter)
-    monkeypatch.setattr(
-        metrics_module, "PeriodicExportingMetricReader", FakePeriodicReader
-    )
+    monkeypatch.setattr(metrics_module, "PeriodicExportingMetricReader", FakePeriodicReader)
     monkeypatch.setattr(metrics_module, "PrometheusMetricReader", FakePrometheusReader)
     monkeypatch.setattr(metrics_module, "_otel_prometheus_reader", None)
     monkeypatch.setattr(metrics_module, "MeterProvider", FakeMeterProvider)

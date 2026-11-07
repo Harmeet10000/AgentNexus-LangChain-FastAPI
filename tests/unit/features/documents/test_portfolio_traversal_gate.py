@@ -58,14 +58,19 @@ def _match(index: int) -> TraversalMatch:
         to_party="GlobalTech Ltd",
         relationship="obliges",
         document_id="doc-a",
-        evidence_handle=f"ev-{index}",
+        evidence_locator=f"portfolio:doc-a:C-{index:03d}:edge-{index}",
     )
 
 
 class _StubEdgeService:
-    """Test double for the read-only edge fetch the probe reuses."""
+    """Test double for the read-only edge fetch the probe reuses.
 
-    def __init__(self, edges: tuple[LegalEdgeRecord, ...]) -> None:
+    Mirrors the real bound read's strict contract: a seeded exception only
+    surfaces when the caller asks for strict mode (the binding-time probe);
+    leniently the read degrades to an empty result.
+    """
+
+    def __init__(self, edges: tuple[LegalEdgeRecord, ...] | Exception) -> None:
         self.edges = edges
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -79,6 +84,7 @@ class _StubEdgeService:
         document_versions: Sequence[tuple[str, int, str | None]] = (),
         document_contracts: Sequence[tuple[str, int, Sequence[int | None], bool]] = (),
         num_results: int = 32,
+        strict: bool = False,
     ) -> tuple[LegalEdgeRecord, ...]:
         self.calls.append(
             (
@@ -87,9 +93,14 @@ class _StubEdgeService:
                     "allowed_doc_ids": allowed_doc_ids,
                     "tenant_id": tenant_id,
                     "num_results": num_results,
+                    "strict": strict,
                 },
             )
         )
+        if isinstance(self.edges, Exception):
+            if strict:
+                raise self.edges
+            return ()
         return self.edges
 
 
@@ -119,6 +130,38 @@ async def test_probe_reports_no_edges_when_read_comes_back_empty() -> None:
     assert probe.verdict is RelationshipEdgeVerdict.NO_EDGES
     assert probe.edges_observed == 0
     assert probe.documents_probed == 1
+
+
+async def test_lenient_probe_reports_a_degraded_backend_read_as_no_edges() -> None:
+    """The runtime probe's default: a swallowed backend read refuses (closed gate)."""
+    service = _StubEdgeService(RuntimeError("neo4j is unreachable"))
+    probe = await relationship_edges_available(
+        service,  # type: ignore[arg-type]
+        allowed_doc_ids=("doc-a",),
+    )
+    assert probe.verdict is RelationshipEdgeVerdict.NO_EDGES
+
+
+async def test_strict_probe_reraises_a_backend_failure_instead_of_no_edges() -> None:
+    """The binding-time probe must never mistake a failed read for a verdict."""
+    service = _StubEdgeService(RuntimeError("neo4j is unreachable"))
+    with pytest.raises(RuntimeError, match="neo4j is unreachable"):
+        await relationship_edges_available(
+            service,  # type: ignore[arg-type]
+            allowed_doc_ids=("doc-a",),
+            strict=True,
+        )
+
+
+async def test_strict_probe_still_reports_a_genuine_empty_corpus_as_no_edges() -> None:
+    """Strict mode changes only failure handling, not a completed empty read."""
+    service = _StubEdgeService(())
+    probe = await relationship_edges_available(
+        service,  # type: ignore[arg-type]
+        allowed_doc_ids=("doc-a",),
+        strict=True,
+    )
+    assert probe.verdict is RelationshipEdgeVerdict.NO_EDGES
 
 
 async def test_probe_refuses_to_probe_an_empty_scope() -> None:

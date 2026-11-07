@@ -56,9 +56,7 @@ def test_deterministic_failures_are_not_transient() -> None:
     assert is_transient(ValueError(_OUR_BUG)) is False
     response = httpx.Response(418)
     request = httpx.Request("GET", "https://example.invalid")
-    assert (
-        is_transient(httpx.HTTPStatusError("418", request=request, response=response)) is False
-    )
+    assert is_transient(httpx.HTTPStatusError("418", request=request, response=response)) is False
 
 
 def test_feature_error_retryable_flag_is_honored() -> None:

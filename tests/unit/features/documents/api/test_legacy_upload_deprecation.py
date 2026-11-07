@@ -110,6 +110,35 @@ async def test_legacy_upload_advertises_successor_headers(
     )
 
 
+async def test_legacy_upload_reports_a_typed_failure_when_bytes_cannot_be_placed() -> None:
+    """The compatibility branch no longer reports success over an empty ingestion.
+
+    The route builds ``IngestionService`` without an object store, so the legacy
+    state's ``raw_bytes`` cannot be routed by reference. The truthful outcome is
+    a typed validation failure naming the key — and the deprecation headers stay
+    exactly where they were.
+    """
+    upload = UploadFile(
+        file=BytesIO(b"clause text"),
+        filename="contract.txt",
+        headers=Headers({"content-type": "text/plain"}),
+    )
+    response = Response()
+
+    result = await ingestion_router_module.upload_document(
+        upload,
+        object(),
+        "user-1",
+        response,
+    )
+
+    assert result.success is False
+    assert response.status_code == 422
+    assert response.headers["deprecation"] == "true"
+    assert response.headers["sunset"] == get_settings().API_SUNSET_DATE
+    assert response.headers["link"].startswith("</documents/upload>")
+
+
 async def test_legacy_upload_keeps_deprecation_headers_on_validation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

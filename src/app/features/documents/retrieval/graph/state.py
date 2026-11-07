@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # get_type_hints, so ContextSection must be present in this module's
 # namespace — a TYPE_CHECKING-only import raises NameError at graph build.
 from app.features.documents.retrieval.context_assembly import ContextSection  # noqa: TC001
+from app.features.documents.retrieval.graph.budgets import StageBudgetTracker  # noqa: TC001
 
 # Same runtime-import discipline: RetrievalGraphContext is a LangGraph context
 # schema, so its annotations resolve too and CountTokens must be present.
@@ -183,6 +184,9 @@ class RetrievalGraphContext:
     grader: Any | None = None
     post_process_max_tokens: int | None = None
     count_tokens: CountTokens | None = None
+    # Per-ask stage budgets (G6 task 4.1); None keeps every node's
+    # behaviour-preserving default (no enforcement on direct node calls).
+    budgets: StageBudgetTracker | None = None
     # Reserved for collaborators that must not become compile-time captures.
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -263,3 +267,6 @@ class RetrievalState(MessagesState, total=False):
     answer_cache_key: str
     # Per-stage spend attribution (task 1.6); appended across nodes.
     stage_usage: Annotated[list[StageUsage], operator.add]
+    # Typed budget degradations (G6 tasks 4.1/4.2); appended across nodes and
+    # merged into the finalised ask envelope's quality warnings.
+    stage_warnings: Annotated[list[StageWarning], operator.add]

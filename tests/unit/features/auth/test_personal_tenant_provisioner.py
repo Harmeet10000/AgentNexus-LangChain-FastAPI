@@ -185,12 +185,8 @@ async def test_concurrent_provisioning_creates_exactly_one_tenant_and_membership
     provisioner = PersonalTenantProvisioner(sql.factory, accounts)
 
     results = await asyncio.gather(
-        provisioner.provision(
-            "user-1", display_name="User One", legal_roles=(LegalRole.REVIEWER,)
-        ),
-        provisioner.provision(
-            "user-1", display_name="User One", legal_roles=(LegalRole.ANALYST,)
-        ),
+        provisioner.provision("user-1", display_name="User One", legal_roles=(LegalRole.REVIEWER,)),
+        provisioner.provision("user-1", display_name="User One", legal_roles=(LegalRole.ANALYST,)),
     )
 
     assert all(isinstance(result, Success) for result in results)
@@ -198,9 +194,7 @@ async def test_concurrent_provisioning_creates_exactly_one_tenant_and_membership
     assert len(sql.memberships) == 1
     membership = sql.memberships[personal_tenant_id("user-1"), "user-1"]
     assert membership.role_revision == 0
-    tenant_ids = {
-        result.unwrap().tenant_id for result in results if isinstance(result, Success)
-    }
+    tenant_ids = {result.unwrap().tenant_id for result in results if isinstance(result, Success)}
     assert tenant_ids == {personal_tenant_id("user-1")}
 
 
@@ -214,9 +208,7 @@ async def test_has_membership_reflects_sql_and_maps_outage_to_infra_error() -> N
     assert isinstance(before, Success)
     assert before.unwrap() is False
 
-    await provisioner.provision(
-        "user-1", display_name="User One", legal_roles=(LegalRole.ANALYST,)
-    )
+    await provisioner.provision("user-1", display_name="User One", legal_roles=(LegalRole.ANALYST,))
     after = await provisioner.has_membership("user-1")
     assert isinstance(after, Success)
     assert after.unwrap() is True

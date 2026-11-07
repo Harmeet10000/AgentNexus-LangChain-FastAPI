@@ -149,9 +149,7 @@ def provisioning_sql() -> FakeTenantSQLStore:
 @pytest.fixture
 def auth_service(account_store, refresh_token_repo, provisioning_sql) -> AuthService:
     provisioner = PersonalTenantProvisioner(provisioning_sql.factory, account_store)
-    return AuthService(
-        account_store, refresh_token_repo, provisioner=provisioner
-    )
+    return AuthService(account_store, refresh_token_repo, provisioner=provisioner)
 
 
 # ─── Test Classes ───────────────────────────────────────────────────────────────
@@ -203,9 +201,7 @@ class TestAuthLogin:
 
     async def test_login_valid_credentials(self, auth_service: AuthService):
         # Create a user first
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
 
         result = await auth_service.login(
             LoginRequest(email="test@example.com", password="ValidPass1")
@@ -219,9 +215,7 @@ class TestAuthLogin:
 
     async def test_login_wrong_password_raises_unauthorized(self, auth_service: AuthService):
         # Create a user first
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
 
         result = await auth_service.login(
             LoginRequest(email="test@example.com", password="WrongPass1")
@@ -260,9 +254,7 @@ class TestAuthRefresh:
 
     async def test_refresh_valid_token(self, auth_service: AuthService, redis: FakeRedis):
         # Register and login to get a valid session
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
         login_result = await auth_service.login(
             LoginRequest(email="test@example.com", password="ValidPass1")
         )
@@ -301,9 +293,7 @@ class TestAuthLogout:
 
     async def test_logout_revokes_token(self, auth_service: AuthService, redis: FakeRedis):
         # Register and login
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
         login_result = await auth_service.login(
             LoginRequest(email="test@example.com", password="ValidPass1")
         )
@@ -323,9 +313,7 @@ class TestAuthSessions:
 
     async def test_list_sessions(self, auth_service: AuthService, redis: FakeRedis):
         # Register and login to create a session
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
         login_result = await auth_service.login(
             LoginRequest(email="test@example.com", password="ValidPass1")
         )
@@ -341,9 +329,7 @@ class TestAuthSessions:
         assert len(sessions) >= 1
 
     async def test_revoke_session(self, auth_service: AuthService, redis: FakeRedis):
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
         login_result = await auth_service.login(
             LoginRequest(email="test@example.com", password="ValidPass1")
         )
@@ -361,9 +347,7 @@ class TestAuthSessions:
         self, auth_service: AuthService, redis: FakeRedis
     ):
         # Create two sessions
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
         login1 = await auth_service.login(
             LoginRequest(email="test@example.com", password="ValidPass1")
         )
@@ -393,9 +377,7 @@ class TestAuthPasswordReset:
     """Password reset tests."""
 
     async def test_forgot_password_generates_token(self, auth_service: AuthService):
-        await create_account_in_store(
-            auth_service, email="test@example.com", password="ValidPass1"
-        )
+        await create_account_in_store(auth_service, email="test@example.com", password="ValidPass1")
 
         await auth_service.forgot_password("test@example.com")
 

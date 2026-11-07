@@ -216,7 +216,9 @@ async def test_resend_failure_is_visible_and_retry_stages_fresh_current_intent(
     payloads: list[dict[str, object]] = []
     attempts = 0
 
-    monkeypatch.setattr("app.features.auth.application.service.generate_token", lambda: next(tokens))
+    monkeypatch.setattr(
+        "app.features.auth.application.service.generate_token", lambda: next(tokens)
+    )
 
     async def stage(**kwargs: object) -> str:
         nonlocal attempts

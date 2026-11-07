@@ -486,7 +486,8 @@ Your first line says inline the functions into connections/graphiti.py; the seco
 284. add a skill/credentials for agent to test the app and also check how exactly this is being done either programatically or through script Personal tenants are derived from the Mongo account id (`personal:<user_id>`).
 PostgreSQL owns the tenant, membership, legal roles, role revision, and
 `self_review_allowed`; Mongo fields are mirrors used for account hydration.
-
+285. It conflicts with your own rule. document_text: str | None in state means full text can reach checkpoints, which contradicts “never store chunk text in state”. If ClauseSegment.text uses exclude=True, it may be silently dropped on checkpoint round trip, so after resume the text is None and a node might proceed with nothing. Write a test that checkpoints, resumes and asserts text is rehydrated from Redis.
+operator.add accumulators aren’t idempotent. Retries, replays and re-runs of a Send fan-out append duplicates, there’s no way to reset them, and ordering across parallel branches shouldn’t be relied on. Use keyed reducers that merge by ID instead.
 ```
 
 10:00 AM Beijing Time = 07:30 AM IST
@@ -674,6 +675,8 @@ You can replay any decision.
 1. The Graphiti entity deduplication trap nobody documents: When you write "Acme Corp INDEMNIFIES GlobalTech Ltd" and later "Acme Corporation shall indemnify GlobalTech", Graphiti's LLM-powered entity extraction creates TWO separate entity nodes — Acme Corp and Acme Corporation — unless you pre-normalise entity names before writing. The deduplication only works reliably when entity names are lexically identical. The fix: run a lightweight entity canonicalisation pass in your entity_extraction node — map party names to canonical IDs (party_id: "acme_corp") and write those to Graphiti, not the raw text. Your obligation chain queries will otherwise silently miss half the edges.
 2. Idempotency key collision is a business logic bug, not a tech bug: If two users submit the same clause text from different documents, hash(step_id + input + user_id) produces different keys because user_id differs. That's correct. But if the same user submits two different documents with identical clause text (common in NDAs), the input_data dict differs only in clause_id — so they get different keys. That's also correct. The trap is if you ever hash the clause TEXT as the input — then you've accidentally made your system treat legally distinct clauses as identical because they share boilerplate. Always hash structural IDs (clause_id, doc_id), never content.
 3. cognify() is a full graph rebuild, not an append: Cognee's cognify() call processes the ENTIRE dataset, not just the newly added documents. If you call it per-document in persist_memory_node, you'll see quadratic runtime growth as the user's legal_reports dataset grows. The production pattern: batch cognee.add() calls in persist_memory_node, but defer cognify() to a nightly Celery beat task. Your search_episodic_memory() will return slightly stale results (yesterday's graph) but avoid blocking the live pipeline. The Cognee team calls this "async cognification" and it's the recommended pattern at scale — it's just not in their quickstart docs.
+
+14. Graphiti Lexical Drift: Graphiti extracts semantic nodes, but lexical drift ("Acme Corp" vs "Acme Corporation") creates duplicate graph nodes and broken relational loops. Never write raw LLM extractions directly. Always run a normalization/canonicalization pass in the extraction node to resolve entities to unique keys (acme_corp) before writing.
 
 # Context Engineering
 

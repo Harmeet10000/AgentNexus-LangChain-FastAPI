@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-_HANDOFF_ROLES: Final = ("orchestrator", "risk", "compliance")
+_HANDOFF_ROLES: Final = ("orchestrator", "risk", "compliance", "deep_research")
 
 
 class TransferPayload(BaseModel):

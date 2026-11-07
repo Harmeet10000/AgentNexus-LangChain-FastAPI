@@ -1,43 +1,32 @@
-> Change class (pick one): **S** single-file fix / config / bump / docs · **M** feature in one module · **L** cross-cutting (multi-module, migration, security, public API)
+# Change: <title>
+
+**Class:** S | M | L   <!-- S: single-file fix/config/docs; M: one module/subsystem; L: cross-cutting (multi-module, data migration, security boundary, public API, new external dependency) -->
 
 ## Why
 
-<!-- Explain the motivation for this change. What problem does this solve? Why now?
-     S: 1-2 sentences. M/L: state the problem and the opportunity. -->
+<1-2 sentences: the problem or opportunity, and why now.>
 
 ## What Changes
 
-<!-- Describe what will change. Be specific about new capabilities, modifications, or removals.
-     Mark breaking changes with **BREAKING**. S: a short bullet list. -->
-
-## Scope / Non-Goals
-
-<!-- S: optional, one line if anything is deliberately excluded.
-     M/L: state explicitly what is OUT of scope so reviewers know the boundary. -->
+- <Specific change; mark breaking with **BREAKING**>
 
 ## Capabilities
 
+<!-- Contract with the specs phase: research openspec/specs/ first. Every capability named here gets a delta spec file. -->
+
 ### New Capabilities
-<!-- Capabilities being introduced. Use kebab-case for path segments you introduce
-     (e.g., user-auth or identity/user-auth) that follow the project's existing
-     spec organization. Each creates specs/<capability-path>/spec.md.
-     S with no behavior change: leave empty and set skip_specs: true in .openspec.yaml. -->
-- `<capability-path>`: <brief description of what this capability covers>
+
+- `kebab-path-name` — <one line>
 
 ### Modified Capabilities
-<!-- Existing capabilities whose REQUIREMENTS are changing (not just implementation).
-     Only list here if spec-level behavior changes. Each needs a delta spec file.
-     Use the exact existing path under openspec/specs/. Leave empty if no requirement
-     changes. A change with no capabilities at all (pure refactor, tooling, docs)
-     must set `skip_specs: true` in its .openspec.yaml - openspec validate rejects
-     a zero-delta change without that marker. Do not invent a requirement just to
-     satisfy validation. -->
-- `<existing-capability-path>`: <what requirement is changing>
+
+- `existing-kebab-path` — <which requirements change; leave empty if implementation-only>
+
+<!-- Every change declares ≥1 capability or sets skip_specs: true in its .openspec.yaml. Do not invent a requirement to satisfy validation. -->
 
 ## Impact
 
-<!-- Affected code, APIs, dependencies, systems. S: keep to one or two lines. -->
-
-## Risks
-
-<!-- What could go wrong, and the mitigation. Omit for S unless risk is unusual. -->
+- **Code**: <modules, files>
+- **APIs**: <endpoints, contracts>
+- **Dependencies**: <packages, services>
+- **Async flows**: <websocket topics, commands, timers/expiry, presence, telemetry — if any, discovery.md is mandatory for M/L>

@@ -47,7 +47,7 @@ def register_default_tools() -> ToolRegistry:
     contract, the tags must agree with it, and web search's egress
     classification is enforced by the same executor contract (D4).
     """
-    r = get_tool_registry()
+    r: ToolRegistry = get_tool_registry()
     r.register(
         get_web_search_tool(),
         tags=["web", "search", "side-effect:egress", f"capability:{CAP_WEB_SEARCH}"],

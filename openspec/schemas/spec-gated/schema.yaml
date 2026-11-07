@@ -65,7 +65,45 @@ artifacts:
 
 
       This is the foundation - specs, design, and tasks all build on this.
+
+
+      Event-driven changes (new or altered async flows: websocket topics,
+      commands, timers/expiry, presence, telemetry): the discovery artifact
+      comes next and MUST be completed before specs for M/L changes. An S
+      change writes the one-line discovery skip instead.
     requires: []
+  - id: discovery
+    generates: discovery.md
+    description: Event-storming discovery for event-driven changes
+    template: discovery.md
+    instruction: >
+      Run a focused event storm for the change BEFORE writing specs. This
+      artifact captures WHAT happens in the domain; specs turn it into
+      testable requirements and contracts/asyncapi.yaml turns it into
+      channels. Skip with one line (`No new async behavior in this change.`)
+      when the change is class S or touches no async flows (no websocket
+      topics, commands, timers/expiry, presence, or telemetry).
+
+
+      Fill the template in order - actors, commands, domain events (past
+      tense, with payload and producer), policies (WHEN/THEN, including
+      timers and expiry), read models with staleness tolerance, hotspots.
+      Every domain event named here MUST appear by name in a spec scenario
+      (`WHEN <event>`) and in the contracts channel map, or be explicitly
+      dropped with a reason.
+
+
+      Name the stable identity for each event payload up front (what ID
+      survives renames, republishes, and deletes - booth/room IDs,
+      destination IDs, event IDs). Unresolved identity questions go to
+      Hotspots, not into assumptions.
+
+
+      Keep it to one page for M, two for L. Discovery records facts; if you
+      are choosing transports, brokers, or retry strategies, you are writing
+      design.md - stop and move there.
+    requires:
+      - proposal
   - id: specs
     generates: specs/**/*.md
     description: Detailed specifications for the change
@@ -244,6 +282,30 @@ artifacts:
 
 
       Specs should be testable - each scenario is a potential test case.
+
+
+      Event-driven changes: write scenarios against discovery.md domain events
+      (`WHEN <event> THEN <reaction>`), one scenario per event per requirement
+      where the event matters. If the change creates, renames, or deletes
+      identities that bookings, signage, or analytics join on (booth/room IDs,
+      destination IDs, event IDs), add an explicit requirement covering
+      stability across renames and republishes, rename handling, and orphan
+      behavior - never leave identity as an assumption.
+
+
+      Quality attributes use Planguage, not scenarios: any requirement that
+      constrains a measurable attribute (latency, budgets, tolerances,
+      capacities) MUST state Scale, Meter, and MUST threshold
+      (e.g. `Scale: procedural geometry per asset | Meter: triangles in the
+      generated recipe | MUST: within catalog budget`). Unquantified adjectives
+      (fast, small, smooth) are not requirements.
+
+
+      Status machines and multi-condition logic use decision tables, not
+      N near-duplicate scenarios: one table whose columns are the conditions
+      and whose final column is the outcome (e.g. hold active/released/
+      expired/converted, invoice unpaid/paid/void). Every table row is a test
+      case and MUST be covered.
     requires:
       - proposal
   - id: design
@@ -273,6 +335,13 @@ artifacts:
       - Ambiguity that benefits from technical decisions before coding
 
 
+      Prior decisions stay with their owning changes. If this design knowingly
+      revisits a durable decision from another change, name that decision as
+      `<prior-change>#ADR-NNN` under Open Questions. The adr step records the
+      supersession in this change's own adr.md; never create or consult a
+      repository-level adr/ directory.
+
+
       Sections:
 
       - **Context**: Only the current state and constraints needed to explain
@@ -292,7 +361,8 @@ artifacts:
       - **Migration Plan**: Steps to deploy, rollback strategy (if applicable)
 
       - **Open Questions**: Unknowns that can safely be answered later without
-        changing the specs, the approach, or the task breakdown. Omit if none.
+        changing the specs, the approach, or the task breakdown. Include any
+        change-local ADR this design suggests superseding. Omit if none.
 
       Open questions are for genuinely deferrable unknowns, not decisions you
 
@@ -311,8 +381,36 @@ artifacts:
 
 
       Good design docs explain the "why" behind technical decisions.
+
+
+      For every touched symbol or module, list its blast radius (callers and
+      dependents - use the code index, not memory). For async flows, decide
+      explicitly: delivery semantics (at-least-once vs effectively-once),
+      ordering guarantees, expiry and retry policy, payload schema versioning,
+      and what the read models do while stale. These decisions feed
+      contracts/asyncapi.yaml.
     requires:
       - proposal
+  - id: contracts
+    generates: contracts/asyncapi.yaml
+    description: AsyncAPI contract for the change's event interfaces
+    template: asyncapi.yaml
+    instruction: >
+      Capture the change's async interfaces as an AsyncAPI 3.x document BEFORE
+      tasks are written. Start from the template scaffold and describe ONLY
+      this change's channels, operations, and message payloads (with required
+      stable identity fields). Every domain event from discovery.md that this
+      change implements MUST have a channel here; every channel MUST trace to
+      a spec scenario.
+
+
+      Skip with one line (`No async interfaces in this change.`) when the
+      change touches no websocket topics, commands, timers/expiry, presence,
+      or telemetry. Version the document per change; breaking payload changes
+      MUST declare a migration for existing subscribers.
+    requires:
+      - specs
+      - design
   - id: review
     generates: review.md
     description: Pre-implementation reviewer gate over proposal, specs, and design
@@ -338,15 +436,28 @@ artifacts:
 
       - **Completeness**: Does every spec requirement have at least one scenario?
         Are the important edge and error cases named, not just the happy path?
+        Are quality attributes quantified (Scale/Meter/MUST, no bare adjectives)?
+        Do decision tables cover every condition combination with no
+        contradictory rows?
       - **Correctness**: Are requirements observably testable (SHALL/MUST, no
         implementation details baked in)? Do the deltas use the right operation
         (ADDED / MODIFIED / REMOVED / RENAMED) against the current main spec?
-      - **Standards**: Do the artifacts follow the project's .opencode/instructions/
-        (RESULT-PATTERN, EXCEPTION-RULES, PYTHON-TYPING-RULES, ARCHITECTURE-RULES)?
-        Are secrets handled via SecretStr.get_secret_value()? Response envelope
-        via APIResponse + http_error()? No match/case on Success/Failure?
+      - **Standards**: Does the plan respect this repo's layering (thin FastAPI
+        routers, service layer owning orchestration, repositories persistence
+        only, feature-sliced under src/app/features/; shared clients read from
+        app.state, initialized in lifespan)? Are incremental tooling changes
+        reviewed refactoring-RFC-style? Do secrets stay behind Pydantic
+        SecretStr (never str() on a SecretStr)? Do tasks run the real gates -
+        `uv run ruff format src/ tests/ && uv run ruff check src/ tests/`,
+        `uv run ty check src/`, `uv run pytest`, `ast-grep scan src/` -
+        instead of assuming green?
       - **Risk**: Security, performance, data integrity, breaking changes and
         migration - surface anything a reviewer would flag before code is written.
+      - **Contracts**: Every discovery domain event implemented by this change
+        has a channel in contracts/asyncapi.yaml tracing to a spec scenario;
+        payloads carry stable identity fields; breaking payload changes declare
+        subscriber migration. Skip only when contracts holds the one-line
+        no-async note.
 
 
       End with a `VERDICT:` line - one of `APPROVED`, `CHANGES-REQUESTED`
@@ -356,31 +467,26 @@ artifacts:
       artifacts.
     requires:
       - design
+      - contracts
   - id: adr
-    generates: adrs.md
-    description: Optional architectural decision record for durable decisions
+    generates: adr.md
+    description: Durable architecture decisions owned by this change
     template: adr.md
     instruction: >
-      Write an ADR ONLY when design.md contains a durable architectural decision
-      that will outlive this change (choice of a new dependency or client, a
-      data model or interface contract that other parts of the system build on,
-      a hard-won trade-off future readers must understand).
+      Complete ADR review by writing durable decisions directly in
+      openspec/changes/<change>/adr.md. This is the only ADR location for the
+      change; never create a repository-level adr/ directory or a separate
+      manifest that merely points elsewhere.
 
-      Skip it (write a single line "No durable architectural decision in this
-      change.") when the change is small or the design only arranges existing
-      pieces in a known pattern. Missing non-decisions is not a defect.
+      Use one numbered section per decision (`ADR-001`, `ADR-002`, ...), with
+      status/date, Context, Decision, Alternatives, and Consequences. A
+      decision qualifies only when it is a long-term architectural commitment
+      that affects later work. If none qualifies, write
+      `No durable architectural decision in this change.`
 
-      Format: short, supersedable. One decision per ADR, dated, with the change
-      name. Sections:
-
-      - **Status**: Proposed | Accepted | Superseded
-      - **Context**: the decision forces at hand
-      - **Decision**: what was chosen, in one or two sentences
-      - **Rationale / Alternatives**: why this option over the others considered
-      - **Consequences**: what this commits the system to (good and bad)
-
-      Do not restate the design doc - capture only the long-lived decision and
-      its rationale.
+      Accepted ADRs become immutable when the change is archived. A later
+      change that revisits one records a new ADR in its own adr.md and sets
+      `Supersedes: <prior-change>#ADR-NNN`; it never edits the archived file.
     requires:
       - design
   - id: tasks
@@ -444,13 +550,35 @@ artifacts:
       ```
 
 
-      Reference specs for what needs to be built, design for how to build it.
+      Reference specs for what needs to be built, design for how to build it,
+      and this change's adr.md for durable architectural commitments.
 
       Each task should be verifiable - you know when it's done.
+
+      If implementation changes behaviour specs, ALWAYS include a final task
+      to run `openspec validate <change> --type change --strict` before
+      archive - it must pass (exit 0) as an explicit checkbox near the end of
+      the checklist.
+
+
+      Every task MUST cite its Requirement/Scenario IDs and end with an
+      explicit verification (`verify: <command plus expected outcome>`,
+      e.g. `verify: bun test tests/venue-draft.test.ts - all pass`).
+      Event-driven tasks MUST also cite the AsyncAPI channel/operation from
+      contracts/asyncapi.yaml. A task without a scenario citation or a
+      verification command is not ready for apply.
+
+
+      Close tasks.md with a Task Dependency Graph: group the task IDs into
+      numbered waves (same wave = no dependencies between them, safe to run
+      in parallel; waves run strictly in order). Every task ID MUST appear
+      in exactly one wave.
     requires:
       - specs
       - design
       - review
+      - contracts
+      - adr
 apply:
   requires:
     - tasks

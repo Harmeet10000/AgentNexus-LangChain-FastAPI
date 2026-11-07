@@ -1,0 +1,49 @@
+{
+  "golden_set_version": "legal_retrieval_v2",
+  "row_count": 155,
+  "cutoff": 10,
+  "horizon": 100,
+  "overall": {
+    "document_kind": "all",
+    "queries": 155,
+    "queries_with_misses": 50,
+    "below_cut_misses": 46,
+    "no_signal_misses": 13,
+    "not_in_corpus_misses": 0
+  },
+  "per_class": [
+    {
+      "document_kind": "contracts",
+      "queries": 133,
+      "queries_with_misses": 47,
+      "below_cut_misses": 43,
+      "no_signal_misses": 12,
+      "not_in_corpus_misses": 0
+    },
+    {
+      "document_kind": "filings",
+      "queries": 1,
+      "queries_with_misses": 0,
+      "below_cut_misses": 0,
+      "no_signal_misses": 0,
+      "not_in_corpus_misses": 0
+    },
+    {
+      "document_kind": "judgments",
+      "queries": 8,
+      "queries_with_misses": 2,
+      "below_cut_misses": 3,
+      "no_signal_misses": 0,
+      "not_in_corpus_misses": 0
+    },
+    {
+      "document_kind": "statutes",
+      "queries": 13,
+      "queries_with_misses": 1,
+      "below_cut_misses": 0,
+      "no_signal_misses": 1,
+      "not_in_corpus_misses": 0
+    }
+  ],
+  "interpretation": "Below-cut misses dominate the missed-chunk population: the text signal reaches most missed chunks but ranks them below the cutoff — the loss class section hydration addresses. This is CONSISTENT WITH context starvation, not proof of it: the offline harness measures ranking, not generation, so it cannot demonstrate the hydration effect itself. The hydration implementation lands DEFAULT-OFF; its measured recall/precision effect per document class remains pending one live run."
+}

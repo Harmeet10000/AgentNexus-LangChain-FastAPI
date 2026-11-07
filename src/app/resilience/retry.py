@@ -123,7 +123,9 @@ def _before_sleep_log(retry_state: RetryCallState) -> None:
     """Surface every scheduled retry as a named event, never a success line."""
     outcome = retry_state.outcome
     failure_name = (
-        type(outcome.exception()).__name__ if outcome is not None and outcome.failed else "retryable_failure"
+        type(outcome.exception()).__name__
+        if outcome is not None and outcome.failed
+        else "retryable_failure"
     )
     logger.bind(
         attempt=retry_state.attempt_number,

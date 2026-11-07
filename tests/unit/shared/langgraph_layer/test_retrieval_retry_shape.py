@@ -28,6 +28,15 @@ if TYPE_CHECKING:
     import pytest
 
 
+def _runtime(**collaborators: Any) -> Any:
+    """A minimal invocation runtime: collaborators ride the context schema."""
+    from types import SimpleNamespace
+
+    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+
+    return SimpleNamespace(context=RetrievalGraphContext(**collaborators))
+
+
 def _exhausted(label: str) -> Callable[..., Any]:
     async def _raise(*args: Any, **kwargs: Any) -> Any:
         msg = f"{label} failed after 3 attempts"
@@ -45,14 +54,15 @@ async def test_query_analyzer_degrades_on_exhausted_retry(
         msg = "the boundary, not the model, is under test"
         raise AssertionError(msg)
 
-    node = make_query_analyzer_node(_llm, redis=None)
+    node = make_query_analyzer_node()
     result = await node(
         {
             "query": "who may terminate?",
             "messages": [],
             "doc_ids_filter": [],
             "iteration_count": 0,
-        }
+        },
+        _runtime(llm=_llm),
     )
     assert result["cache_hit"] is False
     assert result["query_plan"].rewritten_query == "who may terminate?"
@@ -62,13 +72,14 @@ async def test_graph_retrieval_degrades_on_exhausted_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(retrieval_nodes, "retry_immediate", _exhausted("graphiti_retrieval_search"))
-    node = make_graph_retrieval_node(object())
+    node = make_graph_retrieval_node()
     result = await node(
         {
             "user_id": "user-1",
             "query_plan": QueryPlan(rewritten_query="who may terminate?"),
             "doc_ids_filter": [],
-        }
+        },
+        _runtime(graphiti=object()),
     )
     assert result == {"graph_chunk_ids": []}
 
@@ -81,7 +92,7 @@ async def test_graph_retrieval_uses_only_server_document_scope() -> None:
             calls.append(kwargs)
             return []
 
-    node = make_graph_retrieval_node(_ScopedGraphiti())
+    node = make_graph_retrieval_node()
     await node(
         {
             "user_id": "user-1",
@@ -92,7 +103,8 @@ async def test_graph_retrieval_uses_only_server_document_scope() -> None:
             "document_contracts": [("doc-authorized", 1, (None,), True)],
             "query_plan": QueryPlan(rewritten_query="who may terminate?"),
             "doc_ids_filter": ["doc-authorized", "doc-requested-but-unauthorized"],
-        }
+        },
+        _runtime(graphiti=_ScopedGraphiti()),
     )
 
     assert calls == [
@@ -115,13 +127,14 @@ async def test_graph_retrieval_fails_closed_without_server_scope() -> None:
             message = "graph retrieval widened an absent document scope"
             raise AssertionError(message)
 
-    node = make_graph_retrieval_node(_MustNotSearch())
+    node = make_graph_retrieval_node()
     result = await node(
         {
             "user_id": "user-1",
             "query_plan": QueryPlan(rewritten_query="who may terminate?"),
             "doc_ids_filter": ["doc-requested"],
-        }
+        },
+        _runtime(graphiti=_MustNotSearch()),
     )
 
     assert result == {"graph_chunk_ids": []}

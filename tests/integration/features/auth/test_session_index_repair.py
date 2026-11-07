@@ -183,11 +183,15 @@ async def test_repairs_orphan_and_recreates_disappeared_index(
 ) -> None:
     client, _prefix, store, repair = repair_context
     session = _session(_user_id(), ttl=120)
-    await client.set(store._session_key(session.session_id), session.model_dump_json(), ex=session.ttl)
+    await client.set(
+        store._session_key(session.session_id), session.model_dump_json(), ex=session.ttl
+    )
     report = await repair.run(dry_run=False, orphan_limit=100)
     assert report.orphan_sessions == 1
     assert report.orphan_memberships_restored == 1
-    assert await client.sismember(store._user_sessions_key(session.user_id), session.session_id) == 1
+    assert (
+        await client.sismember(store._user_sessions_key(session.user_id), session.session_id) == 1
+    )
     assert await client.ttl(store._user_sessions_key(session.user_id)) >= 110
 
 
@@ -288,4 +292,7 @@ async def test_repeated_repair_and_revoke_interleavings_never_resurrect(
             store.revoke_session(session.session_id, session.user_id),
         )
         assert await client.exists(store._session_key(session.session_id)) == 0
-        assert await client.sismember(store._user_sessions_key(session.user_id), session.session_id) == 0
+        assert (
+            await client.sismember(store._user_sessions_key(session.user_id), session.session_id)
+            == 0
+        )

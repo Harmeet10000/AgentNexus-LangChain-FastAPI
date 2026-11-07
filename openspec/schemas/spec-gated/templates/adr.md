@@ -1,24 +1,31 @@
-> Only write this when design.md contains a durable architectural decision. Otherwise write: `No durable architectural decision in this change.`
+# ADRs: <change>
 
-## ADR: <!-- short title of the decision -->
+<!-- Durable decisions for this change live only in this file. Do not create a repository-level adr/ directory. Use one numbered section per decision. After this change is archived, never rewrite an accepted decision; a later change records a superseding decision in its own adr.md and names the prior change + ADR id. -->
 
-- **Date:** <!-- YYYY-MM-DD -->
-- **Change:** <!-- the change this ADR came from -->
+## ADR-001: <short decision title>
 
-**Status:** Proposed | Accepted | Superseded
+- **Status:** proposed | accepted | superseded
+- **Date:** YYYY-MM-DD
+- **Supersedes:** none | `<prior-change>#ADR-NNN`
 
-## Context
+### Context
 
-<!-- The decision forces at hand - what are we deciding and why now? -->
+<!-- Forces that make a durable decision necessary. -->
 
-## Decision
+### Decision
 
-<!-- What was chosen, in one or two sentences. -->
+<!-- The chosen long-lived contract, boundary, pattern, or technology. -->
 
-## Rationale / Alternatives
+### Alternatives
 
-<!-- Why this option over the alternatives that were considered. -->
+<!-- Material alternatives and why they were rejected. -->
 
-## Consequences
+### Consequences
 
-<!-- What this commits the system to, good and bad. -->
+<!-- Positive and negative commitments. -->
+
+## ADR Review Verdict
+
+- [ ] Every durable decision in design.md is captured here, or no durable decision exists
+- [ ] Every superseded decision names its prior change and ADR id
+- [ ] No repository-level ADR file was created

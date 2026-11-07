@@ -103,14 +103,18 @@ async def test_redis_dependency_reports_retryable_startup_failure() -> None:
 
 async def test_http_claims_skip_redis_for_stateless_impersonation() -> None:
     repo = AsyncMock()
-    with patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims(sid=None)):
+    with patch(
+        "app.features.auth.api.http.dependencies.decode_token", return_value=_claims(sid=None)
+    ):
         result = await get_token_claims("raw-token", repo)
     assert result.sid is None
     repo.get_session.assert_not_awaited()
 
 
 async def test_stateless_impersonation_survives_missing_redis_dependency() -> None:
-    with patch("app.features.auth.api.http.dependencies.decode_token", return_value=_claims(sid=None)):
+    with patch(
+        "app.features.auth.api.http.dependencies.decode_token", return_value=_claims(sid=None)
+    ):
         result = await get_token_claims("raw-token", None)
 
     assert result.sid is None
@@ -214,7 +218,8 @@ async def test_http_claims_reject_authorization_revision_mismatch() -> None:
     )
     with (
         patch(
-            "app.features.auth.api.http.dependencies.decode_token", return_value=_claims(authz_revision=0)
+            "app.features.auth.api.http.dependencies.decode_token",
+            return_value=_claims(authz_revision=0),
         ),
         pytest.raises(UnauthorizedException, match="Session expired or revoked"),
     ):
@@ -530,7 +535,9 @@ async def test_github_userinfo_uses_primary_verified_email_endpoint(
             )
 
     client = _Client()
-    monkeypatch.setattr("app.features.auth.application.oauth.AsyncOAuth2Client", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        "app.features.auth.application.oauth.AsyncOAuth2Client", lambda **_kwargs: client
+    )
     config = OAuthProviderConfig(
         client_id="client",
         client_secret="secret",

@@ -1,0 +1,74 @@
+{
+  "golden_set_version": "legal_retrieval_v2",
+  "row_count": 155,
+  "cutoff": 10,
+  "overlay_description": "recorded overlay evals/corpus/context_overlay_fixture.json",
+  "overall": {
+    "document_kind": "all",
+    "queries": 155,
+    "baseline_recall_at_k": 0.5774193548387097,
+    "with_context_recall_at_k": 0.7,
+    "delta_recall_at_k": 0.1225806451612903,
+    "baseline_ndcg_at_k": 0.4304632615580462,
+    "with_context_ndcg_at_k": 0.5159663842885808,
+    "delta_ndcg_at_k": 0.08550312273053456,
+    "baseline_reciprocal_rank": 0.3888863287250384,
+    "with_context_reciprocal_rank": 0.46594726062467995,
+    "delta_reciprocal_rank": 0.07706093189964153
+  },
+  "per_class": [
+    {
+      "document_kind": "contracts",
+      "queries": 133,
+      "baseline_recall_at_k": 0.5601503759398496,
+      "with_context_recall_at_k": 0.7030075187969925,
+      "delta_recall_at_k": 0.1428571428571429,
+      "baseline_ndcg_at_k": 0.3997007460891151,
+      "with_context_ndcg_at_k": 0.5260579728520862,
+      "delta_ndcg_at_k": 0.12635722676297112,
+      "baseline_reciprocal_rank": 0.3548424633011099,
+      "with_context_reciprocal_rank": 0.47921888053467004,
+      "delta_reciprocal_rank": 0.12437641723356013
+    },
+    {
+      "document_kind": "filings",
+      "queries": 1,
+      "baseline_recall_at_k": 1.0,
+      "with_context_recall_at_k": 1.0,
+      "delta_recall_at_k": 0.0,
+      "baseline_ndcg_at_k": 0.6309297535714575,
+      "with_context_ndcg_at_k": 0.38685280723454163,
+      "delta_ndcg_at_k": -0.2440769463369159,
+      "baseline_reciprocal_rank": 0.5,
+      "with_context_reciprocal_rank": 0.2,
+      "delta_reciprocal_rank": -0.3
+    },
+    {
+      "document_kind": "judgments",
+      "queries": 8,
+      "baseline_recall_at_k": 0.75,
+      "with_context_recall_at_k": 0.75,
+      "delta_recall_at_k": 0.0,
+      "baseline_ndcg_at_k": 0.6788345697591741,
+      "with_context_ndcg_at_k": 0.485532208349267,
+      "delta_ndcg_at_k": -0.1933023614099071,
+      "baseline_reciprocal_rank": 0.65625,
+      "with_context_reciprocal_rank": 0.40535714285714286,
+      "delta_reciprocal_rank": -0.25089285714285714
+    },
+    {
+      "document_kind": "statutes",
+      "queries": 13,
+      "baseline_recall_at_k": 0.6153846153846154,
+      "with_context_recall_at_k": 0.6153846153846154,
+      "delta_recall_at_k": 0.0,
+      "baseline_ndcg_at_k": 0.5769230769230769,
+      "with_context_ndcg_at_k": 0.4413822077979903,
+      "delta_ndcg_at_k": -0.13554086912508656,
+      "baseline_reciprocal_rank": 0.5641025641025641,
+      "with_context_reciprocal_rank": 0.3879120879120879,
+      "delta_reciprocal_rank": -0.17619047619047618
+    }
+  ],
+  "decision": "PENDING LIVE RUN: the offline comparison measures the retrieval effect of recorded fixture context lines (ranking only, no generation quality). Default stays OFF (DOCUMENTS_CONTEXTUAL_PREAMBLE_ENABLED=False) until a live generation run completes the adoption evidence; a per-class regression on this comparison reverts any default."
+}

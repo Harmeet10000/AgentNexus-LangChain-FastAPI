@@ -178,6 +178,7 @@ async def export_session_transcript(
         headers={"Content-Disposition": f'attachment; filename="transcript-{session_id}.ndjson"'},
     )
 
+
 # ---------------------------------------------------------------------------
 # WebSocket endpoint — lives in the websocket transport package; importing it
 # registers the WS route on the shared router object (single prefix/tags).

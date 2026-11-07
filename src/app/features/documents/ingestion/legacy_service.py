@@ -59,9 +59,7 @@ _DECLARED_STATE_PLACEMENTS: dict[str, str] = {
 
 #: Legacy keys that are invocation metadata, not graph state. They travel in
 #: ``RunnableConfig.configurable`` so they never reach the channel mapping.
-_INVOCATION_CONFIG_PLACEMENTS: frozenset[str] = frozenset(
-    {"thread_id", "source", "jurisdiction"}
-)
+_INVOCATION_CONFIG_PLACEMENTS: frozenset[str] = frozenset({"thread_id", "source", "jurisdiction"})
 
 #: Bytes are not a state channel; they reach the ingest function by object-store
 #: reference. They count as placed only once ``object_uri`` is present.
@@ -82,9 +80,7 @@ def map_legacy_state(
         for source, target in _DECLARED_STATE_PLACEMENTS.items()
         if source in legacy
     }
-    configurable = {
-        key: legacy[key] for key in _INVOCATION_CONFIG_PLACEMENTS if key in legacy
-    }
+    configurable = {key: legacy[key] for key in _INVOCATION_CONFIG_PLACEMENTS if key in legacy}
     unmapped = [
         key
         for key in legacy

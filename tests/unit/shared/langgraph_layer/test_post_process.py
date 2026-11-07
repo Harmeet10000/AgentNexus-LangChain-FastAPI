@@ -2,8 +2,22 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from app.features.documents.retrieval.graph.nodes import make_post_process_node
 from app.features.documents.retrieval.graph.state import RetrievedChunk
+
+if TYPE_CHECKING:
+    from typing import Any
+
+
+def _runtime(**collaborators: Any) -> Any:
+    """A minimal invocation runtime: collaborators ride the context schema."""
+    from types import SimpleNamespace
+
+    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+
+    return SimpleNamespace(context=RetrievalGraphContext(**collaborators))
 
 
 def _chunk(chunk_id: str, doc: str, index: int, score: float) -> RetrievedChunk:
@@ -25,7 +39,7 @@ def _words(text: str) -> int:
 
 
 async def test_overlapping_chunk_appears_once_in_document_order() -> None:
-    node = make_post_process_node(max_tokens=10_000, count_tokens=_words)
+    node = make_post_process_node()
     # Two branches returned chunk b twice (relevance order: b, a, b, c);
     # document order within doc-1 is a(0), b(1).
     reranked = [
@@ -35,7 +49,9 @@ async def test_overlapping_chunk_appears_once_in_document_order() -> None:
         _chunk("c", "doc-2", 0, 0.80),
     ]
 
-    result = await node({"reranked_chunks": reranked})
+    result = await node(
+        {"reranked_chunks": reranked}, _runtime(post_process_max_tokens=10_000, count_tokens=_words)
+    )
 
     assert [chunk.chunk_id for chunk in result["reranked_chunks"]] == ["a", "b", "c"]
     assert result["assembled_context"]
@@ -43,7 +59,7 @@ async def test_overlapping_chunk_appears_once_in_document_order() -> None:
 
 
 async def test_empty_reranked_list_assembles_nothing() -> None:
-    node = make_post_process_node(max_tokens=10_000, count_tokens=_words)
+    node = make_post_process_node()
 
     result = await node({"reranked_chunks": []})
 
@@ -52,39 +68,45 @@ async def test_empty_reranked_list_assembles_nothing() -> None:
 
 
 async def test_token_budget_removes_chunks_from_llm_input() -> None:
-    node = make_post_process_node(max_tokens=2, count_tokens=_words)
+    node = make_post_process_node()
     reranked = [
         _chunk("a", "doc-1", 0, 0.9),
         _chunk("b", "doc-2", 0, 0.8),
     ]
 
-    result = await node({"reranked_chunks": reranked})
+    result = await node(
+        {"reranked_chunks": reranked}, _runtime(post_process_max_tokens=2, count_tokens=_words)
+    )
 
     assert [chunk.chunk_id for chunk in result["reranked_chunks"]] == ["a"]
     assert [section.document_id for section in result["assembled_context"]] == ["doc-1"]
 
 
 async def test_token_budget_keeps_fitting_prefix_of_adjacent_group() -> None:
-    node = make_post_process_node(max_tokens=2, count_tokens=_words)
+    node = make_post_process_node()
     reranked = [
         _chunk("a", "doc-1", 0, 0.9),
         _chunk("b", "doc-1", 1, 0.8),
     ]
 
-    result = await node({"reranked_chunks": reranked})
+    result = await node(
+        {"reranked_chunks": reranked}, _runtime(post_process_max_tokens=2, count_tokens=_words)
+    )
 
     assert [chunk.chunk_id for chunk in result["reranked_chunks"]] == ["a"]
     assert result["assembled_context"][0].chunk_ids == ["a"]
 
 
 async def test_token_budget_uses_chunk_identity_when_versions_share_an_index() -> None:
-    node = make_post_process_node(max_tokens=2, count_tokens=_words)
+    node = make_post_process_node()
     reranked = [
         _chunk("version-1", "doc-1", 0, 0.9),
         _chunk("version-2", "doc-1", 0, 0.8),
     ]
 
-    result = await node({"reranked_chunks": reranked})
+    result = await node(
+        {"reranked_chunks": reranked}, _runtime(post_process_max_tokens=2, count_tokens=_words)
+    )
 
     assert [chunk.chunk_id for chunk in result["reranked_chunks"]] == ["version-1"]
     assert result["assembled_context"][0].chunk_ids == ["version-1"]

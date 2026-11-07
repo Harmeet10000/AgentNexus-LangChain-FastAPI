@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from pathlib import Path
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
@@ -109,14 +109,23 @@ def chunks_for_page(page_text: str) -> list[str]:
 
 
 class OfflineCorpusIndex:
-    """The chunk universe derived from the recorded corpus artifacts."""
+    """The chunk universe derived from the recorded corpus artifacts.
 
-    def __init__(self, corpus_root: Path) -> None:
+    ``context_overlay`` optionally maps a chunk id to a context line that is
+    prepended to the chunk's text before any index is built — the offline
+    analogue of the ingest-time document-context preamble riding the generated
+    search text (contextual-chunk-retrieval). The harness measures ranking, not
+    generation, so the overlay carries recorded/fixture context lines; the
+    comparison report that cites an overlay says so explicitly.
+    """
+
+    def __init__(self, corpus_root: Path, context_overlay: Mapping[str, str] | None = None) -> None:
         self._chunk_ids: list[str] = []
         self._chunk_texts: dict[str, str] = {}
         self._doc_chunks: dict[str, list[str]] = {}
         self._bm25_index: dict[str, Counter[str]] = {}
         self._trigram_index: dict[str, Counter[str]] = {}
+        self._overlay = dict(context_overlay) if context_overlay else {}
         self._build(corpus_root)
         self._avgdl = (
             sum(len(tokens) for tokens in self._bm25_index.values()) / len(self._bm25_index)
@@ -135,11 +144,15 @@ class OfflineCorpusIndex:
                 page_no = page["page_no"]
                 for ordinal, chunk in enumerate(chunks_for_page(page.get("text", "")), start=1):
                     chunk_id = f"{source_id}:p{page_no}:c{ordinal:02d}"
+                    # The overlay (fixture document-context line) is part of the
+                    # searchable text — exactly where the ingest preamble lands.
+                    text = self._overlay.get(chunk_id, "")
+                    searchable = f"{text}\n{chunk}" if text else chunk
                     self._chunk_ids.append(chunk_id)
-                    self._chunk_texts[chunk_id] = chunk
+                    self._chunk_texts[chunk_id] = searchable
                     self._doc_chunks.setdefault(source_id, []).append(chunk_id)
-                    self._bm25_index[chunk_id] = Counter(_tokenize(chunk))
-                    self._trigram_index[chunk_id] = Counter(_trigrams(chunk))
+                    self._bm25_index[chunk_id] = Counter(_tokenize(searchable))
+                    self._trigram_index[chunk_id] = Counter(_trigrams(searchable))
 
     @property
     def chunk_ids(self) -> list[str]:

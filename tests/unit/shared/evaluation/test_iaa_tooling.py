@@ -830,7 +830,11 @@ def test_merge_out_refuses_checksum_after_artifact_corruption(
     artifact.write_bytes(b"tampered after the first apply")
     fresh_exports = tmp_path / "fresh" / "exports"
     fresh_exports.mkdir(parents=True)
-    second = {"gold": fixture["gold"], "report": fixture["report"], "out": fresh_exports / "merged.jsonl"}
+    second = {
+        "gold": fixture["gold"],
+        "report": fixture["report"],
+        "out": fresh_exports / "merged.jsonl",
+    }
     original = fixture["gold"].read_bytes()
     code = run_merge(merge_argv(second, tmp_path))
     assert code == 1
@@ -937,10 +941,12 @@ def test_merge_recomputed_iaa_matches_compute_iaa(tmp_path: Path) -> None:
     assert errors == []
     case_ids = sorted(case for case, _, _, _ in WAVE3_FIXTURE)
     kappa, raw, disagreements = merge_annotations.recompute_iaa(case_ids, by_case_a, by_case_b)
-    assert kappa == pytest.approx(iaa.cohen_kappa(
-        [iaa.relevance_of(by_case_a[case_id]) for case_id in case_ids],
-        [iaa.relevance_of(by_case_b[case_id]) for case_id in case_ids],
-    ))
+    assert kappa == pytest.approx(
+        iaa.cohen_kappa(
+            [iaa.relevance_of(by_case_a[case_id]) for case_id in case_ids],
+            [iaa.relevance_of(by_case_b[case_id]) for case_id in case_ids],
+        )
+    )
     assert kappa == pytest.approx(report["kappa"])
     assert raw == pytest.approx(report["raw_agreement"])
     assert disagreements == report["disagreements"]

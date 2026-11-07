@@ -239,3 +239,160 @@ To ensure the reviewer remains effective, Anthropic turns production incidents i
 
 ## 5. You Land It, You Own It (6:01-7:57)
 Anthropic’s operational philosophy shifts the human role toward what machines struggle with: high-level decisions, reviewing risky code like billing, and **owning the outcome**. The principle "you land it, you own it" ensures that the author remains responsible for fixing any breaks caused by their changes. While their revert rate dropped by 40%, the volume of merges doubled, meaning there is still a net increase in absolute reverts. The reviewer is a costly, high-token-budget tool, but the company recommends that smaller teams adopt key parts of this workflow, such as maintaining a `review.md`, capping review rounds, and ensuring humans remain accountable for final approvals.
+
+devil advocate what would change your advice, RAG signals 1. empty results 2. low similarity score 3. average similarity score over all searches 4. source mix (signals do not tell you quality but tells us where to look)
+to measure real retrival quality we need labels - recall@K recalls chunks found in top K + all the correct answer
+we use 2 sources of labels - 1. evauation set 2. production samples
+RAGAS - for OS RAG evaluation
+
+
+✅ *1. Production Challenges*
+Slow responses, API failures, and timeouts
+Irrelevant document retrieval and incorrect answers
+Silent failures that HTTP 200 status codes won't reveal
+Increasing LLM token usage and costs
+
+✅ *2. Monitoring and Performance Metrics*
+p50, p95, and p99 latency
+Time to First Token (TTFT)
+Component-level latency and error tracking
+Retries, fallbacks, and empty retrieval results
+
+✅ *3. Monitoring Tools and Architecture*
+OpenTelemetry for collecting traces, metrics, and logs
+Prometheus for storing and querying metrics
+Grafana for dashboards and alerts
+Langfuse for LLM observability, traces, token usage, and costs
+Ragas for evaluating retrieval and answer quality
+
+✅ *4. RAG Quality Monitoring*
+Retrieval quality signals and Recall@K
+Faithfulness and answer relevance
+Detecting hallucinations and outdated documents
+User feedback, human reviews, and automated evaluation
+
+✅ *5. Distributed Tracing and Debugging*
+Understanding traces and spans
+Finding the root cause of slow responses
+Debugging incorrect answers using retrieved chunks and document versions
+Connecting production failures to specific configuration changes
+
+✅ *6. Cost and Token Monitoring*
+Tracking input and output tokens
+Detecting context growth
+Setting token budgets and cost alerts
+Identifying the causes of increasing LLM expenses
+
+✅ *7. Production Monitoring Architecture*
+Connecting OpenTelemetry, Prometheus, Grafana, Langfuse, and Ragas
+Designing operational, quality, and cost dashboards
+Setting meaningful alerts
+Turning production failures into evaluation cases and regression tests
+
+Implemented the ADR storage change for the `spec-gated` workflow.
+
+The workflow now requires architecture decisions to live inside each OpenSpec change:
+
+```text
+openspec/changes/<change-name>/adr.md
+```
+
+Repository-level `adr/NNNN-*.md` files are no longer created or consulted.
+
+Changed:
+
+- Updated the ADR artifact contract in [schema.yaml](/home/harmeet/Desktop/Projects/langchain-fastapi-production/openspec/schemas/spec-gated/schema.yaml:471).
+- Replaced the repository ADR manifest with a full change-local template in [adr.md](/home/harmeet/Desktop/Projects/langchain-fastapi-production/openspec/schemas/spec-gated/templates/adr.md).
+- Updated the design, review, tasks, and global OpenSpec guidance to reference the owning change’s `adr.md`.
+- Moved:
+  - `openspec/changes/deferred-retrieval-roadmap/adrs.md` → [adr.md](/home/harmeet/Desktop/Projects/langchain-fastapi-production/openspec/changes/deferred-retrieval-roadmap/adr.md)
+  - `openspec/changes/harden-agent-saul-evidence-pipeline/adrs.md` → [adr.md](/home/harmeet/Desktop/Projects/langchain-fastapi-production/openspec/changes/harden-agent-saul-evidence-pipeline/adr.md)
+- Consolidated the two AG-UI decisions into [ag-ui-copilotkit-console/adr.md](/home/harmeet/Desktop/Projects/langchain-fastapi-production/openspec/changes/ag-ui-copilotkit-console/adr.md).
+- Removed the repository-level `adr/` directory after migrating its decisions.
+
+All three affected changes pass strict validation:
+
+- `ag-ui-copilotkit-console`
+- `deferred-retrieval-roadmap`
+- `harden-agent-saul-evidence-pipeline`
+
+The revised YAML parses successfully, and the affected OpenSpec files pass `git diff --check`. The repository-wide diff check still reports pre-existing whitespace in `evals/ingestion/README.md`, which is outside this change.
+
+## Persisted implicit state machines
+
+I audited the repository’s SQLAlchemy registry, Mongo user documents, Redis protocols, and LangGraph checkpoint state. I found **26 substantive persisted state machines**, plus several smaller binary or presence-based lifecycles.
+
+“Implicit” here means that the states may have an enum, but the legal transition graph is distributed through services, repositories, event handlers, Lua scripts, or nullable fields. In most cases, the database does not enforce which transition is legal.
+
+### Document and agent execution
+
+| # | Aggregate | Persisted states and transitions |
+|---|---|---|
+| 1 | Unified document ingestion | `received → processing → parsed → stored_postgres → completed / completed_with_warnings`; failures can enter `failed`, and retries can move back to `processing`. Stored in [`documents.status`](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/documents/domain/document.py:54). |
+| 2 | Search document ingestion | `pending → processing → completed / failed`; pending and failed records may be re-enqueued. Defined by [SearchDocumentStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/search/domain/models.py:31). |
+| 3 | Agent Saul workflow | `initialized`, `qna_clarification`, `plan_pending`, `plan_awaiting_approval`, `plan_approved`, `plan_rejected`, ingestion and analysis phases, `awaiting_human_review`, `finalizing`, `persisting_memory`, `completed`, and `failed`. Persisted through LangGraph checkpoints; vocabulary is in [WorkflowStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/domain/state.py:32). |
+| 4 | Deep-research run | `running → completed / budget_exhausted / no_evidence / ingestion_incomplete`. Defined in [DeepResearchStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/graph/deep_research.py:79). |
+| 5 | Chat-session projection | `active`, `clarifying`, `resumed`, `completed`, `abandoned_expired`, `failed`. This is a derived projection of checkpoint state in [chat session persistence](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/adapters/persistence/models.py:41). |
+| 6 | Pending plan decision | `absent → validated decision pending → consumed/cleared`. It is represented by three nullable columns rather than one state field in [ChatSession](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/adapters/persistence/models.py:103). |
+
+A significant inconsistency exists in document ingestion: the upload API returns `queued`, but `queued` is not written to `documents.status`. The row remains `received` until a worker changes it to `processing`. Consequently, API status and database state do not use the same vocabulary.
+
+### Billing
+
+| # | Aggregate | Persisted states and transitions |
+|---|---|---|
+| 7 | Subscription lifecycle | `created → authenticated → active`; active subscriptions can move through `past_due`, `halted`, or `paused`, resume to `active`, and terminate as `cancelled` or `expired`. See [SubscriptionStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/subscriptions/models.py:24). |
+| 8 | Subscription provider convergence | `pending → synced / retryable_failure / permanent_failure`; retryable failures return to `pending` during reconciliation. See [RemoteSyncState](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/subscriptions/models.py:35). |
+| 9 | Provider operation reconciliation | `pending → succeeded / unknown / failed`; uncertain operations move through `reconciliation` and may end in `succeeded`, `failed`, or `manual_review`. See [ProviderOperationState](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/subscriptions/models.py:44). |
+| 10 | Subscription cancellation intent | `not requested → cancel at period end requested → cancelled/cleared`. It is represented by `cancel_at_period_end`, `cancellation_requested_at`, and terminal subscription fields rather than a dedicated type. See [Subscription](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/subscriptions/models.py:108). |
+| 11 | Payment | `created → authorized → captured`, or `failed`; captured payments can become `partially_refunded → refunded`. See [PaymentStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/payments/models.py:25). |
+| 12 | Invoice | `draft → issued → paid / void`. See [InvoiceStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/invoices/models.py:25). |
+| 13 | User credit | `active → consumed / expired`. See [CreditStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/credits/models.py:84). |
+| 14 | Credit note | `pending → available → applied`; pending or available notes can also become `cancelled`. See [CreditNoteStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/credits/models.py:92). |
+| 15 | Webhook processing | `pending → processing → processed / failed / skipped`; failed events may be replayed. See [WebhookEventStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/webhooks/models.py:38). |
+| 16 | Invoice batch | `pending → processing → completed / partial / failed`. See [BatchStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/invoices/invoice_batch.py:20). |
+| 17 | Report generation | `pending → generating → completed / failed`. See [ReportStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/invoices/report.py:35). |
+| 18 | Trial-extension request | `pending → approved / rejected / cancelled`. See [TrialExtensionStatus](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/subscriptions/trial_extension.py:20). |
+
+The subscription aggregate contains three independent state machines: business status, provider synchronization, and provider-operation reconciliation. This is structurally sound, but their allowed combinations are not enforced. For example, the database could accept `status='active'`, `remote_sync='permanent_failure'`, and an operation in `succeeded` even if that combination contradicts the coordinator’s assumptions.
+
+### Messaging and reliability
+
+| # | Aggregate | Persisted states and transitions |
+|---|---|---|
+| 19 | Transactional outbox event | `unpublished → retrying → published`; after five failures the row is copied to `dead_letter_events` and removed from the active outbox. The state is encoded through `published_at`, `publish_attempts`, and row location in [OutboxEvent](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/events/model.py:14). |
+| 20 | Worker idempotency record | `absent → processing → completed / failed_permanent`; a retryable failure releases `processing` back to `absent`. Stored in Redis by [worker reliability](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/worker/execution/reliability.py:63). |
+| 21 | Circuit breaker | `closed → open → half_open → closed/open`. The repository has two Redis-backed implementations: the worker reliability implementation and the atomic Lua implementation in [CircuitState](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/resilience/circuit_breaker.py:22). These are separate stored instances of the same conceptual machine. |
+
+### Authentication and tenancy
+
+| # | Aggregate | Persisted states and transitions |
+|---|---|---|
+| 22 | Personal-tenant provisioning | `pending → completed`. SQL membership is authoritative; Mongo carries the mirrored provisioning state. See [ProvisioningState](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/domain/tenancy.py:34). |
+| 23 | Refresh-token family | `active[generation n] → active[generation n+1]`; reuse, secret mismatch, role revision mismatch, or explicit revocation moves it to `revoked`. TTL expiry removes it. The transition protocol is an atomic Redis Lua machine in [account_repository.py](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/adapters/persistence/mongodb/account_repository.py:98). |
+| 24 | OAuth account linking | `intent created → provider callback captured/action ready → confirmed/completed`; it may instead expire. The state is spread across three Redis keys and the nullable fields of [OAuthLinkIntent](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/adapters/persistence/mongodb/account_repository.py:263). |
+| 25 | Session-revocation reconciliation | `clean → revocation pending → clean`. The monotonic authorization revision fences old sessions while Redis cleanup is pending. Stored in [`User.session_revocation_pending`](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/domain/user.py:92). |
+| 26 | Tenant membership mirror synchronization | `synced → pending/error → synced`. The lifecycle is encoded by `mirror_sync_pending`, `mirror_sync_error`, and `role_revision` in [TenantMembership](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/domain/tenancy_models.py:49). |
+
+## Smaller persisted lifecycle latches
+
+These also behave as state machines, although each has only two states or uses value presence:
+
+- User verification: token absent/issued/expired or consumed, coupled with `is_verified: false → true` in [User](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/domain/user.py:70).
+- Password reset: no reset → hash and expiry issued → consumed/cleared or expired, using [reset token fields](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/auth/domain/user.py:101).
+- User activation: `active ↔ inactive`.
+- Plan activation: `active ↔ inactive` in [Plan](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/plans/models.py:76).
+- Currency activation: `active ↔ inactive` in [Currency](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/payments/currency.py:49).
+- Email-template activation: `active ↔ inactive` in [EmailTemplate](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/billing/webhooks/email_template.py:47).
+- Chat-message redaction: `visible → redacted`, encoded by nullable `redacted_at` in [ChatMessage](/home/harmeet/Desktop/Projects/langchain-fastapi-production/src/app/features/agent_saul/adapters/persistence/models.py:145).
+- Document extraction quality: `complete ↔ incomplete`, coupled to the document ingestion status through `extraction_incomplete`.
+- Subscription and credit soft deletion: `live → deleted`, encoded by nullable `deleted_at`.
+- Invoice reissue: `not reissued → linked to replacement invoice`, encoded by `reissued_invoice_id`.
+
+I did not count roles, payment methods, event types, report formats, currency codes, or monotonic revision counters as state machines. They classify data or fence concurrent updates but do not independently describe a lifecycle.
+
+The largest integrity gap is that many Python `StrEnum` values map to plain `VARCHAR` columns. Even when a `CHECK` constraint limits the vocabulary, it generally does not constrain transitions. A direct SQL update can therefore jump from a terminal state back to an initial state. Documents, search documents, payments, invoices, batches, reports, trial extensions, and webhooks are especially exposed to that pattern.
+
+> **For the chosen ones**
+>
+> The dangerous part of an implicit state machine is rarely the missing enum. It is the missing invariant across *multiple* state carriers. `subscriptions.status`, `remote_sync`, and `provider_operation_records.state` form a product state space of 8 × 4 × 6 = 192 combinations, while only a small fraction are meaningful. Veterans model and test the allowed cross-product, not merely each enum. The same issue appears in authentication: `role_revision`, `session_revocation_pending`, Redis session existence, and refresh-family status jointly determine whether a request is authorized. A transition table for each field would still miss that security invariant.

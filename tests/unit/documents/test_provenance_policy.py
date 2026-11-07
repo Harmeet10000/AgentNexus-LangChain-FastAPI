@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from graphiti_core.errors import GraphitiError
@@ -14,9 +15,11 @@ from app.features.documents.adapters.persistence.postgres.document_repository im
     build_chunk_upsert_statement,
 )
 from app.features.documents.api.http.dto import UnifiedAskResponse
-from app.features.documents.application.queries.documents import (
-    _build_answer_cache_key,
-    _graphiti_filter_chunk_ids,
+from app.features.documents.application.queries.documents import _build_answer_cache_key
+from app.features.documents.retrieval.graph.nodes import make_graph_retrieval_node
+from app.features.documents.retrieval.graph.state import (
+    QueryPlan,
+    RetrievalGraphContext,
 )
 
 
@@ -53,17 +56,33 @@ async def test_graphiti_filter_degrades_to_unfiltered_postgres_candidates(error:
         async def search(self, **_: object) -> list[object]:
             raise error
 
-    result = await _graphiti_filter_chunk_ids(
-        graphiti=_OutageGraphiti(),  # type: ignore[arg-type]
-        user_id="alice",
-        query="termination",
-        doc_ids_filter=["doc-a"],
+    # Retargeted to the graph node (mount-retrieval-graph): the inline
+    # `_graphiti_filter_chunk_ids` helper was deleted with the inline ask body,
+    # and the optional graph narrowing now lives in the `graph_neo4j` node. The
+    # degrade contract is unchanged: a graph outage empties the optional
+    # narrowing instead of failing the request, so the Postgres legs still
+    # answer. Legal mode still applies its independent graphiti_verified SQL
+    # predicate.
+    node = make_graph_retrieval_node()
+    result = await node(
+        {
+            "user_id": "alice",
+            "tenant_id": "tenant-a",
+            "allowed_doc_ids": ["doc-a"],
+            "scope_bound": True,
+            "document_versions": [("doc-a", 1, None)],
+            "document_contracts": [("doc-a", 1, (None,), True)],
+            "scope_unavailable_documents": [],
+            "contract_index": None,
+            "doc_ids_filter": ["doc-a"],
+            "query_plan": QueryPlan(rewritten_query="termination"),
+        },
+        SimpleNamespace(
+            context=RetrievalGraphContext(graphiti=_OutageGraphiti())  # type: ignore[arg-type]
+        ),
     )
 
-    # An empty optional graph narrowing must not turn a healthy Postgres search
-    # into an empty answer.  Legal mode still applies its independent
-    # graphiti_verified SQL predicate.
-    assert result == []
+    assert result == {"graph_chunk_ids": []}
 
 
 def test_chunk_rows_and_upsert_carry_explicit_provenance() -> None:

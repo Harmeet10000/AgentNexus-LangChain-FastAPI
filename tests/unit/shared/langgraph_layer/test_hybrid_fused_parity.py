@@ -20,6 +20,16 @@ from app.features.documents.retrieval.graph import nodes as retrieval_nodes
 from app.features.documents.retrieval.graph.nodes import make_hybrid_retrieval_node
 from app.features.documents.retrieval.graph.state import QueryPlan
 
+
+def _runtime(**collaborators: object) -> object:
+    """A minimal invocation runtime: collaborators ride the context schema."""
+    from types import SimpleNamespace
+
+    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+
+    return SimpleNamespace(context=RetrievalGraphContext(**collaborators))
+
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -80,17 +90,20 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(retrieval_nodes, "embed_text", _fake_embed)
-    monkeypatch.setattr("app.features.documents.application.queries.documents.embed_text", _fake_embed)
+    monkeypatch.setattr(
+        "app.features.documents.application.queries.documents.embed_text", _fake_embed
+    )
     weights = [0.6, 0.4, RRF_WEIGHT_TRIGRAM]
     repo = _StubRepo()
 
-    node = make_hybrid_retrieval_node(cast("Any", repo), redis=None)
+    node = make_hybrid_retrieval_node()
     node_result = await node(
         {
             "user_id": "user-1",
             "query_plan": QueryPlan(rewritten_query="indemnity cap"),
             "doc_ids_filter": [],
-        }
+        },
+        _runtime(repo=repo),
     )
     node_order = [chunk.chunk_id for chunk in node_result["retrieved_chunks"]]
 

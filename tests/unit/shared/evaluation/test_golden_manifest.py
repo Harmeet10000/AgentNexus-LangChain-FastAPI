@@ -377,7 +377,9 @@ def test_waiver_requires_rationale_and_human_adjudicator() -> None:
     assert record.adjudicator == "sme-lead-7"
 
 
-def _manifest_for(golden_set_version: str, per_artifact: list[dict[str, object]]) -> GoldenProvenanceManifest:
+def _manifest_for(
+    golden_set_version: str, per_artifact: list[dict[str, object]]
+) -> GoldenProvenanceManifest:
     return GoldenProvenanceManifest.model_validate(
         {
             "manifest_version": "golden_provenance_v1",
@@ -685,14 +687,17 @@ def test_sme_requirements_accepts_plain_human_name() -> None:
     """A human name with no model tokens passes the adjudicator guard."""
     from app.ai.evaluation.schema import SmeRequirements
 
-    assert SmeRequirements(
-        role="practising lawyer",
-        domain="Indian contract law",
-        independence="independent of label producers",
-        commitment="sign-off on disputed cases",
-        named_adjudicator="Jane Hillman",
-        adjudication_status="adjudicated",
-    ).named_adjudicator == "Jane Hillman"
+    assert (
+        SmeRequirements(
+            role="practising lawyer",
+            domain="Indian contract law",
+            independence="independent of label producers",
+            commitment="sign-off on disputed cases",
+            named_adjudicator="Jane Hillman",
+            adjudication_status="adjudicated",
+        ).named_adjudicator
+        == "Jane Hillman"
+    )
 
 
 def test_adjudicator_guard_rejects_compound_model_names() -> None:
@@ -722,11 +727,88 @@ def test_adjudicator_guard_accepts_surname_with_guarded_token() -> None:
     """Surnames merely containing guarded substrings (Gellman, Modelski) pass."""
     from app.ai.evaluation.schema import SmeRequirements
 
-    assert SmeRequirements(
-        role="practising lawyer",
-        domain="Indian contract law",
-        independence="independent of label producers",
-        commitment="sign-off on disputed cases",
-        named_adjudicator="Marcus Gellman",
-        adjudication_status="adjudicated",
-    ).named_adjudicator == "Marcus Gellman"
+    assert (
+        SmeRequirements(
+            role="practising lawyer",
+            domain="Indian contract law",
+            independence="independent of label producers",
+            commitment="sign-off on disputed cases",
+            named_adjudicator="Marcus Gellman",
+            adjudication_status="adjudicated",
+        ).named_adjudicator
+        == "Marcus Gellman"
+    )
+
+
+@pytest.mark.asyncio
+async def test_declared_query_count_mismatch_fails(tmp_path: Path) -> None:
+    """The manifest composition floor: declared count must match actual rows."""
+    corpus_root = tmp_path / "corpus"
+    _write_artifact(corpus_root, "doc-1")
+    set_path = tmp_path / "set.jsonl"
+    _write_set(set_path, _v2_row())
+    _write_manifest(tmp_path / "set.manifest.json", [], corpus_root)
+    manifest_payload = json.loads((tmp_path / "set.manifest.json").read_text())
+    manifest_payload["declared_query_count"] = 2
+    manifest = GoldenProvenanceManifest.model_validate(manifest_payload)
+    golden_set = (await load_golden_set(set_path)).unwrap()
+
+    issues = await audit_golden_manifest(manifest, golden_set)
+
+    assert any("declared_query_count 2 does not match" in issue for issue in issues)
+
+
+@pytest.mark.asyncio
+async def test_composition_floors_enforce_kinds_multi_contract_and_ocr(tmp_path: Path) -> None:
+    corpus_root = tmp_path / "corpus"
+    _write_artifact(corpus_root, "doc-1")
+    set_path = tmp_path / "set.jsonl"
+    _write_set(set_path, _v2_row())
+    _write_manifest(tmp_path / "set.manifest.json", [], corpus_root)
+    manifest_payload = json.loads((tmp_path / "set.manifest.json").read_text())
+    manifest_payload["composition"] = {
+        "min_queries": 5,
+        "document_kinds": ["contracts", "judgments"],
+        "multi_contract_documents": ["SRC-04"],
+        "scanned_ocr_profiles": ["heavy_noise"],
+    }
+    manifest = GoldenProvenanceManifest.model_validate(manifest_payload)
+    golden_set = (await load_golden_set(set_path)).unwrap()
+
+    issues = await audit_golden_manifest(manifest, golden_set)
+
+    assert any("minimum of 5" in issue for issue in issues)
+    assert any("document kinds absent" in issue and "judgments" in issue for issue in issues)
+    assert any("multi-contract documents not referenced" in issue for issue in issues)
+    assert any("scanned-OCR profiles" in issue for issue in issues)
+
+
+@pytest.mark.asyncio
+async def test_composition_floors_pass_on_a_satisfied_corpus(tmp_path: Path) -> None:
+    corpus_root = tmp_path / "corpus"
+    sha = _write_artifact(corpus_root, "doc-1")
+    set_path = tmp_path / "set.jsonl"
+    _write_set(
+        set_path,
+        _v2_row(),
+        _v2_row(case_id="direct_answer_fixture_002", ocr_profile="heavy_noise"),
+    )
+    _write_manifest(
+        tmp_path / "set.manifest.json",
+        [_artifact_entry("doc-1", sha)],
+        corpus_root,
+    )
+    manifest_payload = json.loads((tmp_path / "set.manifest.json").read_text())
+    manifest_payload["declared_query_count"] = 2
+    manifest_payload["composition"] = {
+        "min_queries": 2,
+        "document_kinds": ["contracts"],
+        "multi_contract_documents": [],
+        "scanned_ocr_profiles": [],
+    }
+    manifest = GoldenProvenanceManifest.model_validate(manifest_payload)
+    golden_set = (await load_golden_set(set_path)).unwrap()
+
+    issues = await audit_golden_manifest(manifest, golden_set)
+
+    assert issues == []

@@ -25,8 +25,7 @@ if TYPE_CHECKING:
 
 def _insert_values(statement: Insert) -> dict[str, Any]:
     return {
-        column.key: getattr(value, "value", value)
-        for column, value in statement._values.items()
+        column.key: getattr(value, "value", value) for column, value in statement._values.items()
     }
 
 

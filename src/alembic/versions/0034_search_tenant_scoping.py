@@ -253,8 +253,7 @@ def upgrade() -> None:
     # Tenant indexes as IF NOT EXISTS: no-ops on the fresh shape (nothing
     # indexed yet) and on re-runs.
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_search_documents_tenant_id "
-        "ON search_documents (tenant_id)"
+        "CREATE INDEX IF NOT EXISTS ix_search_documents_tenant_id ON search_documents (tenant_id)"
     )
     op.execute("CREATE INDEX IF NOT EXISTS ix_search_chunks_tenant_id ON search_chunks (tenant_id)")
 

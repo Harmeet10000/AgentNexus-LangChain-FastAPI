@@ -195,7 +195,14 @@ class _MutationService:
 
     async def _seed_provider_subscription(self, customer_id: str) -> str:
         result = await self.provider.execute(
-            CreateSubscriptionOperation(plan_id="rp_plan_a", customer_id=customer_id, total_count=0, quantity=1, customer_notify=True, correlation_id="seed-http")
+            CreateSubscriptionOperation(
+                plan_id="rp_plan_a",
+                customer_id=customer_id,
+                total_count=0,
+                quantity=1,
+                customer_notify=True,
+                correlation_id="seed-http",
+            )
         )
         assert isinstance(result, Success)
         value = result.unwrap().value
@@ -263,7 +270,8 @@ class _MutationService:
         self.calls.append(("create", key))
         result = await self.coordinator.apply(
             CreateSubscription(
-                CommandMetadata(request_id=key, expected_version=self._record().snapshot.version), dto.plan_id
+                CommandMetadata(request_id=key, expected_version=self._record().snapshot.version),
+                dto.plan_id,
             ),
             key,
             subscription_id=str(self._state.id),

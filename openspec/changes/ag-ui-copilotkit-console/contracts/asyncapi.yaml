@@ -1,0 +1,258 @@
+asyncapi: 3.0.0
+info:
+  title: Agent Saul AG-UI event interfaces
+  version: 1.0.0
+  description: >
+    The ordered AG-UI stream introduced by ag-ui-copilotkit-console. The client
+    starts or resumes one run with an HTTP POST and consumes the response as
+    server-sent events. Existing WebSocket subscribers are unchanged.
+x-discovery-events-not-published:
+  Run cancelled: >
+    Cancellation happens after the consumer aborts, so it is recorded in the
+    transcript, structured logs, and metrics rather than emitted onto the
+    closed SSE channel. A later resume begins with STATE_SNAPSHOT.
+channels:
+  agentSaulRun:
+    address: /api/v2/agent-saul/agui/runs
+    description: One authorized Agent Saul run or resume request and its ordered SSE response.
+    messages:
+      runAgentInput:
+        $ref: '#/components/messages/RunAgentInput'
+      runEvent:
+        $ref: '#/components/messages/RunEvent'
+operations:
+  receiveRunCommand:
+    action: receive
+    channel:
+      $ref: '#/channels/agentSaulRun'
+    summary: Accept one start or resume command.
+    messages:
+      - $ref: '#/channels/agentSaulRun/messages/runAgentInput'
+    x-spec-scenarios:
+      - agent-ui-streaming/First run for a new thread
+      - agent-ui-streaming/Resume after disconnect
+  sendRunEvents:
+    action: send
+    channel:
+      $ref: '#/channels/agentSaulRun'
+    summary: Send ordered AG-UI events and one terminal event over SSE.
+    messages:
+      - $ref: '#/channels/agentSaulRun/messages/runEvent'
+    x-spec-scenarios:
+      - agent-ui-streaming/Successful completion
+      - agent-ui-streaming/Streamed assistant answer
+      - agent-ui-streaming/Status transition
+      - agent-ui-streaming/Node progress is observable
+      - agent-ui-streaming/Specialist delegation
+      - agent-ui-streaming/Plan approval pause
+      - agent-ui-streaming/Terminal error
+components:
+  messages:
+    RunAgentInput:
+      name: RunAgentInput
+      title: Start or resume an Agent Saul run
+      payload:
+        $ref: '#/components/schemas/RunAgentInput'
+    RunEvent:
+      name: RunEvent
+      title: Ordered Agent Saul run event
+      payload:
+        $ref: '#/components/schemas/RunEvent'
+  schemas:
+    RunAgentInput:
+      type: object
+      additionalProperties: false
+      required: [threadId]
+      properties:
+        threadId:
+          type: string
+          minLength: 1
+          description: Stable identity for the resumable graph thread.
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/InputMessage'
+        state:
+          type: object
+          additionalProperties: true
+        resume:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResumeAnswer'
+      anyOf:
+        - required: [messages]
+        - required: [resume]
+    InputMessage:
+      type: object
+      additionalProperties: true
+      required: [id, role, content]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: Stable semantic identity used to reject duplicate submissions.
+        role:
+          type: string
+        content:
+          type: string
+    ResumeAnswer:
+      type: object
+      additionalProperties: false
+      required: [interruptId, value]
+      properties:
+        interruptId:
+          type: string
+          minLength: 1
+          description: Stable identity of an interrupt currently open on the thread.
+        value: {}
+    RunEvent:
+      oneOf:
+        - $ref: '#/components/schemas/RunStarted'
+        - $ref: '#/components/schemas/TextMessageEvent'
+        - $ref: '#/components/schemas/StateEvent'
+        - $ref: '#/components/schemas/ActivityEvent'
+        - $ref: '#/components/schemas/StepEvent'
+        - $ref: '#/components/schemas/SubagentEvent'
+        - $ref: '#/components/schemas/RunFinished'
+        - $ref: '#/components/schemas/RunError'
+      discriminator: type
+    EventIdentity:
+      type: object
+      required: [type, runId, threadId]
+      properties:
+        type:
+          type: string
+        runId:
+          type: string
+        threadId:
+          type: string
+    RunStarted:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          properties:
+            type:
+              const: RUN_STARTED
+    TextMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          required: [messageId]
+          properties:
+            type:
+              enum: [TEXT_MESSAGE_START, TEXT_MESSAGE_CONTENT, TEXT_MESSAGE_END]
+            messageId:
+              type: string
+            delta:
+              type: string
+    StateEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          properties:
+            type:
+              enum: [STATE_SNAPSHOT, STATE_DELTA]
+            snapshot:
+              type: object
+              additionalProperties: true
+            delta:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+    ActivityEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          properties:
+            type:
+              enum: [ACTIVITY_SNAPSHOT, ACTIVITY_DELTA]
+            activity:
+              type: object
+              additionalProperties: true
+    StepEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          required: [stepId, node, position]
+          properties:
+            type:
+              enum: [STEP_STARTED, STEP_FINISHED]
+            stepId:
+              type: string
+            node:
+              type: string
+            position:
+              type: integer
+              minimum: 1
+    SubagentEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          required: [subagentId]
+          properties:
+            type:
+              enum: [SUBAGENT_STARTED, SUBAGENT_FINISHED, SUBAGENT_ERROR]
+            subagentId:
+              type: string
+            parentRunId:
+              type: string
+    RunFinished:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          required: [outcome]
+          properties:
+            type:
+              const: RUN_FINISHED
+            outcome:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [type]
+                  properties:
+                    type:
+                      const: success
+                - type: object
+                  additionalProperties: false
+                  required: [type, interrupts]
+                  properties:
+                    type:
+                      const: interrupt
+                    interrupts:
+                      type: array
+                      minItems: 1
+                      items:
+                        $ref: '#/components/schemas/Interrupt'
+    Interrupt:
+      type: object
+      additionalProperties: false
+      required: [id, reason, message, responseSchema]
+      properties:
+        id:
+          type: string
+        reason:
+          type: string
+          enum: [plan_approval, human_review_required, clarification_needed, ocr_reupload]
+        message:
+          type: string
+        responseSchema:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+    RunError:
+      allOf:
+        - $ref: '#/components/schemas/EventIdentity'
+        - type: object
+          required: [code, retryable]
+          properties:
+            type:
+              const: RUN_ERROR
+            code:
+              type: string
+            retryable:
+              type: boolean
+            message:
+              type: string

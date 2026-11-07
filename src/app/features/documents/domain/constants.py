@@ -29,6 +29,16 @@ RRF_K = 60
 RRF_WEIGHT_BM25 = 1.5
 RRF_WEIGHT_VECTOR = 1.0
 RRF_WEIGHT_TRIGRAM = 1.2
+# Relationship-graph fusion branch (optional fourth leg, default-off via
+# DOCUMENTS_GRAPHITI_FUSION_ENABLED). Measured, not folk: 0.1 is the argmax of
+# the recorded weight sweep on the grown golden corpus — recall@10, MRR, and
+# nDCG@10 all peak at 0.1 and the branch's leave-one-branch-out ablation at
+# that weight is positive on every metric. Report (measurement method, sweep
+# table, proxy caveat, contribution deltas):
+# evals/reports/graphiti_branch_legal_retrieval_v2_wave4.json and
+# evals/reports/graphiti_branch_legal_retrieval_v2_wave4.measurements.json.
+# Flipping the branch default-on is a later change that cites that report.
+RRF_WEIGHT_GRAPHITI = 0.1
 # Keyword-leg phrase over-fetch multiple: the LIKE post-filter narrows, so the
 # leg reads this many times the candidate budget and truncates after filtering.
 PHRASE_OVERFETCH_MULTIPLE = 5

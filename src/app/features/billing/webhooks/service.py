@@ -1320,7 +1320,9 @@ class WebhookService:
         rz_payment_id = entity.get("id")
         observed = await self._observe_subscription(
             subscription,
-            PaymentFailed(metadata=self._metadata(event_id, entity), payment_id=str(rz_payment_id or "")),
+            PaymentFailed(
+                metadata=self._metadata(event_id, entity), payment_id=str(rz_payment_id or "")
+            ),
             event_id=event_id,
             event_type=WebhookEventType.PAYMENT_FAILED.value,
         )

@@ -52,7 +52,11 @@ async def test_uploaded_fixture_reaches_chunk_rows_through_the_compiled_graph(
     async def embed_texts(texts: list[str], **_kwargs: object) -> list[list[float]]:
         return [[0.0] * width for _ in texts]
 
-    monkeypatch.setattr(import_module("app.features.documents.application.commands.upload_document"), "embed_texts", embed_texts)
+    monkeypatch.setattr(
+        import_module("app.features.documents.application.commands.upload_document"),
+        "embed_texts",
+        embed_texts,
+    )
     graph = build_document_ingestion_graph(
         object_store=cast("Any", object_store),
         graphiti=None,

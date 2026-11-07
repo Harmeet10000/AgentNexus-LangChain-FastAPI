@@ -19,6 +19,7 @@ from returns.result import Failure
 from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.generation import TextGenerationRequest
 from app.ai.graph.retry import TransientExternalError, retry_immediate
+from app.config import get_settings
 from app.features.documents.retrieval.reranking.reranker import get_configured_reranker
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger
@@ -29,6 +30,15 @@ from app.retrieval.token_counter import count_tokens as default_count_tokens
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
 from app.utils import InfrastructureException, to_sorted_key_bytes
 
+from .budgets import (
+    STAGE_EDGE_GROUNDING,
+    STAGE_GENERATE,
+    STAGE_GRADE,
+    STAGE_PLAN,
+    STAGE_RERANK,
+    STAGE_RETRIEVE_FUSION,
+    STAGE_SOURCE_IDENTIFIER,
+)
 from .state import (  # noqa: TC001 — RetrievalState resolves at runtime for branch schemas
     CachedAskEnvelope,
     Citation,
@@ -55,6 +65,8 @@ if TYPE_CHECKING:
     )
     from app.retrieval.edge_expansion import EdgeContextBlock, EdgeExpansion
     from app.retrieval.token_counter import CountTokens
+
+    from .budgets import StageBudgetTracker, StageBudgetViolation
 
 _QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal retrieval query planning engine."),
@@ -123,26 +135,84 @@ _GRADE_LOOP_MAX_ATTEMPTS: int = 2
 
 
 @asynccontextmanager
-async def _stage_span(stage: str) -> AsyncIterator[None]:
+async def _stage_span(
+    stage: str,
+    tracker: StageBudgetTracker | None = None,
+    document_class: str = "unknown",
+) -> AsyncIterator[list[StageBudgetViolation]]:
     """Emit one span attributed to a retrieval-graph stage, with its duration.
 
     The OpenTelemetry span carries the stage attribution; a structured
     ``retrieval_stage_span`` log event mirrors it so the slice is observable
     (and testable) without a configured OTel exporter. First slice of G6.
+
+    When a stage-budget tracker is supplied (G6 task 4.1), the exit duration is
+    checked against the stage's latency budget; a breach is recorded by the
+    tracker (degradation event + sustained-alert window) and yielded back to
+    the node as a violation so the ask envelope names the stage that ran over.
     """
     started = time.perf_counter()
     tracer = otel_trace.get_tracer(__name__)
+    violations: list[StageBudgetViolation] = []
     with tracer.start_as_current_span(f"retrieval_graph.{stage}", attributes={"stage": stage}):
         try:
-            yield
+            yield violations
         finally:
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             logger.bind(stage=stage, duration_ms=duration_ms).info("retrieval_stage_span")
+            if tracker is not None:
+                violation = tracker.check_latency(stage, duration_ms, document_class=document_class)
+                if violation is not None:
+                    violations.append(violation)
 
 
 def _stage_usage(stage: str, calls: int) -> dict[str, object]:
     """One stage-usage delta; nodes append, the state channel concatenates."""
     return {"stage_usage": [StageUsage(stage=stage, calls=calls)]}
+
+
+_BUDGET_WARNING_CODE = "STAGE_BUDGET_EXHAUSTED"
+
+
+def _violation_warning(violation: StageBudgetViolation) -> StageWarning:
+    """The typed degraded-outcome record: the envelope names stage and budget."""
+    return StageWarning(
+        stage=violation.stage,
+        code=_BUDGET_WARNING_CODE,
+        message=(
+            f"Stage '{violation.stage}' exhausted its {violation.budget_kind} budget "
+            f"({violation.observed:g} > {violation.limit:g}); the ask degraded instead of "
+            "continuing unbounded."
+        ),
+        severity="warning",
+    )
+
+
+def _violation_state(violations: Sequence[StageBudgetViolation]) -> dict[str, object]:
+    """State delta carrying the typed budget warnings, when any fired."""
+    if not violations:
+        return {}
+    return {"stage_warnings": [_violation_warning(violation) for violation in violations]}
+
+
+def _charge_stage(
+    context: RetrievalGraphContext, stage: str, document_class: str = "unknown"
+) -> list[StageBudgetViolation]:
+    """Pre-charge the stage's call budget; a refusal stops the unbounded run."""
+    tracker = context.budgets
+    if tracker is None:
+        return []
+    violation = tracker.try_charge(stage, document_class=document_class)
+    return [violation] if violation is not None else []
+
+
+def _state_document_class(state: RetrievalState) -> str:
+    """Best-effort document-class attribution from the hydrated rows."""
+    for row in state.get("retrieved_rows", []):
+        kind = row.get("chunk_kind")
+        if kind:
+            return str(kind)
+    return "unknown"
 
 
 def _invocation_context(runtime: Any) -> RetrievalGraphContext:
@@ -170,9 +240,21 @@ def _structured(llm: Any, schema: type[Any]) -> Any:
 def make_query_analyzer_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
     async def query_analyzer_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
         context = _invocation_context(runtime)
-        async with _stage_span("plan"):
+        document_class = _state_document_class(state)
+        # Pre-call charge (G6 task 4.1): a refusal degrades to the default plan
+        # instead of spending another unbounded planning call.
+        refusals = _charge_stage(context, STAGE_PLAN, document_class)
+        if refusals:
+            query = state["query"]
+            return {
+                "query_plan": QueryPlan(rewritten_query=query, sub_queries=[query]),
+                "cache_hit": False,
+                **_stage_usage(STAGE_PLAN, 0),
+                **_violation_state(refusals),
+            }
+        async with _stage_span(STAGE_PLAN, context.budgets, document_class) as violations:
             result = await _plan_and_cache(state, context)
-        return {**result, **_stage_usage("plan", 1)}
+        return {**result, **_stage_usage(STAGE_PLAN, 1), **_violation_state(violations)}
 
     return query_analyzer_node
 
@@ -282,10 +364,21 @@ def make_source_identifier_node() -> Callable[[RetrievalState, Any], Awaitable[d
         state: RetrievalState, runtime: Any = None
     ) -> dict[str, object]:
         context = _invocation_context(runtime)
-        async with _stage_span("source_identifier"):
-            return await _identify_sources(
+        document_class = _state_document_class(state)
+        refusals = _charge_stage(context, STAGE_SOURCE_IDENTIFIER, document_class)
+        if refusals:
+            return {
+                "query_plan": state["query_plan"],
+                **_stage_usage(STAGE_SOURCE_IDENTIFIER, 0),
+                **_violation_state(refusals),
+            }
+        async with _stage_span(
+            STAGE_SOURCE_IDENTIFIER, context.budgets, document_class
+        ) as violations:
+            result = await _identify_sources(
                 state, _structured(context.llm, SourceCriteria), context.repo
             )
+        return {**result, **_violation_state(violations)}
 
     return source_identifier_node
 
@@ -477,8 +570,20 @@ def make_hybrid_retrieval_node() -> Callable[[RetrievalState, Any], Awaitable[di
                 "retrieved_rows": [],
                 **_stage_usage("retrieve_fusion", 0),
             }
-        async with _stage_span("retrieve_fusion"):
-            return await _retrieve_fused_state(state, context)
+        document_class = _state_document_class(state)
+        refusals = _charge_stage(context, STAGE_RETRIEVE_FUSION, document_class)
+        if refusals:
+            return {
+                "retrieved_chunks": [],
+                "retrieved_rows": [],
+                **_stage_usage(STAGE_RETRIEVE_FUSION, 0),
+                **_violation_state(refusals),
+            }
+        async with _stage_span(
+            STAGE_RETRIEVE_FUSION, context.budgets, document_class
+        ) as violations:
+            result = await _retrieve_fused_state(state, context)
+        return {**result, **_violation_state(violations)}
 
     return hybrid_retrieval_node
 
@@ -536,8 +641,6 @@ async def _retrieve_fused_state(
     # the same registration contract the inline ask path uses — the branch is
     # joined through the shared `retrieve_fused` registry only when the flag is
     # set AND a Graphiti client is wired, and no graph read runs while disabled.
-    from app.config import get_settings  # noqa: PLC0415
-
     graphiti_branch = graphiti if get_settings().DOCUMENTS_GRAPHITI_FUSION_ENABLED else None
     filter_params = build_search_filter_params(
         metadata_filter={
@@ -608,14 +711,27 @@ def make_reranker_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, 
     async def reranker_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
         # A context-supplied reranker wins; otherwise the process-configured
         # one resolves here, per invocation (never captured at compile).
-        resolved = _invocation_context(runtime).reranker or get_configured_reranker()
+        context = _invocation_context(runtime)
+        resolved = context.reranker or get_configured_reranker()
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("retrieved_chunks", [])[:20]
-        async with _stage_span("rerank"):
+        document_class = _state_document_class(state)
+        refusals = _charge_stage(context, STAGE_RERANK, document_class)
+        if refusals:
+            return {
+                "reranked_chunks": [],
+                **_stage_usage(STAGE_RERANK, 0),
+                **_violation_state(refusals),
+            }
+        async with _stage_span(STAGE_RERANK, context.budgets, document_class) as violations:
             reranked: list[RetrievedChunk] = await resolved.rerank(
                 plan.rewritten_query, chunks, limit=5
             )
-        return {"reranked_chunks": reranked, **_stage_usage("rerank", 1)}
+        return {
+            "reranked_chunks": reranked,
+            **_stage_usage(STAGE_RERANK, 1),
+            **_violation_state(violations),
+        }
 
     return reranker_node
 
@@ -708,7 +824,16 @@ def make_edge_grounding_node() -> Callable[[RetrievalState, Any], Awaitable[dict
                 "edge_citations": [],
                 **_stage_usage("edge_grounding", 0),
             }
-        async with _stage_span("edge_grounding"):
+        document_class = _state_document_class(state)
+        refusals = _charge_stage(context, STAGE_EDGE_GROUNDING, document_class)
+        if refusals:
+            return {
+                "grounding_edge_texts": [],
+                "edge_citations": [],
+                **_stage_usage(STAGE_EDGE_GROUNDING, 0),
+                **_violation_state(refusals),
+            }
+        async with _stage_span(STAGE_EDGE_GROUNDING, context.budgets, document_class) as violations:
             expansions = await _edge_grounding_for_reranked(
                 graphiti=graphiti,
                 query=plan.rewritten_query,
@@ -725,7 +850,8 @@ def make_edge_grounding_node() -> Callable[[RetrievalState, Any], Awaitable[dict
         return {
             "grounding_edge_texts": [block.text for block, _ in resolved_blocks],
             "edge_citations": _edge_citations(resolved_blocks),
-            **_stage_usage("edge_grounding", 1),
+            **_stage_usage(STAGE_EDGE_GROUNDING, 1),
+            **_violation_state(violations),
         }
 
     return edge_grounding_node
@@ -951,7 +1077,19 @@ def make_context_grader_node() -> Callable[[RetrievalState, Any], Awaitable[dict
         context = _invocation_context(runtime)
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
-        async with _stage_span("grade"):
+        document_class = _state_document_class(state)
+        refusals = _charge_stage(context, STAGE_GRADE, document_class)
+        if refusals:
+            # The same degrade the seam-failure path chose — proceed to
+            # generation — but honest: the envelope names the stage and budget.
+            grade = ContextGrade(sufficient=True, missing_aspects=[])
+            return {
+                "context_grade": grade,
+                "iteration_count": state.get("iteration_count", 0) + 1,
+                **_stage_usage(STAGE_GRADE, 0),
+                **_violation_state(refusals),
+            }
+        async with _stage_span(STAGE_GRADE, context.budgets, document_class) as violations:
             grade = await _grade_context(
                 grader_llm=_structured(context.llm, ContextGrade),
                 grader=context.grader,
@@ -971,7 +1109,8 @@ def make_context_grader_node() -> Callable[[RetrievalState, Any], Awaitable[dict
         return {
             "context_grade": grade,
             "iteration_count": iteration_count,
-            **_stage_usage("grade", 1),
+            **_stage_usage(STAGE_GRADE, 1),
+            **_violation_state(violations),
         }
 
     return context_grader_node
@@ -1034,6 +1173,36 @@ async def _grade_context_via_llm(*, grader_llm: Any, payload: str) -> ContextGra
         return ContextGrade(sufficient=True, missing_aspects=[])
 
 
+async def _fallback_outcome(
+    state: RetrievalState,
+    redis: Any | None,
+    *,
+    extra_warnings: list[StageWarning] | None = None,
+) -> dict[str, object]:
+    """The typed fallback outcome: fallback answer, finalised envelope, no spend.
+
+    Shared by the grade-cap escape and the generation budget refusal; the
+    caller adds its own stage-usage delta and, for a budget refusal, the
+    typed violation warnings the envelope must name.
+    """
+    answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
+    finalised = _finalise_ask_state(state, answer)
+    if extra_warnings:
+        # The refusal warnings must reach the envelope this run finalises
+        # (the state channel lands only after the node returns).
+        finalised["quality_warnings"] = _merge_warning_lists(
+            [
+                cast("list[StageWarning]", finalised["quality_warnings"]),
+                extra_warnings,
+            ]
+        )
+    await _cache_ask_envelope(state, redis, answer, finalised)
+    return {
+        **finalised,
+        "messages": [AIMessage(content=answer.answer)],
+    }
+
+
 def make_generator_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
     async def generator_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
         context = _invocation_context(runtime)
@@ -1075,47 +1244,27 @@ def make_generator_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str,
             and state.get("iteration_count", 0) >= _GRADE_LOOP_MAX_ATTEMPTS
         )
         if cap_exhausted:
-            answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
-            finalised = _finalise_ask_state(state, answer)
-            await _cache_ask_envelope(state, redis, answer, finalised)
             return {
-                **finalised,
-                "messages": [AIMessage(content=answer.answer)],
-                **_stage_usage("generate", 0),
+                **(await _fallback_outcome(state, redis)),
+                **_stage_usage(STAGE_GENERATE, 0),
             }
 
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
-        payload_data: dict[str, Any] = {
-            "query": plan.rewritten_query,
-            "chunks": [chunk.model_dump() for chunk in chunks],
-        }
-        # The key exists only when edge expansion actually produced blocks, so
-        # a query that touches no edges renders the exact pre-edge payload.
-        grounding_edges = state.get("grounding_edge_texts") or []
-        if grounding_edges:
-            payload_data["grounding_edges"] = list(grounding_edges)
-        payload = serialize_to_toon(payload_data)
-        messages: list[SystemMessage | HumanMessage] = [
-            SystemMessage(content=_GENERATOR_SYSTEM_PROMPT),
-            HumanMessage(content=payload),
-        ]
-        generator_llm = _structured(context.llm, GeneratedAnswer)
-        async with _stage_span("generate"):
-            try:
-                raw_answer = await retry_immediate(
-                    lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
-                    label="gemini_grounded_generator",
-                )
-                answer: GeneratedAnswer = GeneratedAnswer.model_validate(raw_answer)
-            except Exception as exc:  # noqa: BLE001 — generator failure must return hard fallback
-                exc.add_note("operation=generator")
-                logger.bind(operation="generator", error=str(exc)).warning(
-                    "generator_failed_using_fallback"
-                )
-                answer = GeneratedAnswer(
-                    answer=FALLBACK_ANSWER, citations=[], confidence="uncertain"
-                )
+        # Pre-call charge (G6 task 4.1): a refusal returns the typed fallback
+        # outcome instead of spending an unbounded generation call.
+        refusals = _charge_stage(context, STAGE_GENERATE, _state_document_class(state))
+        if refusals:
+            refusal_state = _violation_state(refusals)
+            refusal_warnings = cast(
+                "list[StageWarning]", refusal_state.get("stage_warnings", [])
+            )
+            return {
+                **(await _fallback_outcome(state, redis, extra_warnings=refusal_warnings)),
+                **_stage_usage(STAGE_GENERATE, 0),
+                **refusal_state,
+            }
+        answer, violations = await _generate_answer(context, state, plan, chunks)
 
         if answer.confidence == "uncertain" and FALLBACK_ANSWER not in answer.answer:
             answer = answer.model_copy(update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"})
@@ -1126,10 +1275,109 @@ def make_generator_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str,
         return {
             **finalised,
             "messages": [AIMessage(content=answer.answer)],
-            **_stage_usage("generate", 1),
+            **_stage_usage(STAGE_GENERATE, 1),
+            **_violation_state(violations),
         }
 
     return generator_node
+
+
+async def _generate_answer(
+    context: RetrievalGraphContext,
+    state: RetrievalState,
+    plan: QueryPlan,
+    chunks: list[RetrievedChunk],
+) -> tuple[GeneratedAnswer, list[StageBudgetViolation]]:
+    """One grounded generation attempt over the assembled payload (G6/G5 seam).
+
+    The payload gains ``grounding_edges`` only when edge expansion produced
+    blocks (a query that touches no edges renders the exact pre-edge payload)
+    and ``section_context`` only when hydration is enabled (G5, default off);
+    citations always resolve from the chunk rows, never from either addition.
+    """
+    payload_data: dict[str, Any] = {
+        "query": plan.rewritten_query,
+        "chunks": [chunk.model_dump() for chunk in chunks],
+    }
+    grounding_edges = state.get("grounding_edge_texts") or []
+    if grounding_edges:
+        payload_data["grounding_edges"] = list(grounding_edges)
+    # Section hydration (G5 task 4.3): DEFAULT OFF, adopted only on the
+    # baseline's context-starvation attribution. The section text widens what
+    # the generator sees; citations still resolve to the matched clauses from
+    # the chunk rows, never from the hydrated text.
+    if get_settings().DOCUMENTS_SECTION_HYDRATION_ENABLED:
+        section_context = await _hydrate_sections(context, state, chunks)
+        if section_context:
+            payload_data["section_context"] = section_context
+    payload = serialize_to_toon(payload_data)
+    messages: list[SystemMessage | HumanMessage] = [
+        SystemMessage(content=_GENERATOR_SYSTEM_PROMPT),
+        HumanMessage(content=payload),
+    ]
+    generator_llm = _structured(context.llm, GeneratedAnswer)
+    async with _stage_span(
+        STAGE_GENERATE, context.budgets, _state_document_class(state)
+    ) as violations:
+        try:
+            raw_answer = await retry_immediate(
+                lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
+                label="gemini_grounded_generator",
+            )
+            return GeneratedAnswer.model_validate(raw_answer), violations
+        except Exception as exc:  # noqa: BLE001 — generator failure must return hard fallback
+            exc.add_note("operation=generator")
+            logger.bind(operation="generator", error=str(exc)).warning(
+                "generator_failed_using_fallback"
+            )
+            return (
+                GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain"),
+                violations,
+            )
+
+
+async def _hydrate_sections(
+    context: RetrievalGraphContext,
+    state: RetrievalState,
+    chunks: list[RetrievedChunk],
+) -> dict[str, str]:
+    """Per-chunk parent-section text from the stored structural trees.
+
+    Fail-closed and additive: no repository, no resolved tenant, a tree-read
+    failure, or a chunk whose heading path matches nothing all hydrate
+    nothing — the generator payload is then byte-identical to the
+    non-hydrated contract.
+    """
+    from app.features.documents.retrieval.graph.hydration import (  # noqa: PLC0415
+        hydrate_sections_for_chunks,
+    )
+
+    repo = context.repo
+    user_id = str(state.get("user_id") or "")
+    document_ids = sorted({chunk.parent_doc_id for chunk in chunks})
+    if repo is None or not user_id or not document_ids:
+        return {}
+    try:
+        trees_result = await repo.fetch_structural_trees(
+            user_id=user_id,
+            tenant_id=state.get("tenant_id"),
+            document_ids=document_ids,
+        )
+    except Exception:  # noqa: BLE001 — hydration degrades, never fails the ask
+        logger.bind(operation="section_hydration").warning("section_hydration_failed")
+        return {}
+    if trees_result is None or isinstance(trees_result, Failure):
+        return {}
+    trees = {
+        str(row["document_id"]): row.get("structural_tree") or {}
+        for row in trees_result.unwrap()
+        if isinstance(row.get("structural_tree"), dict)
+    }
+    return hydrate_sections_for_chunks(
+        trees=trees,
+        chunks=chunks,
+        count_tokens=context.count_tokens or default_count_tokens,
+    )
 
 
 async def _cache_ask_envelope(
@@ -1180,7 +1428,9 @@ def _finalise_ask_state(state: RetrievalState, answer: GeneratedAnswer) -> dict[
     graph_document_ids = {
         str(row["document_id"]) for row in rows if bool(row.get("graphiti_verified", False))
     }
-    warnings = _merge_warning_lists([_warnings_from_rows(rows)])
+    warnings = _merge_warning_lists(
+        [_warnings_from_rows(rows), list(state.get("stage_warnings", []))]
+    )
     unavailable_scope_documents = list(state.get("scope_unavailable_documents", []))
     if unavailable_scope_documents:
         warnings.append(

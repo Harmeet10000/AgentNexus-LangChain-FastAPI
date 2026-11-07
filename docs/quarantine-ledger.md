@@ -54,6 +54,19 @@ and it leaves the tree only through a recorded discard decision against its row.
   `ingestion-truthfulness-residue` replaced the silent drop with an explicit
   mapping (or a typed failure naming unmapped keys); the row remains because
   the shim itself remains.
+- 2026-11-08, `deferred-retrieval-roadmap`: the fourth-branch registration row
+  is RESOLVED (ported) — the graph branch is admitted at the reserved
+  registration point with the baseline-cited measured weight
+  (`RRF_WEIGHT_GRAPHITI = 0.1` from
+  `evals/reports/graphiti_branch_legal_retrieval_v2_wave4.measurements.json`),
+  default-off behind `DOCUMENTS_GRAPHITI_FUSION_ENABLED` until a change cites
+  the report for a default-on flip.
+- 2026-11-08, `deferred-retrieval-roadmap`: the preamble row is HALF-RESOLVED —
+  the fill landed (`ingestion/chunking/context_summary.py`, one context call per
+  document) behind `DOCUMENTS_CONTEXTUAL_PREAMBLE_ENABLED`, default off; the row
+  stays open until the measured default-on comparison completes (recorded
+  offline: `evals/reports/contextual_preamble_legal_retrieval_v2_wave4.comparison.json`;
+  one live generation run outstanding).
 
 ## Referenced by
 

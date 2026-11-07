@@ -128,8 +128,7 @@ class TypedJob[T: CeleryTaskPayload](BaseModel):
         return {
             field_name: value
             for field_name, value in full.items()
-            if type(self.payload).model_fields[field_name].is_required()
-            or field_name in fields_set
+            if type(self.payload).model_fields[field_name].is_required() or field_name in fields_set
         }
 
     def wire_json(self) -> str:

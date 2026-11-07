@@ -1,0 +1,69 @@
+Here's both deliverables — the resume block and the full campaign.
+
+## 1. Resume-grade project description
+
+The trick to AI-proofing: nobody's LLM writes "cosine 1.000000 against the live model" or admits to fifteen review rounds. Specifics, numbers, and scar tissue are your proof-of-humanity. Two versions:
+
+**Bullet version (for the experience section):**
+
+> **Legal AI Review Platform — Python / FastAPI / LangGraph** *(personal production project, open source)*
+> - Built a multi-tenant legal document review platform on FastAPI and LangGraph: ingestion pipeline with per-contract boundary detection, typed relationship extraction grounded by fail-closed char-span validation, and a human-in-the-loop review graph with durable interrupts and resumable checkpoints.
+> - Designed evidence-handling so answers can't lie: opaque TTL evidence handles, blocking grounding gates (quote-substring checks + entailment on survivors), and ingestion fidelity metrics that surface `completed_with_warnings` instead of silent success.
+> - Shipped hybrid retrieval (BM25 + DiskANN + trigram, fused via reciprocal rank) with tenant-scoped cache keys; hunted down a live embedding API bug where the provider silently ignored `task_type` and returned bit-identical query/document vectors (cosine 1.000) — fixed by switching to the model family's instruction templates and verified with live cosine measurements.
+> - Maintained a 105-case evaluation corpus with dual-blind annotation (Cohen's κ 0.815), provenance manifests, and CI gates; grew it through four feature PRs and ~70 commits in one week without breaking 1,675 unit tests.
+> - Restructured three feature modules to hexagonal architecture mid-project (290+ import sites rewritten) with import-linter contracts enforcing the boundaries in CI.
+
+**Short paragraph version (for a summary or LinkedIn About):**
+
+> I built and maintain an open-source legal AI review platform (FastAPI + LangGraph + Postgres/pgvector) where the hard problems aren't the model calls — they're everything around them: tenant isolation that fails closed, ingestion that refuses to report success it didn't earn, migrations that survive three different database states, and evaluation corpora with real inter-annotator agreement. One feature PR went through fifteen review rounds; each round fixed a class of bug, not an instance.
+
+**What makes these AI-proof** — kill these on sight if you edit: "leveraged," "robust," "seamless," "cutting-edge," "passionate about," triple-parallel structures, every sentence the same length, no failures mentioned. Real engineers write "the zip fails on every ingestion" — keep one or two wounds visible per block.
+
+## 2. LinkedIn + X campaign plan
+
+Structure: **6 posts over ~2.5 weeks**, each a standalone story, cross-posted with platform adaptation. The spine: post the *stories engineers respect*, not the project tour. The repo link appears only twice.
+
+| # | Day | Post | Angle |
+|---|-----|------|-------|
+| 1 | Mon | The hook | "I spent a Saturday fixing the same feature 15 times — on purpose" |
+| 2 | Thu | The bug story | gemini-embedding-2 returning bit-identical vectors |
+| 3 | Mon (wk 2) | The infra war story | Migration 0034 and the third database shape |
+| 4 | Thu (wk 2) | The contrarian take | "Your RAG doesn't have an eval problem, it has a lying problem" (fidelity metrics) |
+| 5 | Mon (wk 3) | The methodology flex | Eval corpus, κ 0.815, refusing to call it release-ready |
+| 6 | Fri (wk 3) | The repo tour | The only post that's actually about the project; repo link here |
+
+**Cadence rules:** Tue–Thu mornings for LinkedIn (8–10am your audience's timezone); X posts can go same day as LinkedIn but rewrite them — X wants the sharp 3-line version, LinkedIn wants the 150–250 word narrative. Always stay online 30–60 min after posting to reply to every comment — replies carry more reach than the post itself.
+
+**Draft — Post 1 (LinkedIn):**
+
+> I merged a pull request this month that went through fifteen rounds of review.
+> Round 6: my span coordinates were in the wrong coordinate system — the model saw boundary-local text, the database stored document-absolute offsets.
+> Round 10: an optional pass was spending the token budget before mandatory work ran, silently downgrading documents that used to extract cleanly.
+> Round 12: an empty result list was being treated as success. A provider outage produced a zero-edge *success*.
+> Nobody made me do this. It's my own project. But here's what fifteen rounds bought me: every fix addressed a class of bug, not an instance. The retry that skips paid work. The cache key that can't serve one role's vector for another. The checkpoint that survives a graph outage.
+> Ship-your-own-code-without-review is how senior engineers stay senior. Who reviews your side projects?
+
+**Draft — Post 1 (X version):**
+
+> merged a PR after 15 rounds of review. it's my own side project.
+>
+> round 6: wrong coordinate system. round 10: optional pass raiding the budget before mandatory work. round 12: empty list = success, so an outage recorded as a win.
+>
+> every fix was a class of bug, not an instance. who reviews your side projects?
+
+**Draft — Post 2 (the embedding bug, LinkedIn):**
+
+> The most dangerous bug I've hit this year returned a 200, no error, no warning.
+> I switched embedding models. The new one accepts a `task_type` parameter — query vs document — and silently ignores it. Retrieval queries and indexed documents were embedded into the *same* space with *identical* instructions. Cosine similarity between them: 1.000000. Bit-identical.
+> Nothing failed. Search just got quietly worse, in a way no dashboard would ever surface, because there was no error to alert on.
+> The fix: the model family abandons task_type for documented instruction prefixes ("task: search result | query: ..."). I verified against the live model — cosine dropped from 1.000 to 0.969, query and document vectors finally differ.
+> Lesson: silent API degradation beats loud failure for damage. What's the quietest bug you've ever caught?
+
+**Engagement tactics:**
+- Post 3's hook: "My migration had to handle a database shape I'd never seen: migrations marked applied, tables missing." End with a question — every post ends with one; they drive the reply volume the algorithm rewards.
+- Post 5 flexes hardest but keep it humble: "not release-ready until an SME signs off" is the line people will quote.
+- Post 6 (repo tour): bullet the architecture in plain terms, link the repo, pin it. Reference the earlier posts ("the embedding bug from two weeks ago lives here") — drives profile deep-dives.
+- Don't cross-post identical text. X punishes LinkedIn-style paragraphs; LinkedIn punishes thread-style fragments.
+- After the campaign, recycle the best performer as a "one year later" or "what I'd do differently" post — evergreen content.
+
+One caution: you're linking a public repo, so make sure nothing in it embeds real client documents or keys before the traffic arrives — the eval corpus is synthetic/public-source, so you're clean there, but it's worth a final grep before Post 6.

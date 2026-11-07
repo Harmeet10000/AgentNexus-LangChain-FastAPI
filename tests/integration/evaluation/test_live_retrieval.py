@@ -153,7 +153,11 @@ async def test_live_retrieval_returns_real_identifiers(
         message = "retrieval evaluation unexpectedly constructed an LLM"
         raise AssertionError(message)
 
-    monkeypatch.setattr(import_module("app.features.documents.application.queries.documents"), "embed_text", embed_query)
+    monkeypatch.setattr(
+        import_module("app.features.documents.application.queries.documents"),
+        "embed_text",
+        embed_query,
+    )
     engine, session_local = await init_db()
     async with session_local() as session:
         transaction = await session.begin()

@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from returns.result import Success
 
 if TYPE_CHECKING:
     from typing import Any
+
+
+def _runtime(**collaborators: Any) -> Any:
+    """A minimal invocation runtime: collaborators ride the context schema."""
+    from types import SimpleNamespace
+
+    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+
+    return SimpleNamespace(context=RetrievalGraphContext(**collaborators))
+
 
 from app.features.documents.retrieval.graph.graph import build_retrieval_graph
 from app.features.documents.retrieval.graph.nodes import (
@@ -88,12 +98,15 @@ def _state(plan: QueryPlan, iteration: int = 0) -> dict[str, Any]:
 
 
 async def test_allowlist_populates_the_plan() -> None:
-    node = make_source_identifier_node(
-        _CriteriaLlm({"jurisdictions": ["India"], "document_kinds": [], "matters": []}),
-        cast("Any", _ResolvingRepo(["doc-1", "doc-2"])),
-    )
+    node = make_source_identifier_node()
 
-    result = await node(_state(_plan()))
+    result = await node(
+        _state(_plan()),
+        _runtime(
+            llm=_CriteriaLlm({"jurisdictions": ["India"], "document_kinds": [], "matters": []}),
+            repo=_ResolvingRepo(["doc-1", "doc-2"]),
+        ),
+    )
 
     assert result["query_plan"].allowlist == ["doc-1", "doc-2"]
 
@@ -104,14 +117,20 @@ async def test_allowlist_reaches_branch_filter_params(monkeypatch: Any) -> None:
 
     monkeypatch.setattr("app.features.documents.retrieval.graph.nodes.embed_text", _fake_embed)
     repo = _ResolvingRepo(["doc-1", "doc-2"])
-    identifier = make_source_identifier_node(
-        _CriteriaLlm({"jurisdictions": ["India"], "document_kinds": [], "matters": []}),
-        cast("Any", repo),
+    identifier = make_source_identifier_node()
+    identified = await identifier(
+        _state(_plan()),
+        _runtime(
+            llm=_CriteriaLlm({"jurisdictions": ["India"], "document_kinds": [], "matters": []}),
+            repo=repo,
+        ),
     )
-    identified = await identifier(_state(_plan()))
 
-    hybrid = make_hybrid_retrieval_node(cast("Any", repo), redis=None)
-    await hybrid({**_state(_plan()), "query_plan": identified["query_plan"]})
+    hybrid = make_hybrid_retrieval_node()
+    await hybrid(
+        {**_state(_plan()), "query_plan": identified["query_plan"]},
+        _runtime(repo=repo),
+    )
 
     assert repo.seen_filter_params
     # The allowlist constrains the search itself; it is not applied to results
@@ -120,23 +139,29 @@ async def test_allowlist_reaches_branch_filter_params(monkeypatch: Any) -> None:
 
 
 async def test_retry_widens_the_allowlist() -> None:
-    node = make_source_identifier_node(
-        _CriteriaLlm({"jurisdictions": ["India"], "document_kinds": [], "matters": []}),
-        cast("Any", _ResolvingRepo(["doc-1"])),
-    )
+    node = make_source_identifier_node()
 
-    result = await node(_state(_plan(allowlist=["doc-1"]), iteration=1))
+    result = await node(
+        _state(_plan(allowlist=["doc-1"]), iteration=1),
+        _runtime(
+            llm=_CriteriaLlm({"jurisdictions": ["India"], "document_kinds": [], "matters": []}),
+            repo=_ResolvingRepo(["doc-1"]),
+        ),
+    )
 
     assert result["query_plan"].allowlist == []
 
 
 async def test_retry_without_narrowing_is_a_noop() -> None:
-    node = make_source_identifier_node(
-        _CriteriaLlm({"jurisdictions": [], "document_kinds": [], "matters": []}),
-        cast("Any", _ResolvingRepo([])),
-    )
+    node = make_source_identifier_node()
 
-    result = await node(_state(_plan(), iteration=1))
+    result = await node(
+        _state(_plan(), iteration=1),
+        _runtime(
+            llm=_CriteriaLlm({"jurisdictions": [], "document_kinds": [], "matters": []}),
+            repo=_ResolvingRepo([]),
+        ),
+    )
 
     assert result["query_plan"].allowlist == []
 
@@ -178,8 +203,11 @@ def _loop_graph(repo: _LoopRepo) -> Any:
             "GeneratedAnswer": {"answer": "x", "citations": [], "confidence": "uncertain"},
         }
     )
-    return build_retrieval_graph(
-        llm=llm, repo=repo, redis=None, graphiti=None, reranker=_FusedReranker()
+    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+
+    return (
+        build_retrieval_graph(),
+        RetrievalGraphContext(llm=llm, repo=repo, reranker=_FusedReranker()),
     )
 
 
@@ -199,7 +227,7 @@ async def test_insufficient_context_widens_then_terminates(monkeypatch: Any) -> 
 
     monkeypatch.setattr("app.features.documents.retrieval.graph.nodes.embed_text", _fake_embed)
     repo = _LoopRepo()
-    graph = _loop_graph(repo)
+    graph, context = _loop_graph(repo)
 
     final = await graph.ainvoke(
         {
@@ -208,7 +236,8 @@ async def test_insufficient_context_widens_then_terminates(monkeypatch: Any) -> 
             "messages": [],
             "doc_ids_filter": [],
             "iteration_count": 0,
-        }
+        },
+        context=context,
     )
 
     # The first retrieval runs narrowed; the retry runs widened (empty).

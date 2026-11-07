@@ -28,9 +28,6 @@ from app.ai.tools.registry import (
     register_default_tools,
     register_portfolio_traversal_tools,
 )
-from app.features.documents.application.tools.portfolio import (
-    make_portfolio_traversal_tools,
-)
 from app.features.agent_saul.domain.state import (
     OrchestratorAction,
     OrchestratorActionType,
@@ -56,6 +53,9 @@ from app.features.documents.application.evidence import service as evidence_modu
 from app.features.documents.application.evidence.service import (
     EvidenceService,
     InMemoryEvidenceHandleStore,
+)
+from app.features.documents.application.tools.portfolio import (
+    make_portfolio_traversal_tools,
 )
 
 if TYPE_CHECKING:

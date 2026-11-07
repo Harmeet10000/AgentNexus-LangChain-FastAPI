@@ -69,6 +69,10 @@ class RetrievalEngine:
         )
 
         async with independent_session(self._session_factory) as session:
+            from app.features.documents.retrieval.graph.budgets import (  # noqa: PLC0415
+                build_stage_budget_tracker,
+            )
+
             context = RetrievalGraphContext(
                 llm=self._llm_factory(),
                 repo=DocumentRepository(session),
@@ -76,5 +80,8 @@ class RetrievalEngine:
                 graphiti=self._graphiti,
                 reranker=self._reranker,
                 grader=self._grader,
+                # Per-ask stage budgets (G6 task 4.1); None when the feature is
+                # disabled in settings.
+                budgets=build_stage_budget_tracker(),
             )
             yield self.graph, context

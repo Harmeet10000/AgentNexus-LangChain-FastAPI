@@ -44,12 +44,8 @@ def _noop(*args: Any, **kwargs: Any) -> None:
 
 def _stub_completeness(monkeypatch: Any) -> None:
     """The unit under test is the app binding, not catalog validation."""
-    monkeypatch.setattr(
-        worker_app_module, "ensure_worker_catalog_completeness", _noop
-    )
-    monkeypatch.setattr(
-        worker_app_module, "ensure_worker_profile_completeness", _noop
-    )
+    monkeypatch.setattr(worker_app_module, "ensure_worker_catalog_completeness", _noop)
+    monkeypatch.setattr(worker_app_module, "ensure_worker_profile_completeness", _noop)
 
 
 def test_worker_binds_active_app_when_celery_passes_none(

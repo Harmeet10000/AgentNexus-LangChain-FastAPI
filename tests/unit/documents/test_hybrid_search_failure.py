@@ -178,7 +178,9 @@ async def test_the_request_itself_fails_rather_than_answering_200(
     async def _fake_embed(*_args: object, **_kwargs: object) -> list[float]:
         return [0.0, 0.1, 0.2]
 
-    monkeypatch.setattr("app.features.documents.application.queries.documents.embed_text", _fake_embed)
+    monkeypatch.setattr(
+        "app.features.documents.application.queries.documents.embed_text", _fake_embed
+    )
     repo = _StubRepository(
         bm25=_EMPTY,
         vector=_EMPTY,

@@ -36,9 +36,7 @@ from app.security.passwords import hash_password
 from .provisioning_fakes import FakeTenantSQLStore
 
 
-def build_service() -> tuple[
-    AuthService, FakeTenantSQLStore, InMemoryAuthAccountStore, FakeRedis
-]:
+def build_service() -> tuple[AuthService, FakeTenantSQLStore, InMemoryAuthAccountStore, FakeRedis]:
     sql = FakeTenantSQLStore()
     accounts = InMemoryAuthAccountStore()
     redis = FakeRedis(decode_responses=True)
@@ -126,9 +124,7 @@ async def test_sql_provisioning_failure_keeps_account_pending_and_issues_no_sess
     # failure, never invalid credentials, and never a session.
     await verify_account(accounts, "pending@example.com")
     sql.fail_next_commit = True  # Postgres is still unreachable for the repair.
-    login = await service.login(
-        LoginRequest(email="pending@example.com", password="ValidPass1")
-    )
+    login = await service.login(LoginRequest(email="pending@example.com", password="ValidPass1"))
     assert isinstance(login, Failure)
     assert isinstance(login.failure(), AuthInfrastructureError)
     assert await redis.keys("auth:session:*") == []
@@ -145,9 +141,7 @@ async def test_durable_pending_account_repairs_on_next_login() -> None:
     user_id = await verify_account(accounts, "repair@example.com")
 
     # Postgres recovered: the idempotent durable repair converges on login.
-    login = await service.login(
-        LoginRequest(email="repair@example.com", password="ValidPass1")
-    )
+    login = await service.login(LoginRequest(email="repair@example.com", password="ValidPass1"))
 
     assert isinstance(login, Success)
     assert (personal_tenant_id(user_id), user_id) in sql.memberships
@@ -231,7 +225,9 @@ async def test_register_retry_completes_provisioning_for_pending_account() -> No
     service, sql, accounts, _redis = build_service()
     sql.fail_next_commit = True
 
-    first = await service.register(RegisterRequest(email="retry@example.com", password="ValidPass1"))
+    first = await service.register(
+        RegisterRequest(email="retry@example.com", password="ValidPass1")
+    )
     assert isinstance(first, Failure)
     assert isinstance(first.failure(), AuthInfrastructureError)
     sql.fail_next_commit = False
