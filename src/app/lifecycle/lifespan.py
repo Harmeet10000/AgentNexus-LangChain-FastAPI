@@ -56,6 +56,7 @@ from app.features.health.health_check import ALL_PROBES, check_cognee, check_gra
 from app.lifecycle.graphs import (
     graphiti_service,
     provide_langgraph_checkpointer,
+    provide_retrieval_engine,
     provide_saul_graph,
 )
 from app.mcp.client.manager import build_mcp_client_manager
@@ -327,6 +328,28 @@ async def _setup_checkpointer_state(app: FastAPI, _settings: Any) -> None:
     logger.info("LangGraph checkpointer initialized")
 
 
+async def _setup_retrieval_engine_state(app: FastAPI, _settings: Any) -> None:
+    """Compile the retrieval graph once; collaborators arrive per invocation.
+
+    Provisioned before Agent Saul so the qna node's engine provider can be
+    bound at graph-build time. A provisioning failure degrades via the policy
+    registry to ``app.state.retrieval_engine is None``, where both serving
+    doors (the ask endpoints and the qna node) fail closed with a typed
+    unavailability — never a fallback answering path.
+    """
+    session_factory = getattr(app.state, "db_session_local", None)
+    if session_factory is None:
+        message = "PostgreSQL session factory is unavailable for the retrieval engine"
+        raise ServiceUnavailableException(message)
+    app.state.retrieval_engine = provide_retrieval_engine(
+        session_factory=session_factory,
+        redis=getattr(app.state, "redis", None),
+        graphiti=getattr(app.state, "graphiti", None),
+        grader=getattr(app.state, "text_generator", None),
+    )
+    logger.info("Retrieval engine initialized")
+
+
 async def _setup_saul_graph_state(app: FastAPI, settings: Any) -> None:
     """Compile Agent Saul after every collaborator it requires exists."""
     checkpointer = getattr(app.state, "langgraph_checkpointer", None)
@@ -354,6 +377,7 @@ async def _setup_saul_graph_state(app: FastAPI, settings: Any) -> None:
         session_factory=app.state.db_session_local,
         graphiti=graphiti_service(graphiti),
         evidence_service=app.state.evidence_service,
+        retrieval_engine=getattr(app.state, "retrieval_engine", None),
     )
     logger.info("Agent Saul graph initialized")
 
@@ -479,6 +503,16 @@ STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
         fatal_on=(),
         degrade_on=(ConnectionError, TimeoutError, OSError, RuntimeError, ValueError),
         report=_report_outbox_relay_degraded,
+    ),
+    StartupPolicy(
+        name="retrieval_engine",
+        setup=_setup_retrieval_engine_state,
+        state_attr="retrieval_engine",
+        fatal_on=(),
+        degrade_on=(Exception,),
+        report=lambda exc: logger.bind(
+            component="retrieval_engine", error_type=type(exc).__name__
+        ).warning("Retrieval engine unavailable; ask endpoints will fail closed"),
     ),
     StartupPolicy(
         name="agent_saul_graph",

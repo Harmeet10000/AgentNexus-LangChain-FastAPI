@@ -3,43 +3,57 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from typing import TYPE_CHECKING, cast
+import time
+from contextlib import asynccontextmanager
+from operator import itemgetter
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
+import opentelemetry.trace as otel_trace
 from graphiti_core.errors import GraphitiError
 from langchain_core.exceptions import LangChainException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import ValidationError
 from returns.result import Failure
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text
+from app.ai.generation import TextGenerationRequest
 from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.features.documents.retrieval.reranking.reranker import get_configured_reranker
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger
+from app.retrieval.edge_expansion import EdgeSeedChunk, expand_along_edges
+from app.retrieval.graphiti.client import fetch_relationship_edges
 from app.retrieval.graphiti.grouping import GraphitiDocumentScope, fanout_graphiti_group_ids
+from app.retrieval.token_counter import count_tokens as default_count_tokens
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
-from app.utils import InfrastructureException
+from app.utils import InfrastructureException, to_sorted_key_bytes
 
 from .state import (  # noqa: TC001 — RetrievalState resolves at runtime for branch schemas
+    CachedAskEnvelope,
+    Citation,
     ContextGrade,
+    CoverageEnvelope,
     GeneratedAnswer,
+    GroundedCitation,
     QueryPlan,
+    RetrievalGraphContext,
     RetrievalState,
     RetrievedChunk,
     SourceCriteria,
+    StageUsage,
+    StageWarning,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
     from typing import Any
 
-    from redis.asyncio import Redis
-
+    from app.ai.generation import TextGenerationStructuredResult
     from app.features.documents.adapters.persistence.postgres.document_repository import (
         DocumentRepository,
     )
-    from app.features.documents.retrieval.reranking.reranker import Reranker
+    from app.retrieval.edge_expansion import EdgeContextBlock, EdgeExpansion
     from app.retrieval.token_counter import CountTokens
 
 _QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
@@ -61,18 +75,10 @@ _QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
     ("CONSTRAINTS", "Return only QueryPlan."),
 )
 
-_CONTEXT_GRADER_SYSTEM_PROMPT = render_prompt_sections(
-    ("IDENTITY", "You are a retrieval sufficiency grader."),
-    (
-        "OBJECTIVE",
-        "Determine whether the retrieved chunks are sufficient to answer the query without hallucination.",
-    ),
-    (
-        "EXECUTION POLICY",
-        "If the evidence is insufficient, identify missing aspects and provide a concise rewrite suggestion.",
-    ),
-    ("CONSTRAINTS", "Return only ContextGrade."),
-)
+# The grade seam's system prompt, verbatim from the inline `_grade_context`
+# contract the parity suite pins: the injected-grader request and the
+# seam-absent degrade both use this exact string.
+_GRADE_SEAM_SYSTEM_PROMPT = "You are a retrieval sufficiency grader. Return only ContextGrade."
 
 _GENERATOR_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a grounded legal answer generator."),
@@ -95,65 +101,138 @@ _GENERATOR_SYSTEM_PROMPT = render_prompt_sections(
     ),
 )
 
+# Verbatim from the served inline `ask` fallback contract (`_FALLBACK_ANSWER`
+# in `application/queries/documents.py`): the parity suite pins byte-identical
+# fallback answers, so the two constants must carry the same text.
 FALLBACK_ANSWER = (
-    "I do not have enough grounded contract context to answer this reliably. "
+    "I do not have enough grounded document context to answer this reliably. "
     "Please narrow the question or ingest the relevant document sections."
 )
 
+# Edge-aware context expansion bounds, verbatim from the inline ask contract:
+# additive and small by construction — at most a few server-authored grounding
+# lines per reranked chunk, never a second retrieval pass, and only for
+# queries that actually touch edges.
+_EDGE_EXPANSION_MAX_TOKENS: int = 256
+_EDGE_EXPANSION_MAX_BLOCKS_PER_SEED: int = 4
+_EDGE_FETCH_LIMIT: int = 32
 
-def make_query_analyzer_node(
-    query_llm: Any,
-    redis: Redis | None,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    async def query_analyzer_node(state: RetrievalState) -> dict[str, object]:
-        query = state["query"]
-        plan_input = serialize_to_toon(
-            {
-                "query": query,
-                "messages": [str(message.content) for message in state.get("messages", [])[-8:]],
-                "doc_ids_filter": state.get("doc_ids_filter", []),
-                "iteration_count": state.get("iteration_count", 0),
-                "rewrite_suggestion": getattr(
-                    state.get("context_grade"), "rewrite_suggestion", None
-                ),
-            }
-        )
-        messages: list[SystemMessage | HumanMessage] = [
-            SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT),
-            HumanMessage(content=plan_input),
-        ]
+# The grade loop's two-iteration bound (`max_attempts` includes the first
+# attempt, exactly as the inline pipeline's `_ASK_MAX_ATTEMPTS` does).
+_GRADE_LOOP_MAX_ATTEMPTS: int = 2
+
+
+@asynccontextmanager
+async def _stage_span(stage: str) -> AsyncIterator[None]:
+    """Emit one span attributed to a retrieval-graph stage, with its duration.
+
+    The OpenTelemetry span carries the stage attribution; a structured
+    ``retrieval_stage_span`` log event mirrors it so the slice is observable
+    (and testable) without a configured OTel exporter. First slice of G6.
+    """
+    started = time.perf_counter()
+    tracer = otel_trace.get_tracer(__name__)
+    with tracer.start_as_current_span(f"retrieval_graph.{stage}", attributes={"stage": stage}):
         try:
-            raw_plan = await retry_immediate(
-                lambda: query_llm.ainvoke(cast("list[Any]", messages)),
-                label="gemini_query_analyzer",
-            )
-            plan = _normalize_plan(QueryPlan.model_validate(raw_plan))
-        # Both routes into this branch (the C6 contract): a deterministic
-        # framework failure arrives unwrapped; a transient one arrives retried
-        # and, once the budget is spent, as the boundary's transient type with
-        # the original reachable through its cause. Catching only the first
-        # left this degradation branch dead in production.
-        except (LangChainException, TransientExternalError) as exc:
-            exc.add_note(f"query={query[:80]}, operation=query_analyzer")
-            logger.bind(query=query[:80], operation="query_analyzer", error=str(exc)).warning(
-                "query_analyzer_failed_using_default"
-            )
-            plan = QueryPlan(rewritten_query=query, sub_queries=[query])
+            yield
+        finally:
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            logger.bind(stage=stage, duration_ms=duration_ms).info("retrieval_stage_span")
 
-        cache_key = _answer_cache_key(plan.rewritten_query, state.get("doc_ids_filter", []))
-        if redis is not None:
-            cached = await redis.get(cache_key)
-            if cached:
-                raw = str(cached)
+
+def _stage_usage(stage: str, calls: int) -> dict[str, object]:
+    """One stage-usage delta; nodes append, the state channel concatenates."""
+    return {"stage_usage": [StageUsage(stage=stage, calls=calls)]}
+
+
+def _invocation_context(runtime: Any) -> RetrievalGraphContext:
+    """Read the per-invocation collaborators from the LangGraph runtime.
+
+    Every request-scoped collaborator arrives here — the `compiled-graph-lifecycle`
+    contract — so no node factory captures a repository, session, client, or
+    model at compile time. A missing context (a direct node call in tests)
+    degrades to an empty context whose ``None`` collaborators trigger each
+    node's fail-closed default.
+    """
+    context = getattr(runtime, "context", None) if runtime is not None else None
+    if isinstance(context, RetrievalGraphContext):
+        return context
+    return RetrievalGraphContext()
+
+
+def _structured(llm: Any, schema: type[Any]) -> Any:
+    """Derive a structured-output runnable from the invocation-context model."""
+    if hasattr(llm, "with_structured_output"):
+        return llm.with_structured_output(schema)
+    return llm
+
+
+def make_query_analyzer_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
+    async def query_analyzer_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
+        context = _invocation_context(runtime)
+        async with _stage_span("plan"):
+            result = await _plan_and_cache(state, context)
+        return {**result, **_stage_usage("plan", 1)}
+
+    return query_analyzer_node
+
+
+async def _plan_and_cache(
+    state: RetrievalState, context: RetrievalGraphContext
+) -> dict[str, object]:
+    query_llm = _structured(context.llm, QueryPlan)
+    query = state["query"]
+    plan_input = serialize_to_toon(
+        {
+            "query": query,
+            "messages": [str(message.content) for message in state.get("messages", [])[-8:]],
+            "doc_ids_filter": state.get("doc_ids_filter", []),
+            "iteration_count": state.get("iteration_count", 0),
+            "rewrite_suggestion": getattr(state.get("context_grade"), "rewrite_suggestion", None),
+        }
+    )
+    messages: list[SystemMessage | HumanMessage] = [
+        SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT),
+        HumanMessage(content=plan_input),
+    ]
+    try:
+        raw_plan = await retry_immediate(
+            lambda: query_llm.ainvoke(cast("list[Any]", messages)),
+            label="gemini_query_analyzer",
+        )
+        plan = _normalize_plan(QueryPlan.model_validate(raw_plan))
+    # Both routes into this branch (the C6 contract): a deterministic
+    # framework failure arrives unwrapped; a transient one arrives retried
+    # and, once the budget is spent, as the boundary's transient type with
+    # the original reachable through its cause. Catching only the first
+    # left this degradation branch dead in production.
+    except (LangChainException, TransientExternalError) as exc:
+        exc.add_note(f"query={query[:80]}, operation=query_analyzer")
+        logger.bind(query=query[:80], operation="query_analyzer", error=str(exc)).warning(
+            "query_analyzer_failed_using_default"
+        )
+        plan = QueryPlan(rewritten_query=query, sub_queries=[query])
+
+    answer_cache_key = _answer_cache_key(state)
+    redis = context.redis
+    if redis is not None:
+        cached = await redis.get(answer_cache_key)
+        if cached:
+            try:
+                envelope = CachedAskEnvelope.model_validate_json(str(cached))
+            except ValidationError:
+                # A pre-envelope cache entry (or a foreign payload) is a miss,
+                # never a crash: the derivation recomputes and rewrites.
+                envelope = None
+            if envelope is not None:
                 return {
                     "query_plan": plan,
                     "cache_hit": True,
-                    "cached_answer": GeneratedAnswer.model_validate_json(raw),
+                    "cached_envelope": envelope,
+                    "answer_cache_key": answer_cache_key,
                 }
 
-        return {"query_plan": plan, "cache_hit": False}
-
-    return query_analyzer_node
+    return {"query_plan": plan, "cache_hit": False, "answer_cache_key": answer_cache_key}
 
 
 _SOURCE_IDENTIFIER_SYSTEM_PROMPT = render_prompt_sections(
@@ -191,10 +270,7 @@ def _intersect_doc_ids(*, request_ids: list[str], allowlist: list[str]) -> list[
     return [doc_id for doc_id in allowlist if doc_id in request_ids]
 
 
-def make_source_identifier_node(
-    identifier_llm: Any,
-    repo: DocumentRepository,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
+def make_source_identifier_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
     """Narrow the corpus to a document allowlist before retrieval runs.
 
     On a retry iteration the previous narrowing is dropped instead: a wrong
@@ -202,69 +278,91 @@ def make_source_identifier_node(
     iteration cap (not the allowlist) is what bounds the loop.
     """
 
-    async def source_identifier_node(state: RetrievalState) -> dict[str, object]:
-        plan: QueryPlan = state["query_plan"]
-        server_scope = list(state.get("allowed_doc_ids") or [])
-        if state.get("scope_bound") and not server_scope:
-            # An explicit empty capability is not equivalent to "all docs".
-            # Keep the graph alive for its envelope, but make every retrieval
-            # leg return no evidence.
-            return {"query_plan": plan.model_copy(update={"allowlist": []})}
-        if state.get("iteration_count", 0) > 0:
-            if not plan.allowlist:
-                return {"query_plan": plan}
-            logger.bind(operation="source_identifier", iteration=state.get("iteration_count")).info(
-                "source_allowlist_widened_on_retry"
+    async def source_identifier_node(
+        state: RetrievalState, runtime: Any = None
+    ) -> dict[str, object]:
+        context = _invocation_context(runtime)
+        async with _stage_span("source_identifier"):
+            return await _identify_sources(
+                state, _structured(context.llm, SourceCriteria), context.repo
             )
-            # Widen only the model-inferred narrowing.  The server-owned
-            # allowlist remains authoritative and is re-applied by the
-            # hybrid node; never widen it on a retry.
-            return {"query_plan": plan.model_copy(update={"allowlist": []})}
-
-        query = plan.rewritten_query
-        messages: list[SystemMessage | HumanMessage] = [
-            SystemMessage(content=_SOURCE_IDENTIFIER_SYSTEM_PROMPT),
-            HumanMessage(content=query),
-        ]
-        try:
-            raw_criteria = await retry_immediate(
-                lambda: identifier_llm.ainvoke(cast("list[Any]", messages)),
-                label="gemini_source_identifier",
-            )
-            criteria = SourceCriteria.model_validate(raw_criteria)
-        except Exception as exc:  # noqa: BLE001 — cannot narrow means unconstrained, not failed
-            exc.add_note(f"query={query[:80]}, operation=source_identifier")
-            logger.bind(query=query[:80], operation="source_identifier", error=str(exc)).warning(
-                "source_identifier_failed_proceeding_unconstrained"
-            )
-            return {"query_plan": plan}
-
-        if not (criteria.jurisdictions or criteria.document_kinds or criteria.matters):
-            return {"query_plan": plan}
-        resolved = await repo.find_document_ids_by_metadata(
-            user_id=state["user_id"],
-            tenant_id=state.get("tenant_id"),
-            jurisdictions=criteria.jurisdictions,
-            document_kinds=criteria.document_kinds,
-            matters=criteria.matters,
-            limit=SOURCE_ALLOWLIST_MAX_IDS + 1,
-        )
-        if isinstance(resolved, Failure):
-            error = resolved.failure()
-            log_expected_failure(error, operation="source_allowlist_resolve")
-            return {"query_plan": plan}
-        allowlist = resolved.unwrap()
-        if len(allowlist) > SOURCE_ALLOWLIST_MAX_IDS:
-            return {"query_plan": plan}
-        return {"query_plan": plan.model_copy(update={"allowlist": allowlist})}
 
     return source_identifier_node
 
 
-def make_graph_retrieval_node(
-    graphiti: Any,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    async def graph_retrieval_node(state: RetrievalState) -> dict[str, object]:  # noqa: PLR0914 — scope fan-out keeps identity together
+async def _identify_sources(
+    state: RetrievalState, identifier_llm: Any, repo: DocumentRepository
+) -> dict[str, object]:
+    plan: QueryPlan = state["query_plan"]
+    server_scope = list(state.get("allowed_doc_ids") or [])
+    if state.get("scope_bound") and not server_scope:
+        # An explicit empty capability is not equivalent to "all docs".
+        # Keep the graph alive for its envelope, but make every retrieval
+        # leg return no evidence.
+        return {
+            "query_plan": plan.model_copy(update={"allowlist": []}),
+            **_stage_usage("source_identifier", 0),
+        }
+    if state.get("iteration_count", 0) > 0:
+        if not plan.allowlist:
+            return {"query_plan": plan, **_stage_usage("source_identifier", 0)}
+        logger.bind(operation="source_identifier", iteration=state.get("iteration_count")).info(
+            "source_allowlist_widened_on_retry"
+        )
+        # Widen only the model-inferred narrowing.  The server-owned
+        # allowlist remains authoritative and is re-applied by the
+        # hybrid node; never widen it on a retry.
+        return {
+            "query_plan": plan.model_copy(update={"allowlist": []}),
+            **_stage_usage("source_identifier", 0),
+        }
+
+    query = plan.rewritten_query
+    messages: list[SystemMessage | HumanMessage] = [
+        SystemMessage(content=_SOURCE_IDENTIFIER_SYSTEM_PROMPT),
+        HumanMessage(content=query),
+    ]
+    try:
+        raw_criteria = await retry_immediate(
+            lambda: identifier_llm.ainvoke(cast("list[Any]", messages)),
+            label="gemini_source_identifier",
+        )
+        criteria = SourceCriteria.model_validate(raw_criteria)
+    except Exception as exc:  # noqa: BLE001 — cannot narrow means unconstrained, not failed
+        exc.add_note(f"query={query[:80]}, operation=source_identifier")
+        logger.bind(query=query[:80], operation="source_identifier", error=str(exc)).warning(
+            "source_identifier_failed_proceeding_unconstrained"
+        )
+        return {"query_plan": plan, **_stage_usage("source_identifier", 1)}
+
+    if not (criteria.jurisdictions or criteria.document_kinds or criteria.matters):
+        return {"query_plan": plan, **_stage_usage("source_identifier", 1)}
+    resolved = await repo.find_document_ids_by_metadata(
+        user_id=state["user_id"],
+        tenant_id=state.get("tenant_id"),
+        jurisdictions=criteria.jurisdictions,
+        document_kinds=criteria.document_kinds,
+        matters=criteria.matters,
+        limit=SOURCE_ALLOWLIST_MAX_IDS + 1,
+    )
+    if isinstance(resolved, Failure):
+        error = resolved.failure()
+        log_expected_failure(error, operation="source_allowlist_resolve")
+        return {"query_plan": plan, **_stage_usage("source_identifier", 1)}
+    allowlist = resolved.unwrap()
+    if len(allowlist) > SOURCE_ALLOWLIST_MAX_IDS:
+        return {"query_plan": plan, **_stage_usage("source_identifier", 1)}
+    return {
+        "query_plan": plan.model_copy(update={"allowlist": allowlist}),
+        **_stage_usage("source_identifier", 1),
+    }
+
+
+def make_graph_retrieval_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
+    async def graph_retrieval_node(  # noqa: PLR0914 — scope fan-out keeps identity together
+        state: RetrievalState, runtime: Any = None
+    ) -> dict[str, object]:
+        graphiti = _invocation_context(runtime).graphiti
         if graphiti is None:
             return {"graph_chunk_ids": []}
         # Graphiti's historical user group is not an authorization boundary:
@@ -364,127 +462,165 @@ def _document_version_for(
     )
 
 
-def make_hybrid_retrieval_node(
-    repo: DocumentRepository,
-    redis: Redis | None,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    async def hybrid_retrieval_node(state: RetrievalState) -> dict[str, object]:
-        plan = state["query_plan"]
-        # `QUERY`, not `DOCUMENT`. This is the side of the asymmetry that was never declared:
-        # the prior helper passed no task type at all, so a query vector was drawn from the
-        # document projection and compared against stored vectors drawn from the same one.
-        # Mutually consistent, and both wrong — which is why nothing ever errored.
-        embedding = await retry_immediate(
-            lambda: embed_text(
-                plan.rewritten_query,
-                task_type=EmbeddingTaskType.QUERY,
-                redis=redis,
-            ),
-            label="gemini_query_embedding",
-        )
-        chunk_ids = state.get("graph_chunk_ids") or None
-        # Local imports (noqa: PLC0415): `documents.service` imports this package at
-        # module load, so top-level imports would close a cycle. The fused
-        # retrieval helper lives with the other retrieval-region policy in the
-        # service module, and this node reaches the same shared path as `ask`.
-        from app.features.documents.adapters.persistence.postgres.document_repository import (  # noqa: PLC0415
-            build_search_filter_params,
-        )
-        from app.features.documents.application.queries.documents import (  # noqa: PLC0415
-            lookup_to_rows,
-            retrieve_fused,
-        )
-        from app.features.documents.domain.constants import (  # noqa: PLC0415
-            HYBRID_CANDIDATE_LIMIT,
-            RRF_WEIGHT_TRIGRAM,
-        )
-
-        # `user_id` is not a translation of an old argument — the reader this replaces had no
-        # tenant predicate at all, so every fused search read across all owners and was held
-        # back only by the caller never passing another user's chunk ids. The unified query
-        # scopes on the parent document's owner, which is why the state field is required here
-        # rather than optional.
-        request_doc_ids = list(state.get("doc_ids_filter") or [])
-        server_doc_ids = list(state.get("allowed_doc_ids") or [])
-        scoped_doc_ids = (
-            _intersect_doc_ids(request_ids=request_doc_ids, allowlist=server_doc_ids)
-            if state.get("scope_bound")
-            else request_doc_ids
-        )
-        filter_params = build_search_filter_params(
-            metadata_filter={
-                # The request filter and the identifier allowlist both constrain:
-                # intersect when both name documents, otherwise take whichever
-                # is present. A conflicting inference loses to the explicit
-                # request filter rather than silently emptying retrieval.
-                "document_ids": (
-                    _intersect_doc_ids(
-                        request_ids=scoped_doc_ids,
-                        allowlist=list(plan.allowlist),
-                    )
-                    if plan.allowlist
-                    else scoped_doc_ids
-                ),
-                "scope_bound": bool(state.get("scope_bound")),
-                "chunk_ids": list(chunk_ids or []),
-                "jurisdiction": plan.jurisdiction,
-                "contract_type": plan.contract_type,
-                "contract_index": state.get("contract_index"),
+def make_hybrid_retrieval_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
+    async def hybrid_retrieval_node(
+        state: RetrievalState, runtime: Any = None
+    ) -> dict[str, object]:
+        context = _invocation_context(runtime)
+        # An explicitly empty authorized scope is the fallback envelope, not a
+        # wide search (task 1.3): no retrieval leg executes at all, matching
+        # the served inline `ask`'s immediate empty-scope return.
+        server_doc_ids_early = list(state.get("allowed_doc_ids") or [])
+        if state.get("scope_bound") and not server_doc_ids_early:
+            return {
+                "retrieved_chunks": [],
+                "retrieved_rows": [],
+                **_stage_usage("retrieve_fusion", 0),
             }
-        )
-        rows_result = await retry_immediate(
-            lambda: retrieve_fused(
-                repo=repo,
-                user_id=state["user_id"],
-                tenant_id=state.get("tenant_id"),
-                query_text=plan.rewritten_query,
-                query_embedding=embedding,
-                candidate_limit=HYBRID_CANDIDATE_LIMIT,
-                limit=20,
-                filter_params=filter_params,
-                weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM],
-                bm25_threshold=plan.bm25_threshold,
-                exact_phrase=plan.exact_phrase,
-            ),
-            label="postgres_fused_search",
-        )
-        if isinstance(rows_result, Failure):
-            error = rows_result.failure()
-            log_expected_failure(error, operation="postgres_fused_search")
-            raise InfrastructureException(
-                detail=error.message,
-                error_code=error.code,
-                retryable=error.retryable,
-                data=error.details,
-            )
-        fused, lookup = rows_result.unwrap()
-        rows = lookup_to_rows(fused, lookup)
-        return {"retrieved_chunks": [_row_to_chunk(row) for row in rows]}
+        async with _stage_span("retrieve_fusion"):
+            return await _retrieve_fused_state(state, context)
 
     return hybrid_retrieval_node
 
 
-def make_reranker_node(
-    reranker: Reranker | None = None,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    resolved: Reranker = reranker or get_configured_reranker()
+async def _retrieve_fused_state(
+    state: RetrievalState,
+    context: RetrievalGraphContext,
+) -> dict[str, object]:
+    plan = state["query_plan"]
+    redis = context.redis
+    graphiti = context.graphiti
+    # `QUERY`, not `DOCUMENT`. This is the side of the asymmetry that was never declared:
+    # the prior helper passed no task type at all, so a query vector was drawn from the
+    # document projection and compared against stored vectors drawn from the same one.
+    # Mutually consistent, and both wrong — which is why nothing ever errored.
+    embedding = await retry_immediate(
+        lambda: embed_text(
+            plan.rewritten_query,
+            task_type=EmbeddingTaskType.QUERY,
+            redis=redis,
+        ),
+        label="gemini_query_embedding",
+    )
+    chunk_ids = state.get("graph_chunk_ids") or None
+    # Local imports (noqa: PLC0415): `documents.service` imports this package at
+    # module load, so top-level imports would close a cycle. The fused
+    # retrieval helper lives with the other retrieval-region policy in the
+    # service module, and this node reaches the same shared path as `ask`.
+    from app.features.documents.adapters.persistence.postgres.document_repository import (  # noqa: PLC0415
+        build_search_filter_params,
+    )
+    from app.features.documents.application.queries.documents import (  # noqa: PLC0415
+        lookup_to_rows,
+        retrieve_fused,
+    )
+    from app.features.documents.domain.constants import (  # noqa: PLC0415
+        HYBRID_CANDIDATE_LIMIT,
+        RRF_WEIGHT_GRAPHITI,
+        RRF_WEIGHT_TRIGRAM,
+    )
 
-    async def reranker_node(state: RetrievalState) -> dict[str, object]:
+    # `user_id` is not a translation of an old argument — the reader this replaces had no
+    # tenant predicate at all, so every fused search read across all owners and was held
+    # back only by the caller never passing another user's chunk ids. The unified query
+    # scopes on the parent document's owner, which is why the state field is required here
+    # rather than optional.
+    request_doc_ids = list(state.get("doc_ids_filter") or [])
+    server_doc_ids = list(state.get("allowed_doc_ids") or [])
+    scoped_doc_ids = (
+        _intersect_doc_ids(request_ids=request_doc_ids, allowlist=server_doc_ids)
+        if state.get("scope_bound")
+        else request_doc_ids
+    )
+    # Optional relationship-graph fusion branch (retrieval-measurement-gate):
+    # the same registration contract the inline ask path uses — the branch is
+    # joined through the shared `retrieve_fused` registry only when the flag is
+    # set AND a Graphiti client is wired, and no graph read runs while disabled.
+    from app.config import get_settings  # noqa: PLC0415
+
+    graphiti_branch = graphiti if get_settings().DOCUMENTS_GRAPHITI_FUSION_ENABLED else None
+    filter_params = build_search_filter_params(
+        metadata_filter={
+            # The request filter and the identifier allowlist both constrain:
+            # intersect when both name documents, otherwise take whichever
+            # is present. A conflicting inference loses to the explicit
+            # request filter rather than silently emptying retrieval.
+            "document_ids": (
+                _intersect_doc_ids(
+                    request_ids=scoped_doc_ids,
+                    allowlist=list(plan.allowlist),
+                )
+                if plan.allowlist
+                else scoped_doc_ids
+            ),
+            "scope_bound": bool(state.get("scope_bound")),
+            "chunk_ids": list(chunk_ids or []),
+            "jurisdiction": state.get("jurisdiction") or plan.jurisdiction,
+            "contract_type": state.get("contract_type") or plan.contract_type,
+            "contract_index": state.get("contract_index"),
+            "clause_type": state.get("clause_type"),
+            # Evidence policy (task 1.3): `/legal/ask`-shaped requests filter
+            # on graph-indexed evidence here, exactly as the inline loop does.
+            "require_graphiti_verified": bool(state.get("require_graphiti_verified", False)),
+        }
+    )
+    rows_result = await retry_immediate(
+        lambda: retrieve_fused(
+            repo=context.repo,
+            user_id=state["user_id"],
+            tenant_id=state.get("tenant_id"),
+            query_text=plan.rewritten_query,
+            query_embedding=embedding,
+            candidate_limit=HYBRID_CANDIDATE_LIMIT,
+            limit=20,
+            filter_params=filter_params,
+            weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM]
+            + ([RRF_WEIGHT_GRAPHITI] if graphiti_branch is not None else []),
+            bm25_threshold=plan.bm25_threshold,
+            exact_phrase=plan.exact_phrase,
+            graphiti=graphiti_branch,
+            document_versions=state.get("document_versions", []),
+            document_contracts=state.get("document_contracts", []),
+        ),
+        label="postgres_fused_search",
+    )
+    if isinstance(rows_result, Failure):
+        error = rows_result.failure()
+        log_expected_failure(error, operation="postgres_fused_search")
+        raise InfrastructureException(
+            detail=error.message,
+            error_code=error.code,
+            retryable=error.retryable,
+            data=error.details,
+        )
+    fused, lookup = rows_result.unwrap()
+    rows = lookup_to_rows(fused, lookup)
+    return {
+        "retrieved_chunks": [_row_to_chunk(row) for row in rows],
+        # The hydrated rows feed the warning envelope, coverage counts, and
+        # edge-span resolution (task 1.4 / task 1.1).
+        "retrieved_rows": rows,
+        **_stage_usage("retrieve_fusion", 1),
+    }
+
+
+def make_reranker_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
+    async def reranker_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
+        # A context-supplied reranker wins; otherwise the process-configured
+        # one resolves here, per invocation (never captured at compile).
+        resolved = _invocation_context(runtime).reranker or get_configured_reranker()
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("retrieved_chunks", [])[:20]
-        reranked: list[RetrievedChunk] = await resolved.rerank(
-            plan.rewritten_query, chunks, limit=5
-        )
-        return {"reranked_chunks": reranked}
+        async with _stage_span("rerank"):
+            reranked: list[RetrievedChunk] = await resolved.rerank(
+                plan.rewritten_query, chunks, limit=5
+            )
+        return {"reranked_chunks": reranked, **_stage_usage("rerank", 1)}
 
     return reranker_node
 
 
-def make_post_process_node(
-    *,
-    max_tokens: int,
-    count_tokens: CountTokens,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
+def make_post_process_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
     """Deduplicate reranked chunks and assemble document-ordered context.
 
     A chunk returned by two branches reaches generation once, and chunks of
@@ -494,14 +630,21 @@ def make_post_process_node(
     assembled sections are returned so the two stay consistent.
     """
 
-    async def post_process_node(state: RetrievalState) -> dict[str, object]:
+    async def post_process_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
+        context = _invocation_context(runtime)
         # Local imports (noqa: PLC0415): `documents` modules import this
         # package at module load, so top-level imports would close a cycle.
+        from app.features.documents.domain.constants import (  # noqa: PLC0415
+            DEFAULT_RAG_TOKEN_BUDGET,
+        )
         from app.features.documents.retrieval.context_assembly import (  # noqa: PLC0415
             SearchChunkRecord,
             assemble_rag_context,
         )
         from app.retrieval.fusion import RankedChunk  # noqa: PLC0415
+
+        max_tokens = context.post_process_max_tokens or DEFAULT_RAG_TOKEN_BUDGET
+        count_tokens = context.count_tokens or default_count_tokens
 
         chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
         unique: dict[str, RetrievedChunk] = {}
@@ -539,104 +682,541 @@ def make_post_process_node(
     return post_process_node
 
 
-def make_context_grader_node(
-    grader_llm: Any,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    async def context_grader_node(state: RetrievalState) -> dict[str, object]:
+def make_edge_grounding_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
+    """Expand the reranked context along persisted typed relationship edges.
+
+    Ported from the served inline ask path (`_edge_grounding_for_reranked` /
+    `_resolved_edge_blocks` / `_edge_citations`) so the graph, not the service
+    method, owns the behaviour. Fail-closed on every axis: without a live
+    graphiti, a resolved tenant, or an explicit non-empty authorized document
+    scope there is no edge read at all, and the expansion result is additive —
+    an edge-free query keeps the exact edge-free contract.
+    """
+
+    async def edge_grounding_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
+        context = _invocation_context(runtime)
+        graphiti = context.graphiti
+        plan: QueryPlan = state["query_plan"]
+        reranked: list[RetrievedChunk] = state.get("reranked_chunks", [])
+        tenant_id = str(state.get("tenant_id") or "")
+        scope_ids = tuple(state.get("allowed_doc_ids") or []) if state.get("scope_bound") else ()
+        if graphiti is None or not tenant_id or not scope_ids or not reranked:
+            # Fail-closed additive boundary: no expansion, no citation, and no
+            # error surfaced for the absent grounding.
+            return {
+                "grounding_edge_texts": [],
+                "edge_citations": [],
+                **_stage_usage("edge_grounding", 0),
+            }
+        async with _stage_span("edge_grounding"):
+            expansions = await _edge_grounding_for_reranked(
+                graphiti=graphiti,
+                query=plan.rewritten_query,
+                tenant_id=tenant_id,
+                scope_ids=scope_ids,
+                scope_versions=state.get("document_versions", []),
+                scope_contracts=state.get("document_contracts", []),
+                contract_index=state.get("contract_index"),
+                reranked=reranked,
+                count_tokens=context.count_tokens,
+            )
+        rows_by_chunk_id = {str(row["chunk_id"]): row for row in state.get("retrieved_rows", [])}
+        resolved_blocks = _resolved_edge_blocks(expansions, rows_by_chunk_id)
+        return {
+            "grounding_edge_texts": [block.text for block, _ in resolved_blocks],
+            "edge_citations": _edge_citations(resolved_blocks),
+            **_stage_usage("edge_grounding", 1),
+        }
+
+    return edge_grounding_node
+
+
+async def _edge_grounding_for_reranked(
+    *,
+    graphiti: Any,
+    query: str,
+    tenant_id: str,
+    scope_ids: Sequence[str],
+    scope_versions: Sequence[tuple[str, int, str | None]],
+    scope_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]],
+    contract_index: int | None,
+    reranked: Sequence[RetrievedChunk],
+    count_tokens: CountTokens | None,
+) -> list[EdgeExpansion]:
+    """Expand reranked chunk context along persisted typed relationship edges.
+
+    Verbatim port of the inline helper: a transport failure inside the reader
+    degrades to no expansion, so an edge-free query keeps the exact pre-edge
+    ask contract.
+    """
+    if graphiti is None or not tenant_id or not scope_ids:
+        return []
+    edges = await fetch_relationship_edges(
+        graphiti,
+        query,
+        allowed_doc_ids=tuple(dict.fromkeys(scope_ids)),
+        tenant_id=tenant_id,
+        contract_index=contract_index,
+        document_versions=scope_versions,
+        document_contracts=scope_contracts,
+        num_results=_EDGE_FETCH_LIMIT,
+    )
+    if not edges or not reranked:
+        return []
+    seeds = [
+        EdgeSeedChunk(
+            chunk_id=chunk.chunk_id,
+            document_id=chunk.parent_doc_id,
+            content=chunk.chunk_text,
+            clause_ids=_chunk_clause_ids(chunk),
+            contract_index=_chunk_contract_index(chunk),
+            document_version=_chunk_document_version(chunk),
+        )
+        for chunk in reranked
+    ]
+    return expand_along_edges(
+        seeds=seeds,
+        edges=edges,
+        max_expansion_tokens=_EDGE_EXPANSION_MAX_TOKENS,
+        count_tokens=count_tokens or default_count_tokens,
+        max_blocks_per_seed=_EDGE_EXPANSION_MAX_BLOCKS_PER_SEED,
+    )
+
+
+def _chunk_document_version(chunk: RetrievedChunk) -> int | None:
+    """Read the chunk's document version from server metadata, if persisted."""
+    raw = (chunk.metadata_ or {}).get("document_version")
+    return int(raw) if isinstance(raw, int) and raw >= 1 else None
+
+
+def _chunk_contract_index(chunk: RetrievedChunk) -> int | None:
+    """Read the chunk's contract index from server metadata, if persisted.
+
+    The value rides in metadata (never in the field the LLM could see), so
+    reading the field would leave every seed "unknown" and disable the
+    cross-contract matching guard.
+    """
+    return _context_contract_index(chunk.metadata_ or {})
+
+
+def _chunk_clause_ids(chunk: RetrievedChunk) -> tuple[str, ...]:
+    """Read server-persisted clause identities from chunk metadata, if any."""
+    metadata = chunk.metadata_ or {}
+    raw = metadata.get("clause_ids", metadata.get("clause_id"))
+    if isinstance(raw, str) and raw:
+        return (raw,)
+    if isinstance(raw, (list, tuple, set, frozenset)):
+        return tuple(str(item) for item in raw if item)
+    return ()
+
+
+def _resolved_edge_blocks(
+    expansions: Sequence[EdgeExpansion],
+    rows_by_chunk_id: Mapping[str, dict[str, object]],
+) -> list[tuple[EdgeContextBlock, dict[str, object]]]:
+    """Keep only expansion blocks whose grounded span resolves to a hydrated
+    passage — the same resolution the citations use, so the generator never
+    sees a relationship it could not cite against a retrieved chunk."""
+    rows_by_document: dict[str, list[dict[str, object]]] = {}
+    for row in rows_by_chunk_id.values():
+        rows_by_document.setdefault(str(row.get("document_id")), []).append(row)
+    resolved: list[tuple[EdgeContextBlock, dict[str, object]]] = []
+    for expansion in expansions:
+        for block in expansion.blocks:
+            if block.char_start is None or block.char_end is None:
+                continue
+            supporting = _row_containing_span(
+                rows_by_document.get(expansion.document_id, ()),
+                char_start=block.char_start,
+                char_end=block.char_end,
+                document_version=block.document_version,
+                contract_index=block.contract_index,
+            )
+            if supporting is not None:
+                resolved.append((block, supporting))
+    return resolved
+
+
+def _edge_citations(
+    resolved: Sequence[tuple[EdgeContextBlock, dict[str, object]]],
+) -> list[GroundedCitation]:
+    """Server-derived citations for edge-grounded expansion blocks.
+
+    Provenance discipline matches `_citation_response`: document identity,
+    version, and contract come from the hydrated chunk row — never from the
+    edge text or any model output — and the claim is authored here,
+    deterministically, from the edge's grounded span.
+
+    The citation points at the passage the edge's grounded span actually
+    falls in, resolved among the hydrated rows — never at the seed chunk
+    that merely triggered the expansion. An edge whose span resolves to no
+    hydrated passage — or that carries no span at all — earns no citation.
+    """
+    citations: list[GroundedCitation] = []
+    seen: set[tuple[str, str]] = set()
+    for block, supporting in resolved:
+        chunk_id = str(supporting.get("chunk_id"))
+        span = f"chars {block.char_start}-{block.char_end}"
+        claim = (
+            f"Grounded by {block.relationship.upper()} edge "
+            f"'{block.from_entity}' -> '{block.to_entity}' at {span} "
+            f"(clause {block.clause_id}, edge {block.edge_id})"
+        )
+        key = (chunk_id, claim)
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            _citation_response(
+                Citation(
+                    chunk_id=chunk_id,
+                    clause_type=str(supporting.get("clause_type") or "other"),
+                    claim=claim,
+                ),
+                supporting,
+            )
+        )
+    return citations
+
+
+def _row_containing_span(
+    rows: Sequence[dict[str, object]],
+    *,
+    char_start: int,
+    char_end: int,
+    document_version: int | None = None,
+    contract_index: int | None = None,
+) -> dict[str, object] | None:
+    """Find the hydrated row whose persisted source span covers the edge span.
+
+    When the edge carries version/contract provenance, the supporting passage
+    must match it: two stored versions of one document can both cover a char
+    range, and citing the wrong one dresses an unsupported answer as grounded.
+    """
+    for row in rows:
+        metadata = row.get("metadata_") or {}
+        if not isinstance(metadata, dict):
+            continue
+        start = metadata.get("source_start_char")
+        end = metadata.get("source_end_char")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        if not (start <= char_start and char_end <= end):
+            continue
+        if document_version is not None:
+            row_version = metadata.get("document_version")
+            if isinstance(row_version, int) and row_version != document_version:
+                continue
+        if contract_index is not None:
+            row_contract = metadata.get("contract_index")
+            if isinstance(row_contract, int) and row_contract != contract_index:
+                continue
+        return row
+    return None
+
+
+@runtime_checkable
+class ContextGrader(Protocol):
+    """The narrow slice of the text-generation seam the context grader consumes.
+
+    Structural, so the lifespan-owned text generator and any test double with
+    the same single method satisfy it; this package never imports the concrete
+    adapter. Verbatim shape of the inline ask path's grader seam.
+    """
+
+    def generate_structured(
+        self, request: TextGenerationRequest
+    ) -> Awaitable[TextGenerationStructuredResult]: ...
+
+
+def _grader_from_runtime(runtime: Any) -> ContextGrader | None:
+    """Read the optional grader seam from the invocation context, if supplied."""
+    return _invocation_context(runtime).grader
+
+
+def make_context_grader_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
+    """Grade retrieval sufficiency through the injected grader seam.
+
+    Ported from the inline ask loop's grade stage (the validation-pipeline
+    adoption's `_ContextGradeEvaluator` over `_grade_context`): the optional
+    grader arrives through the invocation context (`RetrievalGraphContext
+    .grader`), the request runs at temperature 0.1, and the seam-absent
+    degrade replays the legacy inline path verbatim. The bounded rewrite
+    retry (`max_attempts=2`) is the graph's own conditional edge — one full
+    plan→retrieve→rerank iteration per attempt, identical to the pipeline's
+    feedback-carrying loop.
+    """
+
+    async def context_grader_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
+        context = _invocation_context(runtime)
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
-        payload: str = serialize_to_toon(
-            {
-                "query": plan.rewritten_query,
-                "chunks": [chunk.model_dump() for chunk in chunks],
-            }
-        )
-        messages: list[SystemMessage | HumanMessage] = [
-            SystemMessage(content=_CONTEXT_GRADER_SYSTEM_PROMPT),
-            HumanMessage(content=payload),
-        ]
-        if not chunks:
-            grade = ContextGrade(
-                sufficient=False,
-                missing_aspects=["No retrieved chunks"],
-                rewrite_suggestion=plan.rewritten_query,
+        async with _stage_span("grade"):
+            grade = await _grade_context(
+                grader_llm=_structured(context.llm, ContextGrade),
+                grader=context.grader,
+                query=plan.rewritten_query,
+                reranked=chunks,
             )
-            return {"context_grade": grade, "iteration_count": state.get("iteration_count", 0) + 1}
-        try:
-            raw_grade = await retry_immediate(
-                lambda: grader_llm.ainvoke(cast("list[Any]", messages)),
-                label="gemini_context_grader",
-            )
-            grade: ContextGrade = ContextGrade.model_validate(raw_grade)
-        except Exception as exc:  # noqa: BLE001 — fall back to chunk-presence heuristic
-            exc.add_note("operation=context_grader")
-            logger.bind(operation="context_grader", error=str(exc)).warning(
-                "context_grader_failed_using_chunk_presence"
-            )
-            grade = ContextGrade(sufficient=bool(chunks), missing_aspects=[])
-        return {"context_grade": grade, "iteration_count": state.get("iteration_count", 0) + 1}
+        iteration_count = state.get("iteration_count", 0) + 1
+        # Structured decision-log event (task 1.7): outcome, iteration, and
+        # the cap-exhaustion escape flag, so the escape rate is derivable
+        # without re-parsing free text.
+        escaped_to_fallback = not grade.sufficient and iteration_count >= _GRADE_LOOP_MAX_ATTEMPTS
+        logger.bind(
+            outcome="sufficient" if grade.sufficient else "insufficient",
+            iteration=iteration_count,
+            escaped_to_fallback=escaped_to_fallback,
+        ).info("grade_decision")
+        return {
+            "context_grade": grade,
+            "iteration_count": iteration_count,
+            **_stage_usage("grade", 1),
+        }
 
     return context_grader_node
 
 
-def make_generator_node(
-    generator_llm: Any,
-    redis: Redis | None,
-) -> Callable[[RetrievalState], Awaitable[dict[str, object]]]:
-    async def generator_node(state: RetrievalState) -> dict[str, object]:
-        if state.get("cache_hit") and state.get("cached_answer"):
+async def _grade_context(
+    *,
+    grader_llm: Any,
+    grader: ContextGrader | None,
+    query: str,
+    reranked: Sequence[RetrievedChunk],
+) -> ContextGrade:
+    """Grade retrieval sufficiency through the structured seam, or its legacy twin.
+
+    Verbatim port of the inline dual-path grade: the injected grader rides the
+    lifespan-owned text-generator seam (retries, breaker, schema-validated
+    output) at temperature 0.1, while ``grader=None`` — the seam disabled at
+    lifespan — replays the prior inline path verbatim so a disabled optional
+    capability cannot change ask() results.
+    """
+    if not reranked:
+        return ContextGrade(
+            sufficient=False, missing_aspects=["No retrieved chunks"], rewrite_suggestion=query
+        )
+    payload = serialize_to_toon(
+        {"query": query, "chunks": [chunk.model_dump() for chunk in reranked]}
+    )
+    if grader is None:
+        return await _grade_context_via_llm(grader_llm=grader_llm, payload=payload)
+
+    request = TextGenerationRequest(
+        prompt=payload,
+        system=_GRADE_SEAM_SYSTEM_PROMPT,
+        response_schema=ContextGrade,
+        # Grading is the same near-deterministic call the legacy inline path
+        # made (dependencies.py builds the document LLM at temperature=0.1);
+        # without this override the seam would inherit GEMINI_TEMPERATURE (0.7).
+        temperature=0.1,
+    )
+    result = await grader.generate_structured(request)
+    if isinstance(result, Failure):
+        error = result.failure()
+        log_expected_failure(error, operation="documents_context_grader")
+        # Same degrade the legacy parse-failure path chose: an unavailable grade
+        # proceeds to generation rather than failing the whole ask() loop.
+        return ContextGrade(sufficient=True, missing_aspects=[])
+    return ContextGrade.model_validate(result.unwrap().output)
+
+
+async def _grade_context_via_llm(*, grader_llm: Any, payload: str) -> ContextGrade:
+    """Legacy inline grading path, kept verbatim for the seam-absent degrade."""
+    messages = [SystemMessage(content=_GRADE_SEAM_SYSTEM_PROMPT), HumanMessage(content=payload)]
+    try:
+        raw = await retry_immediate(
+            lambda: grader_llm.ainvoke(cast("list[Any]", messages)),
+            label="documents_context_grader",
+        )
+        return ContextGrade.model_validate(raw)
+    except (ValueError, TypeError):
+        return ContextGrade(sufficient=True, missing_aspects=[])
+
+
+def make_generator_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
+    async def generator_node(state: RetrievalState, runtime: Any = None) -> dict[str, object]:
+        context = _invocation_context(runtime)
+        redis = context.redis
+        envelope: CachedAskEnvelope | None = state.get("cached_envelope")
+        if state.get("cache_hit") and envelope is not None:
+            # The cached envelope serves the full contract the miss that wrote
+            # it served — answer, citation provenance, coverage, warnings, and
+            # evidence policy — with no new spend (the inline cache-hit
+            # contract: the boundary's response is byte-identical, cache_hit
+            # excepted).
+            answer = GeneratedAnswer(
+                answer=envelope.answer,
+                citations=[
+                    Citation(
+                        chunk_id=citation.chunk_id,
+                        clause_type=citation.clause_type,
+                        claim=citation.claim,
+                        contract_index=citation.contract_index,
+                    )
+                    for citation in envelope.citations
+                ],
+                confidence=envelope.confidence,
+            )
             return {
-                "generated_answer": state["cached_answer"],
-                "messages": [AIMessage(content=state["cached_answer"].answer)],
+                "generated_answer": answer,
+                "resolved_citations": list(envelope.citations),
+                "coverage": envelope.coverage,
+                "quality_warnings": list(envelope.warnings),
+                "evidence_policy": envelope.evidence_policy,
+                "messages": [AIMessage(content=answer.answer)],
+                **_stage_usage("generate", 0),
             }
 
         grade: ContextGrade | None = state.get("context_grade")
-        if grade is not None and not grade.sufficient and state.get("iteration_count", 0) >= 2:
+        cap_exhausted = (
+            grade is not None
+            and not grade.sufficient
+            and state.get("iteration_count", 0) >= _GRADE_LOOP_MAX_ATTEMPTS
+        )
+        if cap_exhausted:
             answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
-            return {"generated_answer": answer, "messages": [AIMessage(content=answer.answer)]}
+            finalised = _finalise_ask_state(state, answer)
+            await _cache_ask_envelope(state, redis, answer, finalised)
+            return {
+                **finalised,
+                "messages": [AIMessage(content=answer.answer)],
+                **_stage_usage("generate", 0),
+            }
 
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
-        payload = serialize_to_toon(
-            {
-                "query": plan.rewritten_query,
-                "chunks": [chunk.model_dump() for chunk in chunks],
-            }
-        )
+        payload_data: dict[str, Any] = {
+            "query": plan.rewritten_query,
+            "chunks": [chunk.model_dump() for chunk in chunks],
+        }
+        # The key exists only when edge expansion actually produced blocks, so
+        # a query that touches no edges renders the exact pre-edge payload.
+        grounding_edges = state.get("grounding_edge_texts") or []
+        if grounding_edges:
+            payload_data["grounding_edges"] = list(grounding_edges)
+        payload = serialize_to_toon(payload_data)
         messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content=_GENERATOR_SYSTEM_PROMPT),
             HumanMessage(content=payload),
         ]
-        try:
-            raw_answer = await retry_immediate(
-                lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
-                label="gemini_grounded_generator",
-            )
-            answer: GeneratedAnswer = GeneratedAnswer.model_validate(raw_answer)
-        except Exception as exc:  # noqa: BLE001 — generator failure must return hard fallback
-            exc.add_note("operation=generator")
-            logger.bind(operation="generator", error=str(exc)).warning(
-                "generator_failed_using_fallback"
-            )
-            answer = GeneratedAnswer(answer=FALLBACK_ANSWER, citations=[], confidence="uncertain")
+        generator_llm = _structured(context.llm, GeneratedAnswer)
+        async with _stage_span("generate"):
+            try:
+                raw_answer = await retry_immediate(
+                    lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
+                    label="gemini_grounded_generator",
+                )
+                answer: GeneratedAnswer = GeneratedAnswer.model_validate(raw_answer)
+            except Exception as exc:  # noqa: BLE001 — generator failure must return hard fallback
+                exc.add_note("operation=generator")
+                logger.bind(operation="generator", error=str(exc)).warning(
+                    "generator_failed_using_fallback"
+                )
+                answer = GeneratedAnswer(
+                    answer=FALLBACK_ANSWER, citations=[], confidence="uncertain"
+                )
 
         if answer.confidence == "uncertain" and FALLBACK_ANSWER not in answer.answer:
-            answer: GeneratedAnswer = answer.model_copy(
-                update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"}
-            )
+            answer = answer.model_copy(update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"})
 
-        if redis is not None:
-            cache_key = _answer_cache_key(
-                plan.rewritten_query,
-                state.get("doc_ids_filter", []),
-                state.get("contract_index"),
-            )
-            ttl = 60 * 60 * 24 if state.get("doc_ids_filter") else 60 * 60
-            await redis.setex(cache_key, ttl, answer.model_dump_json())
+        finalised = _finalise_ask_state(state, answer)
+        await _cache_ask_envelope(state, redis, answer, finalised)
 
-        return {"generated_answer": answer, "messages": [AIMessage(content=answer.answer)]}
+        return {
+            **finalised,
+            "messages": [AIMessage(content=answer.answer)],
+            **_stage_usage("generate", 1),
+        }
 
     return generator_node
+
+
+async def _cache_ask_envelope(
+    state: RetrievalState,
+    redis: Any | None,
+    answer: GeneratedAnswer,
+    finalised: dict[str, object],
+) -> None:
+    """Write the full finalised ask envelope under the version-aware key.
+
+    The cache stores the envelope — not the bare answer — so a cache hit
+    serves the same coverage, warnings, citations, and evidence policy the
+    miss served (the inline contract; drift-register item 4).
+    """
+    if redis is None:
+        return
+    envelope = CachedAskEnvelope(
+        answer=answer.answer,
+        confidence=answer.confidence,
+        citations=list(finalised["resolved_citations"]),  # ty: ignore[invalid-argument-type]
+        evidence_policy=finalised["evidence_policy"],  # ty: ignore[invalid-argument-type]
+        coverage=finalised["coverage"],  # ty: ignore[invalid-argument-type]
+        warnings=list(finalised["quality_warnings"]),  # ty: ignore[invalid-argument-type]
+    )
+    cache_key = state.get("answer_cache_key") or _answer_cache_key(state)
+    from app.features.documents.domain.constants import (  # noqa: PLC0415
+        DEFAULT_SEARCH_CACHE_TTL_SECONDS,
+    )
+
+    await redis.setex(cache_key, DEFAULT_SEARCH_CACHE_TTL_SECONDS, envelope.model_dump_json())
+
+
+def _finalise_ask_state(state: RetrievalState, answer: GeneratedAnswer) -> dict[str, object]:
+    """Finalisation (task 1.4): the truthful coverage and warning envelope.
+
+    Coverage is derived from the hydrated rows and the scope-unavailable
+    documents, never asserted; warnings are merged and deduplicated exactly
+    as the inline `_warnings_from_rows`/`_merge_warning_lists` pair does; the
+    scope-unavailable warning matches the inline contract verbatim; citation
+    provenance is resolved from the hydrated rows (`_citation_response`
+    discipline) and the server-derived edge citations are appended.
+    """
+    rows: list[dict[str, Any]] = state.get("retrieved_rows", [])
+    rows_by_chunk_id = {str(row["chunk_id"]): row for row in rows}
+    require_graphiti_verified = bool(state.get("require_graphiti_verified", False))
+    scope_bound = bool(state.get("scope_bound"))
+    result_document_ids = {str(row["document_id"]) for row in rows}
+    graph_document_ids = {
+        str(row["document_id"]) for row in rows if bool(row.get("graphiti_verified", False))
+    }
+    warnings = _merge_warning_lists([_warnings_from_rows(rows)])
+    unavailable_scope_documents = list(state.get("scope_unavailable_documents", []))
+    if unavailable_scope_documents:
+        warnings.append(
+            StageWarning(
+                stage="graph_scope",
+                code="GRAPH_SCOPE_UNAVAILABLE",
+                message=(
+                    "Authoritative document version/contract scope was unavailable "
+                    f"for {len(unavailable_scope_documents)} authorized document(s)."
+                ),
+                severity="warning",
+            )
+        )
+    citations = [
+        _citation_response(citation, rows_by_chunk_id.get(citation.chunk_id))
+        for citation in answer.citations
+    ]
+    citations.extend(state.get("edge_citations", []))
+    return {
+        "generated_answer": answer,
+        "coverage": CoverageEnvelope(
+            documents_requested=(
+                len(state.get("allowed_doc_ids", []))
+                if scope_bound
+                else len(state.get("doc_ids_filter", []))
+            ),
+            documents_ready=len(result_document_ids),
+            graph_indexed_documents=len(graph_document_ids),
+            graph_unavailable_documents=len(result_document_ids - graph_document_ids),
+        ),
+        "quality_warnings": warnings,
+        "resolved_citations": citations,
+        "evidence_policy": (
+            "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
+        ),
+    }
 
 
 def should_run_graph(state: RetrievalState) -> str:
@@ -648,7 +1228,11 @@ def should_run_graph(state: RetrievalState) -> str:
 
 def should_retry_or_generate(state: RetrievalState) -> str:
     grade = state.get("context_grade")
-    if grade is not None and not grade.sufficient and state.get("iteration_count", 0) < 2:
+    if (
+        grade is not None
+        and not grade.sufficient
+        and state.get("iteration_count", 0) < _GRADE_LOOP_MAX_ATTEMPTS
+    ):
         return "query_analyzer"
     return "generate"
 
@@ -683,43 +1267,154 @@ def _row_to_chunk(row: dict[str, Any]) -> RetrievedChunk:
         clause_type=str(row["clause_type"]),
         parent_doc_id=str(row["parent_doc_id"]),
         chunk_index=int(chunk_index) if chunk_index is not None else 0,
-        contract_index=_read_contract_index(row),
-        metadata_=dict(row["metadata_"] or {}),
+        # The contract index is never populated on the field the LLM could
+        # see — it rides in metadata, exactly as the inline `_row_to_chunk`
+        # leaves it — so the chunk payloads the grader and generator consume
+        # are byte-identical across both paths.
+        # The same server-metadata enrichment the inline `_row_to_chunk`
+        # performs: quality warnings, graph-indexing state, document version,
+        # pipeline version, and contract index ride in metadata so edge-seed
+        # resolution and citation provenance read them from one place.
+        metadata_={
+            **dict(row["metadata_"] or {}),
+            "quality_warnings": row.get("quality_warnings", []),
+            "graphiti_verified": bool(row.get("graphiti_verified")),
+            "graph_indexed": bool(row.get("graphiti_verified")),
+            "document_version": row.get("document_version", 1),
+            "pipeline_version": row.get("pipeline_version"),
+            "contract_index": row.get("contract_index"),
+            "graph_indexed_at": row.get("graph_indexed_at"),
+        },
         custom_metadata=dict(row["custom_metadata"] or {}),
         score=float(row["rrf_score"]),
     )
 
 
-def _answer_cache_key(
-    rewritten_query: str,
-    doc_ids_filter: list[str],
-    contract_index: int | None = None,
-) -> str:
-    raw = json.dumps(
-        {
-            "query": " ".join(rewritten_query.lower().split()),
-            "doc_ids": sorted(doc_ids_filter),
-            "contract_index": contract_index,
-        },
-        sort_keys=True,
+def _answer_cache_key(state: Mapping[str, Any]) -> str:
+    """Version-aware answer cache key, matching the inline `_build_answer_cache_key`.
+
+    The derivation covers the tenant, the authorized scope, the resolved
+    document version of every scoped document, the canonical pipeline
+    version, and the request's evidence policy — so a cached answer can never
+    be served after a scoped document's version or the pipeline version has
+    changed. The query is the *original* request query (normalized), not the
+    plan's rewrite, matching the inline derivation.
+    """
+    from app.features.documents.domain.constants import (  # noqa: PLC0415
+        CANONICAL_PIPELINE_VERSION,
     )
-    return "kb:answer:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    # `user_id` is mandatory on the served path (the hybrid node requires it),
+    # but the derivation tolerates its absence so a malformed state fails at
+    # retrieval, not in the cache read.
+    user_id = str(state.get("user_id") or "")
+    tenant_id = str(state.get("tenant_id") or user_id)
+    require_graphiti_verified = bool(state.get("require_graphiti_verified", False))
+    raw = to_sorted_key_bytes(
+        {
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "query": " ".join(str(state["query"]).lower().split()),
+            "doc_ids_filter": sorted(str(doc_id) for doc_id in state.get("doc_ids_filter", [])),
+            "allowed_doc_ids": sorted(str(doc_id) for doc_id in state.get("allowed_doc_ids", [])),
+            "document_versions": sorted(
+                (
+                    (str(doc_id), int(version), pipeline)
+                    for doc_id, version, pipeline in state.get("document_versions", [])
+                ),
+                key=itemgetter(0),
+            ),
+            "jurisdiction": state.get("jurisdiction"),
+            "contract_type": state.get("contract_type"),
+            "contract_index": state.get("contract_index"),
+            "clause_type": state.get("clause_type"),
+            "require_graphiti_verified": require_graphiti_verified,
+            "evidence_policy": (
+                "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
+            ),
+            "pipeline_version": CANONICAL_PIPELINE_VERSION,
+        },
+    )
+    return "documents:answer:" + hashlib.sha256(raw).hexdigest()
 
 
-def _read_contract_index(row: dict[str, Any]) -> int | None:
-    value = row.get("contract_index")
+def _flatten_warnings(raw_groups: list[Any]) -> list[StageWarning]:
+    warnings: list[StageWarning] = []
+    for group in raw_groups:
+        if isinstance(group, list):
+            warnings.extend(
+                StageWarning.model_validate(warning)
+                for warning in group
+                if isinstance(warning, dict)
+            )
+        elif isinstance(group, dict):
+            warnings.append(StageWarning.model_validate(group))
+    return warnings
+
+
+def _merge_warning_lists(groups: list[list[StageWarning]]) -> list[StageWarning]:
+    """Merge warning groups, deduplicating on (stage, code, message, severity).
+
+    Verbatim port of the inline `_merge_warning_lists`: first occurrence
+    wins, insertion order preserved.
+    """
+    merged: dict[tuple[str, str, str, str], StageWarning] = {}
+    for group in groups:
+        for warning in group:
+            merged[warning.stage, warning.code, warning.message, warning.severity] = warning
+    return list(merged.values())
+
+
+def _warnings_from_rows(rows: list[dict[str, Any]]) -> list[StageWarning]:
+    return _flatten_warnings([row.get("quality_warnings", []) for row in rows])
+
+
+def _context_contract_index(metadata: dict[str, object]) -> int | None:
+    """Return a contract index only when a context section is contract-local."""
+    value = metadata.get("contract_index")
     if isinstance(value, bool):
         return None
-    if isinstance(value, int) and value >= 0:
-        return value
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
-    metadata = row.get("metadata_")
-    if isinstance(metadata, dict):
-        value = metadata.get("contract_index")
-        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            return value
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
     return None
+
+
+def _citation_response(citation: Citation, row: dict[str, object] | None) -> GroundedCitation:
+    """Attach immutable source provenance to a citation when a row is available.
+
+    Verbatim port of the inline `_citation_response` discipline: identity,
+    version, contract, pipeline version, and page come from the hydrated row,
+    never from the citation text or any model output.
+    """
+    grounded = GroundedCitation(
+        chunk_id=citation.chunk_id,
+        clause_type=citation.clause_type,
+        claim=citation.claim,
+    )
+    if row is None:
+        return grounded
+    return grounded.model_copy(
+        update={
+            "document_id": str(row["document_id"]) if row.get("document_id") else None,
+            "document_version": int(cast("int | str", row.get("document_version", 1))),
+            "contract_index": (
+                int(cast("int | str", row["contract_index"]))
+                if isinstance(row.get("contract_index"), (int, str))
+                and not isinstance(row.get("contract_index"), bool)
+                else None
+            ),
+            "pipeline_version": (
+                str(row["pipeline_version"]) if row.get("pipeline_version") is not None else None
+            ),
+            "page_no": int(cast("int | str", row.get("page_no", 0))),
+        }
+    )
 
 
 def _extract_postgres_chunk_ids(value: str) -> list[str]:

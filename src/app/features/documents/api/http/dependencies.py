@@ -84,6 +84,11 @@ async def get_document_query_service(
         graphiti=getattr(request.app.state, "graphiti", None),
         grader=grader,
         audit_recorder=cast("DocumentAccessAuditRecorder | None", recorder),
+        # The compile-once retrieval engine (mount-retrieval-graph 4.x): the
+        # ask endpoints serve through it. Absence (provisioning degraded at
+        # lifespan) stays ``None`` and the service fails closed with a typed
+        # unavailability — it never falls back to another answering path.
+        retrieval_engine=getattr(request.app.state, "retrieval_engine", None),
     )
 
 

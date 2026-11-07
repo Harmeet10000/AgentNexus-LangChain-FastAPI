@@ -41,6 +41,7 @@ from .grouping import (
     fanout_graphiti_group_ids,
     parse_graphiti_group_id,
 )
+from .retrieval_branch import fetch_ranked_chunk_ids
 from .write_clause_episodes import write_clause_episodes_to_graphiti
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
     "GraphitiGroupScope",
     "build_graphiti_group_id",
     "fanout_graphiti_group_ids",
+    "fetch_ranked_chunk_ids",
     "get_obligation_chain",
     "parse_graphiti_group_id",
     "search_for_precedent_chains",

@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from app.extraction.langextract.service import AsyncExtractionService
     from app.features.documents.application.evidence.service import EvidenceService
     from app.features.documents.application.tools.portfolio import RelationshipEdgeProbe
+    from app.features.documents.retrieval.graph.engine import RetrievalEngine
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
     from app.utils.storage import StorageService
 
@@ -59,6 +60,42 @@ async def provide_langgraph_checkpointer(database_url: str) -> AsyncPostgresSave
     """Provision the checkpointer for the process that owns its pool."""
 
     return await setup_langgraph_checkpointer(database_url)
+
+
+def provide_retrieval_engine(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis: Redis | None,
+    graphiti: Graphiti | None,
+    grader: Any | None = None,
+) -> RetrievalEngine:
+    """Compile the retrieval graph once and bind its per-invocation collaborators.
+
+    The compiled graph captures nothing request-scoped (mount-retrieval-graph
+    task 3.1): the repository arrives per invocation over a short-lived
+    session, and the language model is constructed on first use — an eager
+    construction would let a provider misconfiguration break boot for a
+    capability that can degrade. Provisioning failure degrades via the
+    startup policy registry; the ask endpoints and the qna node then fail
+    closed with a typed unavailability.
+    """
+    from app.features.documents.retrieval.graph.engine import (  # noqa: PLC0415
+        RetrievalEngine,
+    )
+
+    return RetrievalEngine(
+        session_factory=session_factory,
+        redis=redis,
+        graphiti=graphiti,
+        # Same construction contract as the documents HTTP dependency: built
+        # lazily, at the serving temperature the ask contract pins (0.1).
+        llm_factory=lambda: build_chat_model(
+            model_name=None,
+            temperature=0.1,
+            implementation="generic",
+        ),
+        grader=grader,
+    )
 
 
 def provide_agent_memory_service(settings: Settings) -> AgentMemoryService:
@@ -111,6 +148,7 @@ async def provide_saul_graph(
     session_factory: async_sessionmaker[AsyncSession],
     graphiti: GraphitiService,
     evidence_service: EvidenceService | None = None,
+    retrieval_engine: RetrievalEngine | None = None,
 ) -> CompiledStateGraph[Any]:
     """Compile Agent Saul once from already-provisioned process resources.
 
@@ -161,6 +199,7 @@ async def provide_saul_graph(
         tool_registry=tool_bundle,
         traversal_graphiti_service=graphiti if probe is not None else None,
         traversal_gate_probe=probe,
+        retrieval_engine=retrieval_engine,
     )
 
 

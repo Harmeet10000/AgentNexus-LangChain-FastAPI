@@ -312,13 +312,17 @@ def _build_graph_nodes(
     pro_llm: BaseChatModel,
     memory_service: Any,
     tool_registry: AgentToolBundle,
+    retrieval_engine: Any | None = None,
 ) -> SaulGraphNodes:
     # D7 / ADR-2: the review node is built only through its sink entry, so a
     # Saul-side ESCALATE reaches HITL through the HumanReviewSink contract.
     review_sink, review_node = make_human_review_entry()
     return SaulGraphNodes(
         gateway=make_gateway_node(),
-        qna=make_qna_node(registry.qna_llm),
+        # The compile-once retrieval engine rides the qna node as its
+        # grounded answering engine (mount-retrieval-graph 3.x) — a node-
+        # internal invocation, never a tool; no toolset below changes.
+        qna=make_qna_node(registry.qna_llm, retrieval_engine=retrieval_engine),
         orchestrator=make_orchestrator_node(
             cast(
                 "Runnable[list[Any], OrchestratorAction]",

@@ -10,12 +10,13 @@ from app.utils import ServiceUnavailableException
 async def get_ingestion_graph(request: Request) -> CompiledStateGraph[Any]:
     """The compiled ingestion graph, or a typed 503 if this process has none.
 
-    **This dependency is expected to fail, permanently.** The lifespan assignment that would
-    populate it is commented out by decision (D17) and stays that way: ingestion runs in the queue
-    worker process, which never executes the application lifespan, so a per-process graph was never
-    shared application state to begin with. The router that would consume this is not mounted
-    either, so no unavailable surface actually ships today. What this function owes is that if it is
-    ever reached, it fails *closed* and says why.
+    **This dependency is expected to fail in the serving process.** The lifespan DOES provision
+    ``app.state.ingestion_graph`` (``lifecycle/lifespan.py`` → ``provide_document_ingestion_graph``),
+    but that graph is bound for the queue-worker contract; in the API process the attribute is
+    absent, so this dependency fails closed with a typed 503. The deprecated router that consumes it
+    is retained only for the sunset window (see the quarantine ledger's folded-shim row). What this
+    function owes is exactly what it does: if reached without a provisioned graph, it fails *closed*
+    and says why — never a 500, never a fallback answering path.
 
     Read through ``getattr`` with a default rather than as an attribute, because the attribute is
     never **set** — not set to ``None``. Starlette's state object raises on an unknown attribute, so

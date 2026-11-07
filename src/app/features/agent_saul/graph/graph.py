@@ -132,6 +132,7 @@ def build_saul_graph(
     *,
     traversal_graphiti_service: BoundGraphitiService | None = None,
     traversal_gate_probe: RelationshipEdgeProbe | None = None,
+    retrieval_engine: Any | None = None,
 ) -> CompiledStateGraph[Any]:
     """Build and compile the Agent Saul LangGraph.
 
@@ -139,6 +140,10 @@ def build_saul_graph(
     portfolio traversal binding seam to ``build_agent_registry`` (openspec
     ``agent-portfolio-traversal-tools``): the lifespan probes the corpus and
     passes both, or omits the probe (None) to skip bindings entirely.
+
+    ``retrieval_engine`` forwards the compile-once retrieval graph the qna
+    node uses as its grounded answering engine (mount-retrieval-graph 3.x).
+    It is a process-scoped provider, never a tool: no toolset changes.
     """
     registry = build_agent_registry(
         pro_llm,
@@ -152,6 +157,7 @@ def build_saul_graph(
         pro_llm=pro_llm,
         memory_service=memory_service,
         tool_registry=tool_registry,
+        retrieval_engine=retrieval_engine,
     )
 
     state_graph_factory = cast("Any", StateGraph)

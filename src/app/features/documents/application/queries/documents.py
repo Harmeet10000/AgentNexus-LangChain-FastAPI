@@ -5,25 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+from collections.abc import Mapping
 from operator import itemgetter
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast, runtime_checkable
 
-from graphiti_core.errors import GraphitiError
-from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, ConfigDict
 from returns.result import Failure, Success
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.generation import TextGenerationRequest
-from app.ai.graph.retry import TransientExternalError, retry_immediate
-from app.ai.validation import (
-    EvaluationContext,
-    SemanticFinding,
-    SemanticReport,
-    ValidationDecision,
-    ValidationPipeline,
-)
-from app.config import get_settings
 from app.features.auth.domain.tenancy import personal_tenant_id
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
@@ -49,51 +38,34 @@ from app.features.documents.application.access_audit import (
 from app.features.documents.domain.constants import (
     CANONICAL_PIPELINE_VERSION,
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
-    HYBRID_CANDIDATE_LIMIT,
     RRF_K,
-    RRF_WEIGHT_TRIGRAM,
 )
+from app.features.documents.domain.errors import DocumentDatabaseError
 from app.features.documents.retrieval.context_assembly import (
     SearchChunkRecord,
     assemble_rag_context,
 )
 from app.features.documents.retrieval.graph import (
-    Citation,
-    ContextGrade,
-    GeneratedAnswer,
-    QueryPlan,
-    RetrievedChunk,
-    _extract_postgres_chunk_ids,
-    build_retrieval_graph,
-    get_shared_reranker,
+    RetrievalEngine,
+    RetrievalGraphContext,
 )
 from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
-from app.retrieval.edge_expansion import (
-    EdgeContextBlock,
-    EdgeExpansion,
-    EdgeSeedChunk,
-    expand_along_edges,
-)
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
-from app.retrieval.graphiti.client import fetch_relationship_edges
-from app.retrieval.graphiti.grouping import build_graphiti_group_id
+from app.retrieval.graphiti.retrieval_branch import fetch_ranked_chunk_ids
 from app.retrieval.structural_navigator import navigate_tree
 from app.retrieval.token_counter import count_tokens as default_count_tokens
-from app.shared.langchain_layer import serialize_to_toon
-from app.utils import to_sorted_key_bytes
+from app.utils import InfrastructureException, ServiceUnavailableException, to_sorted_key_bytes
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
+    from typing import Any
 
     from graphiti_core.graphiti import Graphiti
     from langchain_core.language_models import BaseChatModel
     from redis.asyncio import Redis
-    from ty_extensions import Unknown
 
     from app.ai.generation import TextGenerationStructuredResult
-    from app.ai.validation import RetryFeedback
-    from app.config.settings import Settings
     from app.features.documents.api.http import dto as documents_dto
     from app.features.documents.domain.errors import DocumentResult
     from app.features.documents.ingestion.chunking.classification import QualityWarning
@@ -101,23 +73,10 @@ if TYPE_CHECKING:
         LegalMetadataExtraction,
     )
     from app.features.documents.retrieval.context_assembly import ContextSection
-_GENERATOR_SYSTEM_PROMPT = (
-    "You are a grounded answer generator. Use only the provided chunks. "
-    "Every factual claim must cite exact chunk_id and clause_type in the citations list. "
-    "Return only GeneratedAnswer."
-)
-_CONTEXT_GRADER_SYSTEM_PROMPT = "You are a retrieval sufficiency grader. Return only ContextGrade."
-_QUERY_ANALYZER_SYSTEM_PROMPT = "You are a legal retrieval query planner. Return only QueryPlan."
 _FALLBACK_ANSWER = (
     "I do not have enough grounded document context to answer this reliably. "
     "Please narrow the question or ingest the relevant document sections."
 )
-# Edge-aware context expansion bounds. Additive and small by construction: at
-# most a few server-authored grounding lines per reranked chunk, never a
-# second retrieval pass, and only for queries that actually touch edges.
-_EDGE_EXPANSION_MAX_TOKENS: int = 256
-_EDGE_EXPANSION_MAX_BLOCKS_PER_SEED: int = 4
-_EDGE_FETCH_LIMIT: int = 32
 _KNOWLEDGE_EXTRACTION_PROMPT = (
     "Extract grounded legal clauses and their attributes. Use extraction classes such as "
     "indemnity, termination, payment, confidentiality, governing_law, arbitration, "
@@ -138,7 +97,13 @@ _KNOWLEDGE_EXTRACTION_PROMPT = (
 
 
 class _BranchInput(NamedTuple):
-    """Shared input every fused-retrieval branch runs from."""
+    """Shared input every fused-retrieval branch runs from.
+
+    The ``graphiti``/``document_versions``/``document_contracts`` tail exists
+    for the optional relationship-graph branch (``retrieval-measurement-gate``):
+    the three mandatory legs never read them, and the graph branch is registered
+    only when the caller passes a client.
+    """
 
     user_id: str
     tenant_id: str
@@ -148,6 +113,9 @@ class _BranchInput(NamedTuple):
     filter_params: dict[str, Any]
     bm25_threshold: float | None = None
     exact_phrase: str | None = None
+    graphiti: Graphiti | None = None
+    document_versions: Sequence[tuple[str, int, str | None]] = ()
+    document_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]] = ()
 
 
 class _LegalPreparation(NamedTuple):
@@ -200,6 +168,44 @@ async def _run_trigram_branch(
     )
 
 
+async def _run_graphiti_branch(
+    repo: DocumentRepository, args: _BranchInput
+) -> DocumentResult[list[dict[str, Any]]]:
+    """Relationship-graph branch coroutine (optional fourth leg).
+
+    The repository is unused: the read goes to the Graphiti knowledge graph,
+    ranked, tenant-scoped, over the same chunk-identifier space the SQL legs
+    return. A raised transport failure is converted to a typed Failure so
+    `_run_branches` attributes it to the branch — the enabled branch fails the
+    request naming the branch, it never silently shrinks the fusion. An empty
+    ranking — no reachable relationships for the query — contributes nothing.
+    """
+    _ = repo
+    try:
+        chunk_ids = await fetch_ranked_chunk_ids(
+            args.graphiti,
+            args.query_text,
+            allowed_doc_ids=tuple(args.filter_params.get("document_ids") or ()),
+            tenant_id=args.tenant_id,
+            contract_index=args.filter_params.get("contract_index"),
+            document_versions=args.document_versions,
+            document_contracts=args.document_contracts,
+        )
+    except Exception as exc:  # noqa: BLE001 — converted to a typed Failure below.
+        return Failure(
+            DocumentDatabaseError(
+                message=f"graphiti retrieval branch read failed: {exc}",
+                details={"branch": GRAPHITI_BRANCH_NAME, "error": type(exc).__name__},
+            )
+        )
+    return Success(
+        [
+            {"chunk_id": chunk_id, "score": 1.0 / rank}
+            for rank, chunk_id in enumerate(chunk_ids, start=1)
+        ]
+    )
+
+
 class RetrievalBranchPolicy(NamedTuple):
     """One fused-retrieval branch: attribution name plus how to run it."""
 
@@ -215,25 +221,47 @@ RETRIEVAL_BRANCHES: tuple[RetrievalBranchPolicy, ...] = (
     RetrievalBranchPolicy(name="trigram", run=_run_trigram_branch),
 )
 
+# The optional fourth branch: registered here per the registry contract (name
+# paired with its runnable), but appended to the fused set only when the caller
+# passes a Graphiti client (the ask path does so only when
+# DOCUMENTS_GRAPHITI_FUSION_ENABLED is set). Gather/zip/fusion code is shared
+# with the mandatory legs unchanged; a failure attributes to "graphiti".
+GRAPHITI_BRANCH_NAME = "graphiti"
+
+
+def fused_branches(graphiti: Graphiti | None = None) -> tuple[RetrievalBranchPolicy, ...]:
+    """Return the branches the fusion runs: the mandatory three, plus graph."""
+    if graphiti is None:
+        return RETRIEVAL_BRANCHES
+    return (
+        *RETRIEVAL_BRANCHES,
+        RetrievalBranchPolicy(name=GRAPHITI_BRANCH_NAME, run=_run_graphiti_branch),
+    )
+
+
 # Derived, not authored: the i-th label names the i-th gathered result, and the
 # pairing tests pin this derivation rather than a hand-kept tuple.
 _SEARCH_BRANCHES = tuple(branch.name for branch in RETRIEVAL_BRANCHES)
 
 
 async def _run_branches(
-    *, repo: DocumentRepository, branch_input: _BranchInput
+    *,
+    repo: DocumentRepository,
+    branch_input: _BranchInput,
+    branches: Sequence[RetrievalBranchPolicy] = RETRIEVAL_BRANCHES,
+    branch_diagnostics: dict[str, Any] | None = None,
 ) -> DocumentResult[list[list[RankedResultRow]]]:
     """Run every retrieval branch and return ranked row sets, or fail with attribution.
 
     A branch that *raised* keeps its own error kind via `model_copy` — re-wrapping
     would flatten the taxonomy and turn a 422 from one branch into a 503 for the
-    whole request — with only the branch name added.
+    whole request — with only the branch name added. When ``branch_diagnostics``
+    is provided, each executed branch's contribution (name, identifiers
+    contributed) is recorded into it for the response path's diagnostics.
     """
-    results = await asyncio.gather(
-        *(branch.run(repo, branch_input) for branch in RETRIEVAL_BRANCHES)
-    )
+    results = await asyncio.gather(*(branch.run(repo, branch_input) for branch in branches))
     row_sets: list[list[RankedResultRow]] = []
-    for branch, branch_result in zip(RETRIEVAL_BRANCHES, results, strict=True):
+    for branch, branch_result in zip(branches, results, strict=True):
         if isinstance(branch_result, Failure):
             error = branch_result.failure()
             return Failure(
@@ -247,7 +275,16 @@ async def _run_branches(
         # `else`, not `elif isinstance(..., Success)`. The old form had no final branch, so a
         # value that was neither would have been dropped from `row_sets` entirely — shrinking
         # the fusion input with no log line and no failure.
-        row_sets.append(_to_ranked_rows(branch_result.unwrap()))
+        row_set = _to_ranked_rows(branch_result.unwrap())
+        row_sets.append(row_set)
+        if branch_diagnostics is not None:
+            branch_diagnostics.setdefault("branches_executed", []).append(
+                {
+                    "branch": branch.name,
+                    "executed": True,
+                    "identifiers_contributed": len(row_set),
+                }
+            )
     return Success(row_sets)
 
 
@@ -264,15 +301,22 @@ async def retrieve_fused(
     bm25_threshold: float | None = None,
     exact_phrase: str | None = None,
     tenant_id: str | None = None,
+    graphiti: Graphiti | None = None,
+    document_versions: Sequence[tuple[str, int, str | None]] = (),
+    document_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]] = (),
+    branch_diagnostics: dict[str, Any] | None = None,
 ) -> DocumentResult[tuple[list[RankedChunk], dict[str, dict[str, Any]]]]:
-    """Run the three branch legs over base chunks and fuse them in Python.
+    """Run the branch legs over base chunks and fuse them in Python.
 
     The single fused path shared by the search endpoint, `ask`, and the
     retrieval-graph hybrid node: every caller issues the same branch SQL with the
     same inputs and fuses with the same weights, so one query yields identical
     chunk-id order from every door. A branch that *raised* keeps its attribution
     (branch name in details); a branch that legitimately matches nothing
-    contributes an empty rank list and fusion proceeds.
+    contributes an empty rank list and fusion proceeds. The optional
+    relationship-graph leg (``graphiti``) joins the fusion through the branch
+    registry — no second fusion implementation — and only when the caller
+    passes a client.
     """
     branch_input = _BranchInput(
         user_id=user_id,
@@ -283,8 +327,16 @@ async def retrieve_fused(
         filter_params=filter_params,
         bm25_threshold=bm25_threshold,
         exact_phrase=exact_phrase,
+        graphiti=graphiti,
+        document_versions=document_versions,
+        document_contracts=document_contracts,
     )
-    results = await _run_branches(repo=repo, branch_input=branch_input)
+    results = await _run_branches(
+        repo=repo,
+        branch_input=branch_input,
+        branches=fused_branches(graphiti),
+        branch_diagnostics=branch_diagnostics,
+    )
     if isinstance(results, Failure):
         return Failure(results.failure())
     row_sets = results.unwrap()
@@ -372,105 +424,6 @@ class ContextGrader(Protocol):
     ) -> Awaitable[TextGenerationStructuredResult]: ...
 
 
-# Ask-loop pipeline adoption (validation-seam-adoption): the grade/rewrite
-# loop runs through the shared ValidationPipeline. Grading is the semantic
-# evaluator (``_grade_context`` verbatim); one full plan→retrieve→rerank
-# iteration is ``produce``; the rewrite suggestion rides the bounded
-# feedback-carrying retry. The observable ask contract is byte-identical
-# (parity suite: the existing grade-loop and ask tests).
-_ASK_VALIDATION_SEAM = "ask_context_grader"
-# First attempt + the bounded rewrite retry: the two-iteration bound, unchanged.
-_ASK_MAX_ATTEMPTS = 2
-_INSUFFICIENT_CONTEXT_FINDING = "insufficient_context"
-
-
-class RetrievedContext(BaseModel):
-    """One retrieval iteration's produced context, as the grader consumes it.
-
-    The schema-gate model for the ask loop's pipeline: ``produce`` runs one
-    full plan→graphiti-filter→embed→retrieve→rerank iteration and hands this
-    to the semantic evaluator (the context grader).
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    query: str
-    reranked: tuple[RetrievedChunk, ...] = ()
-    rows: tuple[dict[str, Any], ...] = ()
-
-
-class _AskLoopState:
-    """Mutable per-ask cell shared by the pipeline's produce and evaluator.
-
-    The evaluator records the latest :class:`ContextGrade` so the retry's
-    rewrite suggestion reaches ``produce`` exactly as the hand-rolled loop's
-    second iteration consumed it; the last completed iteration's rows drive
-    the warning envelope and coverage in both the accepted and escalated
-    outcomes, byte-identically.
-    """
-
-    __slots__ = ("failure", "grade", "rows", "rows_by_chunk_id")
-
-    def __init__(self) -> None:
-        self.failure: object | None = None
-        self.grade: ContextGrade | None = None
-        self.rows: list[dict[str, Any]] = []
-        self.rows_by_chunk_id: dict[str, dict[str, Any]] = {}
-
-
-class _RetrievalFailedError(Exception):
-    """The fused-retrieval step failed: nothing was produced to grade.
-
-    Raised out of ``produce`` so the typed failure reaches the caller exactly
-    as the inline loop returned it. No validation happened, so no decision
-    event exists for a failed retrieval.
-    """
-
-
-class _ContextGradeEvaluator:
-    """The ask loop's semantic evaluator: ``_grade_context`` behind the port.
-
-    ``_grade_context`` is kept verbatim (dual paths, degrade-on-failure), so
-    the adoption changes only who calls it and what an insufficient grade
-    means: the retryable finding that feeds the bounded rewrite retry.
-    """
-
-    __slots__ = ("_grader", "_grader_llm", "_state")
-
-    def __init__(
-        self,
-        *,
-        grader_llm: Any,
-        grader: ContextGrader | None,
-        state: _AskLoopState,
-    ) -> None:
-        self._grader_llm = grader_llm
-        self._grader = grader
-        self._state = state
-
-    async def evaluate(
-        self, value: RetrievedContext, context: EvaluationContext  # noqa: ARG002 — port signature
-    ) -> SemanticReport:
-        grade = await _grade_context(
-            grader_llm=self._grader_llm,
-            grader=self._grader,
-            query=value.query,
-            reranked=value.reranked,
-        )
-        self._state.grade = grade
-        if grade.sufficient:
-            return SemanticReport(verdict="pass")
-        return SemanticReport(
-            verdict="reject",
-            findings=(
-                SemanticFinding(
-                    code=_INSUFFICIENT_CONTEXT_FINDING,
-                    message="retrieved context is insufficient to answer the query",
-                ),
-            ),
-        )
-
-
 class DocumentQueryService:
     """Unified retrieval and grounded QA service."""
 
@@ -483,6 +436,7 @@ class DocumentQueryService:
         *,
         grader: ContextGrader | None = None,
         audit_recorder: DocumentAccessAuditRecorder | None = None,
+        retrieval_engine: RetrievalEngine | None = None,
     ):
         self.repo: DocumentRepository = repo
         # The model client is constructed on first use, not at dependency
@@ -500,6 +454,12 @@ class DocumentQueryService:
         # every other consumer of `self.llm` is unchanged either way.
         self.grader: ContextGrader | None = grader
         self.audit_recorder = audit_recorder or InMemoryDocumentAccessAuditRecorder()
+        # The compile-once retrieval engine (mount-retrieval-graph 4.x): the
+        # graph-served ask path invokes `retrieval_engine.graph` with this
+        # request's collaborators as the invocation context. ``None`` means
+        # this process has no provisioned engine and `_ask` fails closed with
+        # a typed unavailability — never a fallback answering path.
+        self.retrieval_engine = retrieval_engine
 
     async def _record_access(
         self,
@@ -806,134 +766,6 @@ class DocumentQueryService:
         )
 
     @trace_layer("service")
-    async def ask_via_retrieval_graph(
-        self,
-        *,
-        user_id: str,
-        tenant_id: str | None = None,
-        allowed_doc_ids: tuple[str, ...] | None = None,
-        payload: documents_dto.UnifiedAskRequest,
-    ) -> DocumentResult[UnifiedAskResponse]:
-        """Answer through the compiled retrieval graph rather than the inline loop in `ask`.
-
-        **Deliberately not exposed by any router**, and that is the whole point of it existing.
-        `build_retrieval_graph` is change 1's foundation — the compiled plan/retrieve/grade/generate
-        machine in `features/documents/retrieval_graph/` — and its only caller in the tree was
-        `features/search/service.py:ask_legal`, which this change deletes. Deleting the last caller
-        would leave the graph builder, its nodes and the retarget at step 5 with nothing reaching
-        them: type-checked, unit-tested, and unreferenced from the application. So the caller moves
-        here rather than disappearing.
-
-        It is honest to say what this costs. `ask` above re-implements the same node sequence inline
-        as module-level helpers (`_build_query_plan`, `_grade_context`, `_generate_answer`) and is
-        the path the mounted router actually serves, so the two are duplicate expressions of one
-        behaviour. That duplication is recorded as debt in this change's notes rather than resolved
-        here: collapsing them is a behavioural change to a live endpoint, and this step is a
-        deletion. The graph is the better-factored of the two and is the intended survivor.
-        """
-        tenant_id = _resolve_tenant_id(tenant_id, user_id)
-        if allowed_doc_ids is not None and not allowed_doc_ids:
-            return Success(
-                UnifiedAskResponse(
-                    answer=_FALLBACK_ANSWER,
-                    citations=[],
-                    confidence="uncertain",
-                    evidence_policy="mechanically_verified",
-                )
-            )
-        scope_ids = tuple(dict.fromkeys(allowed_doc_ids or ()))
-        scope_versions = await _resolve_scope_versions(
-            self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
-        )
-        scope_contracts = await _resolve_scope_contracts(
-            self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
-        )
-        version_by_document = {document_id: version for document_id, version, _ in scope_versions}
-        contracts_by_document = {
-            document_id: (version, indexes, legacy_null)
-            for document_id, version, indexes, legacy_null in scope_contracts
-        }
-        unavailable_scope_documents: list[str] = []
-        for document_id in scope_ids:
-            version = version_by_document.get(document_id)
-            contract_scope = contracts_by_document.get(document_id)
-            if version is None or contract_scope is None or contract_scope[0] != version:
-                unavailable_scope_documents.append(document_id)
-                continue
-            _scope_version, indexes, legacy_null = contract_scope
-            if payload.contract_index is not None:
-                if payload.contract_index not in indexes:
-                    unavailable_scope_documents.append(document_id)
-            elif not indexes and not legacy_null:
-                unavailable_scope_documents.append(document_id)
-        graph = build_retrieval_graph(
-            llm=self.llm,
-            repo=self.repo,
-            redis=None if payload.bypass_cache else self.redis,
-            graphiti=self.graphiti,
-        )
-        result = await graph.ainvoke(
-            {
-                "user_id": user_id,
-                "tenant_id": tenant_id,
-                "allowed_doc_ids": list(scope_ids),
-                "document_versions": list(scope_versions),
-                "document_contracts": list(scope_contracts),
-                "scope_unavailable_documents": unavailable_scope_documents,
-                "scope_bound": allowed_doc_ids is not None,
-                "query": payload.query,
-                "doc_ids_filter": payload.doc_ids_filter,
-                "contract_index": payload.contract_index,
-                "messages": [],
-                "iteration_count": 0,
-            }
-        )
-        answer = GeneratedAnswer.model_validate(result["generated_answer"])
-        return Success(
-            UnifiedAskResponse(
-                answer=answer.answer,
-                citations=[
-                    LegalCitationResponse(
-                        chunk_id=citation.chunk_id,
-                        clause_type=citation.clause_type,
-                        claim=citation.claim,
-                        contract_index=(
-                            citation.contract_index
-                            if citation.contract_index is not None
-                            else _retrieved_contract_index(
-                                citation.chunk_id, result.get("retrieved_chunks", [])
-                            )
-                        ),
-                    )
-                    for citation in answer.citations
-                ],
-                confidence=answer.confidence,
-                evidence_policy="mechanically_verified",
-                coverage=EvidenceCoverage(
-                    documents_requested=len(scope_ids),
-                    documents_ready=len(scope_ids) - len(unavailable_scope_documents),
-                    graph_unavailable_documents=len(unavailable_scope_documents),
-                ),
-                warnings=(
-                    [
-                        QualityWarningDTO(
-                            stage="graph_scope",
-                            code="GRAPH_SCOPE_UNAVAILABLE",
-                            message=(
-                                "Authoritative document version/contract scope was unavailable "
-                                f"for {len(unavailable_scope_documents)} authorized document(s)."
-                            ),
-                            severity="warning",
-                        )
-                    ]
-                    if unavailable_scope_documents
-                    else []
-                ),
-                cache_hit=bool(result.get("cache_hit")),
-            )
-        )
-
-    @trace_layer("service")
     async def ask(
         self,
         *,
@@ -967,7 +799,7 @@ class DocumentQueryService:
             ),
         )
 
-    async def _ask(  # noqa: PLR0914 PLR0915
+    async def _ask(
         self,
         *,
         user_id: str,
@@ -976,10 +808,24 @@ class DocumentQueryService:
         payload: documents_dto.UnifiedAskRequest,
         require_graphiti_verified: bool,
     ) -> DocumentResult[UnifiedAskResponse]:
+        """Answer through the compile-once retrieval graph (mount-retrieval-graph 4.x).
+
+        The inline plan→retrieve→grade→generate loop this method used to
+        re-implement was deleted once the parity suite (28 tests in
+        ``tests/unit/features/documents/retrieval/``) pinned the graph's
+        behaviour byte-identically against the recorded inline contract. The
+        graph is the single implementation; this method resolves the
+        server-owned scope, drives one graph invocation, and maps the
+        finalised result state onto the response envelope. The audit wrapper
+        (``ask``) is unchanged.
+        """
         tenant_id = _resolve_tenant_id(tenant_id, user_id)
         explicit_scope = allowed_doc_ids is not None
         scope_ids = tuple(dict.fromkeys(allowed_doc_ids or ()))
         if explicit_scope and not scope_ids:
+            # An explicitly empty authorized scope is a deny, not an answering
+            # path: the grounded fallback carries the request's evidence policy
+            # and no engine is needed (the inline contract, byte-identical).
             return Success(
                 UnifiedAskResponse(
                     answer=_FALLBACK_ANSWER,
@@ -992,615 +838,155 @@ class DocumentQueryService:
                     ),
                 )
             )
+        engine = self.retrieval_engine
+        if engine is None or engine.graph is None:
+            # Fail closed (task 4.2): a typed unavailability, never a
+            # substitution of the single-shot or any other answering path.
+            message = "Retrieval engine is not provisioned in this process"
+            raise ServiceUnavailableException(
+                message,
+                data={"capability": "retrieval_engine"},
+            )
         scope_versions = await _resolve_scope_versions(
             self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
         )
         scope_contracts = await _resolve_scope_contracts(
             self.repo, tenant_id=tenant_id, allowed_doc_ids=scope_ids
         )
-        answer_cache_key = _build_answer_cache_key(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            query=payload.query,
-            doc_ids_filter=payload.doc_ids_filter,
-            allowed_doc_ids=scope_ids,
-            document_versions=scope_versions,
-            jurisdiction=payload.jurisdiction,
-            contract_type=payload.contract_type,
-            contract_index=payload.contract_index,
-            clause_type=payload.clause_type,
-            require_graphiti_verified=require_graphiti_verified,
-            evidence_policy=(
-                "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
-            ),
-        )
-        if not payload.bypass_cache and self.redis is not None:
-            cached = await self.redis.get(answer_cache_key)
-            if cached is not None:
-                response = UnifiedAskResponse.model_validate_json(cached)
-                return Success(response.model_copy(update={"cache_hit": True}))
-
-        settings: Settings = get_settings()
-        _ = settings
-        llm = self.llm
-        query_llm = llm.with_structured_output(QueryPlan)
-        grader_llm = llm.with_structured_output(ContextGrade)
-        generator_llm = llm.with_structured_output(GeneratedAnswer)
-        response_warnings: list[QualityWarningDTO] = []
-        answer = GeneratedAnswer(answer=_FALLBACK_ANSWER, citations=[], confidence="uncertain")
-        # Edge-grounded expansion is additive: it stays empty unless an
-        # authorized graph scope, a healthy graphiti, and at least one typed
-        # edge touching the reranked chunks all exist.
-        edge_expansions: list[EdgeExpansion] = []
-        resolved_edges: list[tuple[EdgeContextBlock, dict[str, object]]] = []
-        loop_state = _AskLoopState()
-
-        async def _produce_retrieval_context(feedback: RetryFeedback | None) -> object:
-            """One full retrieval iteration: plan → filter → embed → retrieve → rerank.
-
-            The retry's rewrite arrives as pipeline feedback: the previous
-            attempt's grade carries the rewrite suggestion, consumed exactly
-            as the hand-rolled loop's second iteration consumed it (deleted
-            below — the pipeline owns the bounded retry now).
-            """
-            rewritten_query = payload.query
-            if feedback is not None and loop_state.grade is not None:
-                rewritten_query = loop_state.grade.rewrite_suggestion or payload.query
-            plan = await _build_query_plan(
-                query_llm=query_llm,
-                query=rewritten_query,
-                doc_ids_filter=payload.doc_ids_filter,
-                jurisdiction=payload.jurisdiction,
-                contract_type=payload.contract_type,
-                clause_type=payload.clause_type,
-            )
-            graph_chunk_ids = await _graphiti_filter_chunk_ids(
-                graphiti=self.graphiti,
-                tenant_id=tenant_id,
-                query=plan.rewritten_query,
-                doc_ids_filter=list(scope_ids) if explicit_scope else payload.doc_ids_filter,
-                contract_index=payload.contract_index,
-                document_versions=scope_versions,
-                document_contracts=scope_contracts,
-            )
-            embedding = await retry_immediate(
-                # `query=` binds the plan query at definition rather than at call, so the
-                # awaited embedding always matches this iteration's plan.
-                lambda query=plan.rewritten_query: embed_text(
-                    query,
-                    task_type=EmbeddingTaskType.QUERY,
-                    redis=None if payload.bypass_cache else self.redis,
-                ),
-                label="documents_query_embedding",
-            )
-            filter_params = build_search_filter_params(
-                metadata_filter={
-                    "document_ids": list(scope_ids) if explicit_scope else payload.doc_ids_filter,
+        try:
+            result = await engine.graph.ainvoke(
+                {
+                    "user_id": user_id,
+                    "tenant_id": tenant_id,
+                    "allowed_doc_ids": list(scope_ids),
+                    "document_versions": list(scope_versions),
+                    "document_contracts": list(scope_contracts),
+                    "scope_unavailable_documents": resolve_unavailable_scope_documents(
+                        scope_ids=scope_ids,
+                        scope_versions=scope_versions,
+                        scope_contracts=scope_contracts,
+                        contract_index=payload.contract_index,
+                    ),
                     "scope_bound": explicit_scope,
-                    "chunk_ids": graph_chunk_ids or [],
-                    "jurisdiction": payload.jurisdiction or plan.jurisdiction,
-                    "contract_type": payload.contract_type or plan.contract_type,
+                    "query": payload.query,
+                    "doc_ids_filter": payload.doc_ids_filter,
                     "contract_index": payload.contract_index,
+                    "jurisdiction": payload.jurisdiction,
+                    "contract_type": payload.contract_type,
                     "clause_type": payload.clause_type,
                     "require_graphiti_verified": require_graphiti_verified,
-                }
+                    "messages": [],
+                    "iteration_count": 0,
+                },
+                context=RetrievalGraphContext(
+                    llm=self.llm,
+                    repo=self.repo,
+                    redis=None if payload.bypass_cache else self.redis,
+                    graphiti=self.graphiti,
+                    grader=self.grader,
+                ),
             )
-            fused_result = await retrieve_fused(
-                repo=self.repo,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                query_text=plan.rewritten_query,
-                query_embedding=embedding,
-                candidate_limit=HYBRID_CANDIDATE_LIMIT,
-                limit=20,
-                filter_params=filter_params,
-                weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM],
-                bm25_threshold=plan.bm25_threshold,
-                exact_phrase=plan.exact_phrase,
+        except InfrastructureException as exc:
+            # The graph's retrieval stage raises a typed infrastructure error
+            # where the inline loop returned a typed Failure. The served
+            # contract is the Failure (and the failure-path audit the wrapper
+            # records), so the boundary converts back — the branch-attributed
+            # message and details travel unchanged. `APIException.detail` is
+            # the rich envelope; the original message rides inside it.
+            rich_detail = exc.detail
+            message = (
+                str(rich_detail.get("message", str(exc)))
+                if isinstance(rich_detail, Mapping)
+                else str(rich_detail)
             )
-            if isinstance(fused_result, Failure):
-                loop_state.failure = fused_result.failure()
-                message = "fused retrieval failed"
-                raise _RetrievalFailedError(message)
-            fused, lookup = fused_result.unwrap()
-            rows = lookup_to_rows(fused, lookup)
-            rows_by_chunk_id = {str(row["chunk_id"]): row for row in rows}
-            retrieved_chunks = [_row_to_chunk(row) for row in rows]
-            reranked = await get_shared_reranker().rerank(
-                plan.rewritten_query, retrieved_chunks, limit=5
-            )
-            loop_state.rows = rows
-            loop_state.rows_by_chunk_id = rows_by_chunk_id
-            return RetrievedContext(
-                query=plan.rewritten_query, reranked=tuple(reranked), rows=tuple(rows)
-            )
-
-        pipeline = ValidationPipeline(
-            schema=RetrievedContext,
-            evaluator=_ContextGradeEvaluator(
-                grader_llm=grader_llm, grader=self.grader, state=loop_state
-            ),
-            max_attempts=_ASK_MAX_ATTEMPTS,
-            retryable_findings=(_INSUFFICIENT_CONTEXT_FINDING,),
-        )
-        try:
-            outcome = await pipeline.validate(
-                _produce_retrieval_context,
-                EvaluationContext(seam=_ASK_VALIDATION_SEAM),
-            )
-        except _RetrievalFailedError:
-            assert loop_state.failure is not None  # noqa: S101 — set on every raise
-            return Failure(loop_state.failure)
-
-        # The last completed iteration's rows drive the warning envelope,
-        # citations and coverage — accepted or escalated — byte-identically.
-        response_warnings = _merge_warning_lists([_warnings_from_rows(loop_state.rows)])
-        if outcome.decision is ValidationDecision.ACCEPT:
-            context_value = outcome.value
-            assert context_value is not None  # noqa: S101 — an ACCEPT outcome carries its value
-            edge_expansions = await _edge_grounding_for_reranked(
-                graphiti=self.graphiti,
-                query=context_value.query,
-                tenant_id=tenant_id,
-                scope_ids=scope_ids if explicit_scope else (),
-                scope_versions=scope_versions,
-                scope_contracts=scope_contracts,
-                contract_index=payload.contract_index,
-                reranked=list(context_value.reranked),
-            )
-            resolved_edges = _resolved_edge_blocks(edge_expansions, loop_state.rows_by_chunk_id)
-            answer = await _generate_answer(
-                generator_llm=generator_llm,
-                query=context_value.query,
-                reranked=list(context_value.reranked),
-                grounding_edges=[block.text for block, _ in resolved_edges],
-            )
-
-        evidence_policy: EvidencePolicy = (
-            "graph_indexed_only" if require_graphiti_verified else "mechanically_verified"
-        )
-        result_document_ids = {str(row["document_id"]) for row in loop_state.rows}
-        graph_document_ids = {
-            str(row["document_id"])
-            for row in loop_state.rows
-            if bool(row.get("graphiti_verified", False))
-        }
-        citations = [
-            _citation_response(citation, loop_state.rows_by_chunk_id.get(citation.chunk_id))
-            for citation in answer.citations
-        ]
-        citations.extend(_edge_citations(resolved_edges))
-        response = UnifiedAskResponse(
-            answer=answer.answer,
-            citations=citations,
-            confidence=answer.confidence,
-            evidence_policy=evidence_policy,
-            coverage=EvidenceCoverage(
-                documents_requested=len(scope_ids)
-                if explicit_scope
-                else len(payload.doc_ids_filter),
-                documents_ready=len(result_document_ids),
-                graph_indexed_documents=len(graph_document_ids),
-                graph_unavailable_documents=len(result_document_ids - graph_document_ids),
-            ),
-            warnings=response_warnings,
-            cache_hit=False,
-        )
-        if not payload.bypass_cache and self.redis is not None:
-            await self.redis.setex(
-                answer_cache_key,
-                DEFAULT_SEARCH_CACHE_TTL_SECONDS,
-                response.model_dump_json(),
-            )
-        return Success(response)
+            details = exc.data if isinstance(exc.data, dict) else {}
+            return Failure(DocumentDatabaseError(message=message, details=details))
+        return Success(_graph_ask_response(result))
 
 
-async def _build_query_plan(
-    *,
-    query_llm: Any,
-    query: str,
-    doc_ids_filter: list[str],
-    jurisdiction: str | None,
-    contract_type: str | None,
-    clause_type: str | None,
-    contract_index: int | None = None,
-) -> QueryPlan:
-    payload = serialize_to_toon(
-        {
-            "query": query,
-            "doc_ids_filter": doc_ids_filter,
-            "jurisdiction": jurisdiction,
-            "contract_type": contract_type,
-            "contract_index": contract_index,
-            "clause_type": clause_type,
-        }
-    )
-    messages: list[SystemMessage | HumanMessage] = [
-        SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT),
-        HumanMessage(content=payload),
-    ]
-    try:
-        raw: Unknown = await retry_immediate(
-            lambda: query_llm.ainvoke(messages),
-            label="documents_query_analyzer",
-        )
-        plan = QueryPlan.model_validate(raw)
-    except (ValueError, TypeError):
-        plan = QueryPlan(
-            rewritten_query=query,
-            sub_queries=[query],
-            jurisdiction=jurisdiction,
-            contract_type=contract_type,
-        )
-    total = plan.vector_weight + plan.keyword_weight
-    if total > 0:
-        plan = plan.model_copy(
-            update={
-                "vector_weight": plan.vector_weight / total,
-                "keyword_weight": plan.keyword_weight / total,
-            }
-        )
-    return plan
+def _graph_ask_response(result: Mapping[str, Any]) -> UnifiedAskResponse:
+    """Map the graph's finalised result state onto the ask response envelope.
 
-
-async def _graphiti_filter_chunk_ids(
-    *,
-    graphiti: Graphiti | None,
-    tenant_id: str = "",
-    user_id: str | None = None,
-    query: str,
-    doc_ids_filter: list[str],
-    contract_index: int | None = None,
-    document_versions: Sequence[tuple[str, int, str | None]] = (),
-    document_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]] = (),
-) -> list[str]:
-    """Narrow candidates using the server-selected tenant Graphiti scope.
-
-    ``user_id`` remains accepted for callers that used the pre-tenant helper
-    signature, but it is intentionally ignored.  A user identity is an audit
-    field, not a Graphiti authority boundary; when the explicit tenant scope
-    is absent this helper fails closed instead of deriving one from the user.
+    The single crossing point from retrieval state to the HTTP contract: the
+    answer and confidence from the generated (or cache-hit) answer, citations
+    with the hydrated-row provenance the graph resolved, the truthful
+    coverage envelope, the merged warnings, and the derived evidence policy.
+    Field-for-field identical to the inline wrapper the parity suite pins.
     """
-    _ = user_id
-    if graphiti is None or not tenant_id or not doc_ids_filter:
-        return []
-    versions = {document_id: version for document_id, version, _ in document_versions}
-    contract_scopes = {
-        (document_id, version): (indexes, legacy_null)
-        for document_id, version, indexes, legacy_null in document_contracts
-    }
-    group_ids: list[str] = []
-    for document_id in doc_ids_filter:
-        version = versions.get(document_id)
-        if version is None:
-            # No authoritative version means no graph read.  In particular,
-            # never fall back to the historical bare/v1 document group.
-            continue
-        scope = contract_scopes.get((document_id, version))
-        if scope is None:
-            continue
-        indexes, legacy_null = scope
-        if contract_index is not None:
-            if contract_index not in indexes:
-                continue
-            group_ids.append(
-                build_graphiti_group_id(
-                    tenant_id=tenant_id,
-                    document_id=document_id,
-                    document_version=version,
-                    contract_index=contract_index,
-                )
+    answer: Any = result["generated_answer"]
+    coverage: Any = result.get("coverage")
+    return UnifiedAskResponse(
+        answer=answer.answer,
+        citations=[
+            LegalCitationResponse(
+                chunk_id=citation.chunk_id,
+                clause_type=citation.clause_type,
+                claim=citation.claim,
+                document_id=citation.document_id,
+                document_version=citation.document_version,
+                contract_index=citation.contract_index,
+                pipeline_version=citation.pipeline_version,
+                page_no=citation.page_no,
             )
-            continue
-        if not indexes and not legacy_null:
-            continue
-        group_ids.extend(
-            build_graphiti_group_id(
-                tenant_id=tenant_id,
-                document_id=document_id,
-                document_version=version,
-                contract_index=index,
+            for citation in result["resolved_citations"]
+        ],
+        confidence=answer.confidence,
+        evidence_policy=result["evidence_policy"],
+        coverage=EvidenceCoverage(
+            documents_requested=coverage.documents_requested,
+            documents_ready=coverage.documents_ready,
+            graph_indexed_documents=coverage.graph_indexed_documents,
+            graph_unavailable_documents=coverage.graph_unavailable_documents,
+        )
+        if coverage is not None
+        else EvidenceCoverage(),
+        warnings=[
+            QualityWarningDTO(
+                stage=warning.stage,
+                code=warning.code,
+                message=warning.message,
+                severity=warning.severity,
             )
-            for index in indexes
-        )
-        if legacy_null:
-            group_ids.append(
-                build_graphiti_group_id(
-                    tenant_id=tenant_id,
-                    document_id=document_id,
-                    document_version=version,
-                    contract_index=None,
-                )
-            )
-    if not group_ids:
-        return []
-    try:
-        raw_results = await retry_immediate(
-            lambda: graphiti.search(query=query, group_ids=group_ids, num_results=20),
-            label="documents_graphiti_filter",
-        )
-    except (GraphitiError, TransientExternalError, ValueError, TypeError):
-        return []
-    chunk_ids: list[str] = []
-    for result in raw_results or []:
-        source_description = getattr(result, "source_description", "") or ""
-        content = getattr(result, "content", "") or getattr(result, "episode_body", "") or ""
-        chunk_ids.extend(_extract_postgres_chunk_ids(source_description))
-        chunk_ids.extend(_extract_postgres_chunk_ids(content))
-    return sorted(set(chunk_ids))
-
-
-async def _grade_context(
-    *,
-    grader_llm: Any,
-    grader: ContextGrader | None,
-    query: str,
-    reranked: Sequence[RetrievedChunk],
-) -> ContextGrade:
-    """Grade retrieval sufficiency through the structured seam, or its legacy twin.
-
-    Dual paths, deliberate: the injected grader rides the lifespan-owned
-    text-generator seam (retries, breaker, schema-validated output), while
-    ``grader=None`` — the seam disabled at lifespan — replays the prior inline
-    path verbatim so a disabled optional capability cannot change ask() results.
-    """
-    if not reranked:
-        return ContextGrade(
-            sufficient=False, missing_aspects=["No retrieved chunks"], rewrite_suggestion=query
-        )
-    payload = serialize_to_toon(
-        {"query": query, "chunks": [chunk.model_dump() for chunk in reranked]}
+            for warning in result.get("quality_warnings", [])
+        ],
+        cache_hit=bool(result.get("cache_hit")),
     )
-    if grader is None:
-        return await _grade_context_via_llm(grader_llm=grader_llm, payload=payload)
-
-    request = TextGenerationRequest(
-        prompt=payload,
-        system=_CONTEXT_GRADER_SYSTEM_PROMPT,
-        response_schema=ContextGrade,
-        # Grading is the same near-deterministic call the legacy inline path
-        # made (dependencies.py builds the document LLM at temperature=0.1);
-        # without this override the seam would inherit GEMINI_TEMPERATURE (0.7).
-        temperature=0.1,
-    )
-    result = await grader.generate_structured(request)
-    if isinstance(result, Failure):
-        error = result.failure()
-        log_expected_failure(error, operation="documents_context_grader")
-        # Same degrade the legacy parse-failure path chose: an unavailable grade
-        # proceeds to generation rather than failing the whole ask() loop.
-        return ContextGrade(sufficient=True, missing_aspects=[])
-    return ContextGrade.model_validate(result.unwrap().output)
 
 
-async def _grade_context_via_llm(*, grader_llm: Any, payload: str) -> ContextGrade:
-    """Legacy inline grading path, kept verbatim for the seam-absent degrade."""
-    messages = [SystemMessage(content=_CONTEXT_GRADER_SYSTEM_PROMPT), HumanMessage(content=payload)]
-    try:
-        raw = await retry_immediate(
-            lambda: grader_llm.ainvoke(messages), label="documents_context_grader"
-        )
-        return ContextGrade.model_validate(raw)
-    except (ValueError, TypeError):
-        return ContextGrade(sufficient=True, missing_aspects=[])
-
-
-async def _generate_answer(
+def resolve_unavailable_scope_documents(
     *,
-    generator_llm: Any,
-    query: str,
-    reranked: Sequence[RetrievedChunk],
-    grounding_edges: Sequence[str] | None = None,
-) -> GeneratedAnswer:
-    payload_data: dict[str, Any] = {
-        "query": query,
-        "chunks": [chunk.model_dump() for chunk in reranked],
-    }
-    # The key exists only when edge expansion actually produced blocks, so a
-    # query that touches no edges renders the exact pre-edge payload.
-    if grounding_edges:
-        payload_data["grounding_edges"] = list(grounding_edges)
-    payload = serialize_to_toon(payload_data)
-    messages = [SystemMessage(content=_GENERATOR_SYSTEM_PROMPT), HumanMessage(content=payload)]
-    try:
-        raw = await retry_immediate(
-            lambda: generator_llm.ainvoke(messages), label="documents_answer_generator"
-        )
-        answer = GeneratedAnswer.model_validate(raw)
-    except (ValueError, TypeError):
-        answer = GeneratedAnswer(answer=_FALLBACK_ANSWER, citations=[], confidence="uncertain")
-    if answer.confidence == "uncertain" and _FALLBACK_ANSWER not in answer.answer:
-        return answer.model_copy(update={"answer": f"{answer.answer}\n\n{_FALLBACK_ANSWER}"})
-    return answer
-
-
-async def _edge_grounding_for_reranked(
-    *,
-    graphiti: Graphiti | None,
-    query: str,
-    tenant_id: str,
     scope_ids: Sequence[str],
     scope_versions: Sequence[tuple[str, int, str | None]],
     scope_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]],
-    contract_index: int | None,
-    reranked: Sequence[RetrievedChunk],
-) -> list[EdgeExpansion]:
-    """Expand reranked chunk context along persisted typed relationship edges.
-
-    Fails closed on every axis: without a live graphiti, a resolved tenant, or
-    an explicit non-empty authorized document scope there is no edge read at
-    all — the same boundary ``_graphiti_filter_chunk_ids`` enforces.  A
-    transport failure inside the reader degrades to no expansion, so an
-    edge-free query keeps the exact pre-edge ask contract.
-    """
-    if graphiti is None or not tenant_id or not scope_ids:
-        return []
-    edges = await fetch_relationship_edges(
-        graphiti,
-        query,
-        allowed_doc_ids=tuple(dict.fromkeys(scope_ids)),
-        tenant_id=tenant_id,
-        contract_index=contract_index,
-        document_versions=scope_versions,
-        document_contracts=scope_contracts,
-        num_results=_EDGE_FETCH_LIMIT,
-    )
-    if not edges or not reranked:
-        return []
-    seeds = [
-        EdgeSeedChunk(
-            chunk_id=chunk.chunk_id,
-            document_id=chunk.parent_doc_id,
-            content=chunk.chunk_text,
-            clause_ids=_chunk_clause_ids(chunk),
-            contract_index=_chunk_contract_index(chunk),
-            document_version=_chunk_document_version(chunk),
-        )
-        for chunk in reranked
-    ]
-    return expand_along_edges(
-        seeds=seeds,
-        edges=edges,
-        max_expansion_tokens=_EDGE_EXPANSION_MAX_TOKENS,
-        count_tokens=default_count_tokens,
-        max_blocks_per_seed=_EDGE_EXPANSION_MAX_BLOCKS_PER_SEED,
-    )
-
-
-def _chunk_document_version(chunk: RetrievedChunk) -> int | None:
-    """Read the chunk's document version from server metadata, if persisted."""
-    raw = (chunk.metadata_ or {}).get("document_version")
-    return int(raw) if isinstance(raw, int) and raw >= 1 else None
-
-
-def _chunk_contract_index(chunk: RetrievedChunk) -> int | None:
-    """Read the chunk's contract index from server metadata, if persisted.
-
-    ``RetrievedChunk.contract_index`` is never populated by ``_row_to_chunk``
-    (the value rides in metadata), so reading the field would leave every
-    seed "unknown" and disable the cross-contract matching guard.
-    """
-    return _context_contract_index(chunk.metadata_ or {})
-
-
-def _chunk_clause_ids(chunk: RetrievedChunk) -> tuple[str, ...]:
-    """Read server-persisted clause identities from chunk metadata, if any."""
-    metadata = chunk.metadata_ or {}
-    raw = metadata.get("clause_ids", metadata.get("clause_id"))
-    if isinstance(raw, str) and raw:
-        return (raw,)
-    if isinstance(raw, (list, tuple, set, frozenset)):
-        return tuple(str(item) for item in raw if item)
-    return ()
-
-
-def _resolved_edge_blocks(
-    expansions: Sequence[EdgeExpansion],
-    rows_by_chunk_id: Mapping[str, dict[str, object]],
-) -> list[tuple[EdgeContextBlock, dict[str, object]]]:
-    """Keep only expansion blocks whose grounded span resolves to a hydrated
-    passage — the same resolution the citations use, so the generator never
-    sees a relationship it could not cite against a retrieved chunk."""
-    rows_by_document: dict[str, list[dict[str, object]]] = {}
-    for row in rows_by_chunk_id.values():
-        rows_by_document.setdefault(str(row.get("document_id")), []).append(row)
-    resolved: list[tuple[EdgeContextBlock, dict[str, object]]] = []
-    for expansion in expansions:
-        for block in expansion.blocks:
-            if block.char_start is None or block.char_end is None:
-                continue
-            supporting = _row_containing_span(
-                rows_by_document.get(expansion.document_id, ()),
-                char_start=block.char_start,
-                char_end=block.char_end,
-                document_version=block.document_version,
-                contract_index=block.contract_index,
-            )
-            if supporting is not None:
-                resolved.append((block, supporting))
-    return resolved
-
-
-def _edge_citations(
-    resolved: Sequence[tuple[EdgeContextBlock, dict[str, object]]],
-) -> list[LegalCitationResponse]:
-    """Server-derived citations for edge-grounded expansion blocks.
-
-    Provenance discipline matches ``_citation_response``: document identity,
-    version, and contract come from the hydrated chunk row — never from the
-    edge text or any model output — and the claim is authored here,
-    deterministically, from the edge's grounded span.
-
-    The citation points at the passage the edge's grounded span actually
-    falls in, resolved among the hydrated rows — never at the seed chunk
-    that merely triggered the expansion (two passages can share an entity
-    name, and a relationship from one must not be cited under the other's
-    chunk and page).  An edge whose span resolves to no hydrated passage —
-    or that carries no span at all — earns no citation: the expansion text
-    still reached the generator, but there is no verified passage to point
-    at.
-    """
-    citations: list[LegalCitationResponse] = []
-    seen: set[tuple[str, str]] = set()
-    for block, supporting in resolved:
-        chunk_id = str(supporting.get("chunk_id"))
-        span = f"chars {block.char_start}-{block.char_end}"
-        claim = (
-            f"Grounded by {block.relationship.upper()} edge "
-            f"'{block.from_entity}' -> '{block.to_entity}' at {span} "
-            f"(clause {block.clause_id}, edge {block.edge_id})"
-        )
-        key = (chunk_id, claim)
-        if key in seen:
-            continue
-        seen.add(key)
-        citations.append(
-            _citation_response(
-                Citation(
-                    chunk_id=chunk_id,
-                    clause_type=str(supporting.get("clause_type") or "other"),
-                    claim=claim,
-                ),
-                supporting,
-            )
-        )
-    return citations
-
-
-def _row_containing_span(
-    rows: Sequence[dict[str, object]],
-    *,
-    char_start: int,
-    char_end: int,
-    document_version: int | None = None,
     contract_index: int | None = None,
-) -> dict[str, object] | None:
-    """Find the hydrated row whose persisted source span covers the edge span.
+) -> list[str]:
+    """Documents whose authoritative version/contract scope is unavailable.
 
-    When the edge carries version/contract provenance, the supporting passage
-    must match it: two stored versions of one document can both cover a char
-    range, and citing the wrong one dresses an unsupported answer as grounded.
+    Shared by the HTTP ask path and the qna engine's scope mapping: a scoped
+    document with no resolved version, a version/contract mismatch, or a
+    request contract index the document does not partition into carries the
+    ``GRAPH_SCOPE_UNAVAILABLE`` warning and no graph read — never a silent
+    fallback to a legacy identity.
     """
-    for row in rows:
-        metadata = row.get("metadata_") or {}
-        if not isinstance(metadata, dict):
+    version_by_document = {document_id: version for document_id, version, _ in scope_versions}
+    contracts_by_document = {
+        document_id: (version, indexes, legacy_null)
+        for document_id, version, indexes, legacy_null in scope_contracts
+    }
+    unavailable: list[str] = []
+    for document_id in scope_ids:
+        version = version_by_document.get(document_id)
+        contract_scope = contracts_by_document.get(document_id)
+        if version is None or contract_scope is None or contract_scope[0] != version:
+            unavailable.append(document_id)
             continue
-        start = metadata.get("source_start_char")
-        end = metadata.get("source_end_char")
-        if not isinstance(start, int) or not isinstance(end, int):
-            continue
-        if not (start <= char_start and char_end <= end):
-            continue
-        if document_version is not None:
-            row_version = metadata.get("document_version")
-            if isinstance(row_version, int) and row_version != document_version:
-                continue
+        _scope_version, indexes, legacy_null = contract_scope
         if contract_index is not None:
-            row_contract = metadata.get("contract_index")
-            if isinstance(row_contract, int) and row_contract != contract_index:
-                continue
-        return row
-    return None
+            if contract_index not in indexes:
+                unavailable.append(document_id)
+        elif not indexes and not legacy_null:
+            unavailable.append(document_id)
+    return unavailable
 
 
 def _to_ranked_rows(rows: list[dict[str, object]]) -> list[RankedResultRow]:
@@ -1833,18 +1219,6 @@ def _flatten_warnings(
     return warnings
 
 
-def _merge_warning_lists(groups: list[list[QualityWarningDTO]]) -> list[QualityWarningDTO]:
-    merged: dict[tuple[str, str, str, str], QualityWarningDTO] = {}
-    for group in groups:
-        for warning in group:
-            merged[warning.stage, warning.code, warning.message, warning.severity] = warning
-    return list(merged.values())
-
-
-def _warnings_from_rows(rows: list[dict[str, object]]) -> list[QualityWarningDTO]:
-    return _flatten_warnings([row.get("quality_warnings", []) for row in rows])
-
-
 def _context_contract_index(metadata: dict[str, object]) -> int | None:
     """Return a contract index only when a context section is contract-local."""
     value = metadata.get("contract_index")
@@ -1858,78 +1232,4 @@ def _context_contract_index(metadata: dict[str, object]) -> int | None:
         except ValueError:
             return None
         return parsed if parsed >= 0 else None
-    return None
-
-
-def _row_to_chunk(row: dict[str, object]) -> RetrievedChunk:
-    return RetrievedChunk(
-        chunk_id=str(row["chunk_id"]),
-        chunk_text=str(row["chunk_text"]),
-        preamble=str(row.get("preamble") or ""),
-        clause_type=str(row.get("clause_type") or "other"),
-        parent_doc_id=str(row["parent_doc_id"]),
-        metadata_={
-            **cast("dict[str, object]", row.get("metadata_") or {}),
-            "quality_warnings": row.get("quality_warnings", []),
-            "graphiti_verified": bool(row.get("graphiti_verified")),
-            "graph_indexed": bool(row.get("graphiti_verified")),
-            "document_version": row.get("document_version", 1),
-            "pipeline_version": row.get("pipeline_version"),
-            "contract_index": row.get("contract_index"),
-            "graph_indexed_at": row.get("graph_indexed_at"),
-        },
-        custom_metadata=cast("dict[str, object]", row.get("custom_metadata") or {}),
-        score=float(cast("float | int | str", row["rrf_score"])),
-    )
-
-
-def _citation_response(citation: Citation, row: dict[str, object] | None) -> LegalCitationResponse:
-    """Attach immutable source provenance to a generated citation when available."""
-    chunk_id = citation.chunk_id
-    response = LegalCitationResponse(
-        chunk_id=chunk_id,
-        clause_type=citation.clause_type,
-        claim=citation.claim,
-    )
-    if row is None:
-        return response
-    return response.model_copy(
-        update={
-            "document_id": str(row["document_id"]) if row.get("document_id") else None,
-            "document_version": int(cast("int | str", row.get("document_version", 1))),
-            "contract_index": (
-                int(cast("int | str", row["contract_index"]))
-                if isinstance(row.get("contract_index"), (int, str))
-                and not isinstance(row.get("contract_index"), bool)
-                else None
-            ),
-            "pipeline_version": (
-                str(row["pipeline_version"]) if row.get("pipeline_version") is not None else None
-            ),
-            "page_no": int(cast("int | str", row.get("page_no", 0))),
-        }
-    )
-
-
-def _retrieved_contract_index(chunk_id: str, chunks: object) -> int | None:
-    """Recover server provenance for graph citations without trusting the LLM."""
-    if not isinstance(chunks, list):
-        return None
-    for chunk in chunks:
-        if isinstance(chunk, dict):
-            chunk_key = chunk.get("chunk_id")
-            value = chunk.get("contract_index")
-            metadata = chunk.get("metadata_")
-        else:
-            chunk_key = getattr(chunk, "chunk_id", None)
-            value = getattr(chunk, "contract_index", None)
-            metadata = getattr(chunk, "metadata_", None)
-        if chunk_key != chunk_id:
-            continue
-        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            return value
-        if isinstance(metadata, dict):
-            value = metadata.get("contract_index")
-            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-                return value
     return None

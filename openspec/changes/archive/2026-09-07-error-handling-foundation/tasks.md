@@ -419,3 +419,44 @@ its measured surface and the hazard that will bite whoever takes it.
 - [x] 17.7 Derive the total twice by structurally different queries before calling the migration complete, and grep every `DONE` block for "partial", "deferred" and "TODO" — a `DONE` block that admits a partial is a debt nothing collects
   > **DONE:** OpenSpec parser and checkbox enumeration agree on 141 total tasks. Historical scheduling text describes work subsequently completed; no current DONE block admits unfinished work or outstanding placeholders.
   > **Method:** 13 of the `DONE` blocks in sections 10 and 11 currently share one verbatim boilerplate paragraph about `ruff` and `per-file-ignores`, including tasks whose actual obligation was to *record* something in a follow-on proposal. Identical evidence across unrelated tasks is not evidence. Re-verify those 14 before citing sections 10 and 11 as complete.
+
+## 18. Task Dependency Graph (reconstructed post-archive)
+
+Restored from the file's own dependency statements after the owner-supplied
+12-wave fragment was found to be an early-partial snapshot: it contradicted
+this file's recorded order (scheduled `5.1` before §2–4 complete, `10.1` before
+§1–9 complete) and named nonexistent IDs (`11.8`, bare `14`). Its anchor wave —
+`2.1, 2.2, 3.1` — is preserved verbatim below. Same-wave = no dependency
+between them, safe to parallelize; waves run strictly in order. Every one of
+the 141 task IDs appears in exactly one wave.
+
+- **Wave 0:** §1 complete — 1.1–1.13 *(header: independent of the whole redesign; can land alone)*
+- **Wave 1:** 2.1, 2.2, 3.1 *(spine starts; the fragment's anchor wave, unchanged)*
+- **Wave 2:** 2.3, 2.4, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7 *(2.3 checks 2.2's ClassVar design; 3.2 is 3.1's deferred re-measure fixture; 3.3–3.7 are additive new rules)*
+- **Wave 3:** 2.5, 2.6, 3.8, 3.9, 3.10, 4.1, 4.2 *(2.6 needs 2.4's classification; 3.9/3.10 verify 3.8's rule; 4.1 needs 2.4's `http_status_for_kind`, 4.2 names its success parameter)*
+- **Wave 4:** 2.7, 3.11, 4.3, 4.4, 4.5 *(3.11 registers all rules from 3.2–3.10; 4.3/4.4 test 4.1)*
+- **Wave 5:** 5.1; 6.1, 6.2; 7.4; 8.1, 8.2, 8.3 *(header: §6–8 run parallel with the exemplar)*
+- **Wave 6:** 5.2, 5.3; 6.3, 6.4; 7.1; 8.4, 8.6; 9.1
+- **Wave 7:** 5.4, 5.5; 6.5, 6.6; 7.6; 8.5, 8.7; 9.2, 9.4
+- **Wave 8:** 5.6; 6.7, 6.8, 6.9; 7.2, 7.5, 7.7; 9.3, 9.5, 9.6 *(7.5 and 9.3 are committed in the same commit, per 9.3's own instruction; 9.5 confirms no change needed after 9.1's unignore; 9.6 converts the breaker's inner catch)*
+- **Wave 9:** 5.7, 5.8; 7.3; 9.7, 9.8; 9.11 *(7.3 pins the 49/7 split — it needs 7.1 from wave 6 and 7.2 from wave 8 landed first; it explicitly lands in the exemplar's PR, which §5 dominates)*
+- **Wave 10:** 9.9, 9.10, 9.12, 9.13, 9.14, 9.15, 9.16 *(9.9's rule proves 9.7/9.8's exemptions first)*
+- **Wave 11:** §10 complete — 10.1–10.7 *(header: §10 gates the change — after all of §1–9)*
+- **Wave 12:** §11 complete — 11.1–11.7 *(handoff records; 11.4/11.5 are superseded by §12, which follows)*
+- **Wave 13:** §12 complete — 12.1–12.6 *(12.2 corrects 11.5's arithmetic, 12.3 corrects 11.4's order)*
+- **Wave 14:** 13.1, 13.2, 13.3, 13.4 *(§13 header: storage/tavily/mailer are independent — this wave unblocks crawler, profile and invoices)*
+- **Wave 15:** 13.5; 14.3, 14.4; 15.1 *(13.5 is the gate over 13.1–13.4; 15.1 is the published second exemplar — file: §1–11 must be complete before §15)*
+- **Wave 16:** 14.1; 15.2, 15.3; 15.15, 15.16 *(14.1 lands in the same change as the crawler feature; crawler is gated by 13.5, then users per published order; health/chat/search classifications need only 12.3)*
+- **Wave 17:** 15.4, 15.5, 15.6, 15.7 *(profile is blocked by 13.1 — wave 14)*
+- **Wave 18:** 15.8, 15.9 *(invoices blocked by 13.1)*
+- **Wave 19:** 15.10, 15.11 *(agent_saul must not re-open 6.7 — wave 8)*
+- **Wave 20:** 15.12; 14.2, 15.13 *(14.2 lands in the same change as documents)*
+- **Wave 21:** 15.14 *(auth published last; preserves 7.2's retryable half)*
+- **Wave 22:** §16 complete — 16.1, 16.2, 16.3, 16.4, 16.5 *(header: only possible once 15.x is complete)*
+- **Wave 23:** 16.6 *(delete AppError after every zero in 16.1–16.5)*
+- **Wave 24:** §17 complete — 17.1–17.6 *(completion gates measure the retirement)*
+- **Wave 25:** 17.7 *(the independent double-enumeration — last, so it audits this schedule too)*
+
+Reconciliation: 141 task IDs across 26 waves; per-section sums checked against
+17.2's double-enumeration convention: 13+7+11+5+8+9+7+7+16+7+7+6+5+4+16+6+7 =
+141.

@@ -8,21 +8,13 @@ the pinned sets below in the same commit.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import Any
-
 from app.features.documents.retrieval.graph.graph import build_retrieval_graph
 
 
-class _StubLlm:
-    def with_structured_output(self, schema: type[Any]) -> type[Any]:
-        return schema
-
-
 def _shape() -> tuple[set[str], set[tuple[str, str]]]:
-    graph = build_retrieval_graph(llm=_StubLlm(), repo=object(), redis=None, graphiti=object())
+    # Compile-once (mount-retrieval-graph 3.1): the factory takes no
+    # collaborators; everything arrives per invocation via the context.
+    graph = build_retrieval_graph()
     drawable = graph.get_graph()
     return (
         set(drawable.nodes.keys()),
@@ -41,16 +33,17 @@ def test_retrieval_graph_node_set_is_pinned() -> None:
         "hybrid_postgres",
         "reranker",
         "post_process",
+        "edge_grounding",
         "context_grader",
         "generate",
     }
 
 
 def test_retrieval_graph_edge_set_is_pinned() -> None:
-    # Net delta of the source-identifier insertion: +1 node, +1 edge (the
-    # analyzer's two retrieval arms now route through the identifier; the
-    # analyzer->generate direct edge is preserved so cached and trivial
-    # queries skip identification).
+    # Net delta of the edge-grounding insertion (mount-retrieval-graph 1.1):
+    # +1 node; the post_process → context_grader edge now routes through the
+    # fail-closed edge_grounding node (post_process → edge_grounding →
+    # context_grader).
     _, edges = _shape()
     assert edges == {
         ("__start__", "query_analyzer"),
@@ -61,7 +54,8 @@ def test_retrieval_graph_edge_set_is_pinned() -> None:
         ("graph_neo4j", "hybrid_postgres"),
         ("hybrid_postgres", "reranker"),
         ("reranker", "post_process"),
-        ("post_process", "context_grader"),
+        ("post_process", "edge_grounding"),
+        ("edge_grounding", "context_grader"),
         ("context_grader", "query_analyzer"),
         ("context_grader", "generate"),
         ("generate", "__end__"),

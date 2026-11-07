@@ -1,0 +1,10 @@
+{
+  "source_report": "evals/reports/baseline_legal_retrieval_v2_wave4.json",
+  "golden_set_version": "legal_retrieval_v2",
+  "cutoff": 10,
+  "thresholds": {
+    "recall_at_k": 0.57,
+    "ndcg_at_k": 0.43
+  },
+  "notes": "Derived from the recorded baseline of legal_retrieval_v2 at 155 rows (commit 9c9512a55cbeea98c683d6f400892b703eeaa61d): two identical deterministic offline runs measured recall@10=0.5774193548387097, MRR=0.3888863287250384, nDCG@10=0.4304632615580462 (see baseline_legal_retrieval_v2_wave4.json and .run2.json; the full per-branch attribution is in the reports). Thresholds sit just below the measured values (round-down to two decimals) so cross-platform float noise cannot flake the gate while any real regression fails. A threshold change must re-run the harness and cite a new report."
+}

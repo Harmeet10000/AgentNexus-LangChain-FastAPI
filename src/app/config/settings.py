@@ -452,6 +452,16 @@ class Settings(BaseSettings):
     # a worker runs), so it must outlive any realistic polling window.
     SEARCH_TASK_OWNER_TTL_SECONDS: int = Field(default=86_400, ge=1)
 
+    # --- Documents ask-path retrieval (fused branches) ---
+    # Relationship-graph fusion branch (retrieval-measurement-gate): DEFAULT
+    # OFF. The branch registers in the branch registry but joins the fusion
+    # only when this flag is set and a Graphiti client is wired; its fusion
+    # weight is the measured constant RRF_WEIGHT_GRAPHITI (documents domain
+    # constants, citing evals/reports/graphiti_branch_legal_retrieval_v2_wave4.json).
+    # Flipping the default on is a later change that cites that report.
+    # Disabled is a normal serving state, never a provisioning failure.
+    DOCUMENTS_GRAPHITI_FUSION_ENABLED: bool = Field(default=False)
+
     # --- Redis Cache for Crawler ---
     REDIS_CRAWL_CACHE_TTL: int = Field(default=3600)  # 1 hour
 

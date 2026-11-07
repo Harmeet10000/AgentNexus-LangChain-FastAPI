@@ -16,10 +16,16 @@
 >   change `openspec/changes/ingestion-truthfulness-residue/`; the
 >   one ungated silent-drop edge is `legacy_service.py:57-66` vs
 >   `ingestion/workflow.py:49-67`.
-> - **Phase F / step 6 (retrieval unification)** → DECIDED: mount the graph
->   (approach C). OpenSpec change `openspec/changes/mount-retrieval-graph/`
->   (HTTP cutover + Agent Saul `qna` engine exposure); decision matrix appended
->   below.
+> - **Phase F / step 6 (retrieval unification)** → **DONE 2026-11-04**:
+>   `openspec/changes/mount-retrieval-graph/` cut the served ask path over to
+>   the compiled graph (parity suite 28 tests green; inline duplicate deleted)
+>   and wired Saul's `qna` to it node-internally. Surviving residue: G4 is
+>   registered default-off with a measured weight (`retrieval-measurement-gate`
+>   delivered); G5/G6-remainder/G7 stay gated on the baseline
+>   (`openspec/changes/deferred-retrieval-roadmap/` owns the contracts; issue
+>   #107 notified). Decision matrix appended below.
+>   Original pointer: DECIDED: mount the graph (approach C); decision matrix
+>   appended below.
 > - **G1** recall-gate in CI (corpus at 105/150–300) · **G4** graphiti as a fused
 >   branch (registration point: `documents.py:126-128`) → OpenSpec change
 >   `openspec/changes/retrieval-measurement-gate/`. **G5/G6/G7** untouched —

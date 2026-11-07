@@ -1,0 +1,35 @@
+{
+  "report": "evals/reports/graphiti_branch_legal_retrieval_v2_wave4.json",
+  "golden_set_version": "legal_retrieval_v2",
+  "row_count": 155,
+  "commit_identifier": "9c9512a55cbeea98c683d6f400892b703eeaa61d",
+  "cutoff": 10,
+  "what_was_measured": "The relationship-graph fusion branch, scored with the deterministic offline harness (bm25 + trigram + graph legs over the recorded corpus artifacts, production reciprocal_rank_fusion). The 'graph' leg is the OFFLINE PROXY for the live Graphiti read: an entity-anchor ranking (multi-word capitalized query spans matched as chunk substrings) standing in for the relationship-graph's entity-connected chunk retrieval. The proxy is deterministic and recorded; a live-graph measurement against a seeded Graphiti remains the follow-up before any default-on flip.",
+  "weight_sweep": {
+    "fixed_weights": "bm25=1.0, trigram=1.0",
+    "points": [
+      {"w_graph": 0.0, "recall_at_10": 0.577419, "mrr": 0.388886, "ndcg_at_10": 0.430463},
+      {"w_graph": 0.1, "recall_at_10": 0.603226, "mrr": 0.407007, "ndcg_at_10": 0.450755},
+      {"w_graph": 0.25, "recall_at_10": 0.596774, "mrr": 0.395333, "ndcg_at_10": 0.439722},
+      {"w_graph": 0.5, "recall_at_10": 0.596774, "mrr": 0.39381, "ndcg_at_10": 0.438987},
+      {"w_graph": 0.75, "recall_at_10": 0.596774, "mrr": 0.394462, "ndcg_at_10": 0.439262},
+      {"w_graph": 1.0, "recall_at_10": 0.587097, "mrr": 0.392957, "ndcg_at_10": 0.436334},
+      {"w_graph": 1.25, "recall_at_10": 0.587097, "mrr": 0.346444, "ndcg_at_10": 0.400612},
+      {"w_graph": 1.5, "recall_at_10": 0.587097, "mrr": 0.347396, "ndcg_at_10": 0.401506}
+    ]
+  },
+  "measured_weight": 0.1,
+  "measured_weight_rationale": "argmax of the sweep on all three recorded metrics (recall@10, MRR, nDCG@10); every point above 0.1 degrades at least one metric relative to it, and w_graph=0 (branch absent) is dominated on all three.",
+  "at_measured_weight": {
+    "aggregates": {"recall_at_k": 0.603226, "reciprocal_rank": 0.407007, "ndcg_at_k": 0.450755, "precision_at_k": 0.063871},
+    "delta_vs_branch_absent": {"recall_at_k": 0.025806, "reciprocal_rank": 0.018121, "ndcg_at_k": 0.020292},
+    "graph_branch_ablation": {
+      "identifiers_contributed": 644,
+      "delta_recall_at_k": 0.025806,
+      "delta_reciprocal_rank": 0.018121,
+      "delta_ndcg_at_k": 0.020292,
+      "delta_precision_at_k": 0.003226
+    }
+  },
+  "decision": "RRF_WEIGHT_GRAPHITI = 0.1 in src/app/features/documents/domain/constants.py. The branch REMAINS DEFAULT-OFF (DOCUMENTS_GRAPHITI_FUSION_ENABLED=False); flipping default-on is a later change that cites this report per the graph-fusion-branch spec."
+}
