@@ -616,7 +616,10 @@ class Settings(BaseSettings):
     # a compact PDF substantially during OCR/table inference. Operators may
     # lower or raise this within the hard 25 MiB safety ceiling after rerunning
     # the benchmark on the production worker image.
-    MAX_UPLOAD_SIZE: int = Field(default=10 * 1024 * 1024, gt=0, le=25 * 1024 * 1024)
+    # Ceiling raised 2026-11-09 from 25 MiB on measured corpus data: the golden
+    # corpus's largest real contract (SRC-04) is 37 MB — the live corpus is the
+    # measurement the harden-2.4 limit was required to be data-informed by.
+    MAX_UPLOAD_SIZE: int = Field(default=10 * 1024 * 1024, gt=0, le=64 * 1024 * 1024)
     DOCUMENT_EXTRACTION_TIMEOUT_SECONDS: float = Field(default=120.0, gt=0, le=900.0)
     DOCUMENT_EXTRACTION_MAX_PAGES: int = Field(default=250, ge=1, le=2_000)
     DOCUMENT_EXTRACTION_MAX_OUTPUT_BYTES: int = Field(

@@ -435,10 +435,10 @@ To solve these problems, the creator shifted to a **production-grade database ar
 171. use CacheBackedEmbeddings fore reusing embeddings
 172. use prebuilt and custom middlewares in langchain 
 179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
+250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
 
 242. fix agent tools. need to check what are all the tools my agent has. does it have all the tools it needs or does it require more? what are the best practices and principles for making agent tools.   DONE — audited; covered by PLAN-agent-tools.md + 7 specced changes (see audit 2026-11-01)
 
-250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
 
 252. retrival graph if present and figure out is this is the best way to do retrival Full picture gathered. Here are the facts first, then one decision I need from you before touching the layout (the two halves of your instruction point at different homes).   DONE — decision D6 made: mount the compiled graph; `mount-retrieval-graph` change 22/22 tasks checked
 

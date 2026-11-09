@@ -1152,18 +1152,26 @@ class DocumentRepository:
         self,
         chunk_ids: Sequence[str],
         *,
+        tenant_id: str,
         exact_phrase: str | None = None,
-        tenant_id: str | None = None,
         allowed_doc_ids: Sequence[str] | None = None,
     ) -> DocumentResult[dict[str, dict[str, Any]]]:
+        """Hydrate chunks by id under a mandatory tenant predicate.
+
+        ``tenant_id`` is required — a chunk read is never tenant-agnostic.
+        ``allowed_doc_ids`` stays optional because the search hydration leg
+        legitimately reads the whole tenant corpus, but when the caller has an
+        explicit allowlist (evidence reads) it must pass it: ``None`` omits the
+        predicate while an empty sequence matches nothing (fail closed).
+        """
         if not chunk_ids:
             return Success({})
         try:
             # Expression form of the keyed chunk fetch: chunks JOIN documents
-            # with an allowlist-scoped uuid[] ANY filter, optional tenant pin,
-            # and an optional escaped-ILIKE phrase post-filter. The three
-            # `CAST(:x AS text) IS NULL OR ...` guards become Python-side
-            # conditionals on values the caller already resolved.
+            # with a mandatory tenant predicate, an allowlist-scoped uuid[] ANY
+            # filter, and an optional escaped-ILIKE phrase post-filter. The
+            # former `CAST(:x AS text) IS NULL OR ...` guards become
+            # Python-side conditionals on values the caller already resolved.
             statement = (
                 select(
                     cast(UnifiedChunk.id, String).label("chunk_id"),
@@ -1192,10 +1200,11 @@ class DocumentRepository:
                     UnifiedDocument,
                     UnifiedDocument.id == UnifiedChunk.document_id,
                 )
-                .where(UnifiedChunk.id == uuid_any("chunk_ids", chunk_ids))
+                .where(
+                    UnifiedChunk.tenant_id == tenant_id,
+                    UnifiedChunk.id == uuid_any("chunk_ids", chunk_ids),
+                )
             )
-            if tenant_id is not None:
-                statement = statement.where(UnifiedChunk.tenant_id == tenant_id)
             if allowed_doc_ids is not None:
                 # Fail closed: only ``None`` omits the allowlist.  An empty
                 # allowlist is an explicit empty scope and must match no

@@ -247,3 +247,5 @@ graphify-out/
 
 # parallel-cli research scratch (session dumps)
 .research/parallel/*
+.testing-credentials.json
+.live-ingestion-mapping.json

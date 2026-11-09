@@ -182,6 +182,7 @@ async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards()
 
         hydrated = await repo.fetch_chunks_by_ids(
             [str(matching_id)],
+            tenant_id="personal:" + USER_ID,
             exact_phrase="100% guarantee under clause_2",
         )
         assert isinstance(hydrated, Success), hydrated

@@ -17,7 +17,7 @@ from langchain_core.tools import BaseTool, InjectedToolArg, tool
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
-from app.connections.tavily import get_tavily_client
+from app.connections.tavily import get_tavily_client, _TavilyClient
 from app.resilience.idempotency import ToolResult
 from app.utils import ExternalServiceException
 
@@ -76,7 +76,7 @@ async def web_search(
 
     max_results = min(max_results, 10)
 
-    tavily = await get_tavily_client()
+    tavily: _TavilyClient = await get_tavily_client()
 
     result = await tavily.search(
         query=query,

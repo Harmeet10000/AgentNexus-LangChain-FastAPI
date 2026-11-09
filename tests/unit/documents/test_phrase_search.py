@@ -136,6 +136,7 @@ async def test_chunk_hydration_reuses_the_escaped_database_phrase_predicate() ->
 
     result = await repo.fetch_chunks_by_ids(
         ["10000000-0000-0000-0000-000000000001"],
+        tenant_id="tenant-1",
         exact_phrase="100% clause_2",
     )
 

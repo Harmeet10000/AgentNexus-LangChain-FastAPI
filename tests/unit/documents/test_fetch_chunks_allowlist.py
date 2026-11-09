@@ -45,6 +45,7 @@ async def _captured_sql(allowed_doc_ids: tuple[str, ...] | None) -> str:
     repo = DocumentRepository(cast("Any", session))
     result = await repo.fetch_chunks_by_ids(
         ["00000000-0000-0000-0000-00000000000a"],
+        tenant_id="tenant-1",
         allowed_doc_ids=allowed_doc_ids,
     )
     assert isinstance(result, Success)
