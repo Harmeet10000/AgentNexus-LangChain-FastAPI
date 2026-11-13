@@ -15,12 +15,14 @@ MIN_CRAWL4AI_VERSION = "0.7.4"
 try:
     from crawl4ai.__version__ import __version__
     from packaging import version
+
     if version.parse(__version__) < version.parse(MIN_CRAWL4AI_VERSION):
         print(f"⚠️  Warning: Crawl4AI {MIN_CRAWL4AI_VERSION}+ recommended (you have {__version__})")
 except ImportError:
     print(f"ℹ️  Crawl4AI {MIN_CRAWL4AI_VERSION}+ required")
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+
 
 async def crawl_batch(urls: List[str], max_concurrent: int = 5):
     """
@@ -30,10 +32,7 @@ async def crawl_batch(urls: List[str], max_concurrent: int = 5):
 
     # Configure browser for efficiency
     browser_config = BrowserConfig(
-        headless=True,
-        viewport_width=1280,
-        viewport_height=800,
-        verbose=False
+        headless=True, viewport_width=1280, viewport_height=800, verbose=False
     )
 
     # Configure crawler
@@ -42,7 +41,7 @@ async def crawl_batch(urls: List[str], max_concurrent: int = 5):
         remove_overlay_elements=True,
         wait_for="css:body",
         page_timeout=30000,  # 30 seconds timeout per page
-        screenshot=False  # Disable screenshots for batch processing
+        screenshot=False,  # Disable screenshots for batch processing
     )
 
     results = []
@@ -51,27 +50,25 @@ async def crawl_batch(urls: List[str], max_concurrent: int = 5):
     async with AsyncWebCrawler(config=browser_config) as crawler:
         # Use arun_many for efficient batch processing
         batch_results = await crawler.arun_many(
-            urls=urls,
-            config=crawler_config,
-            max_concurrent=max_concurrent
+            urls=urls, config=crawler_config, max_concurrent=max_concurrent
         )
 
         for result in batch_results:
             if result.success:
-                results.append({
-                    "url": result.url,
-                    "title": result.metadata.get("title", ""),
-                    "description": result.metadata.get("description", ""),
-                    "content_length": len(result.markdown),
-                    "links_count": len(result.links.get("internal", [])) + len(result.links.get("external", [])),
-                    "images_count": len(result.media.get("images", [])),
-                })
+                results.append(
+                    {
+                        "url": result.url,
+                        "title": result.metadata.get("title", ""),
+                        "description": result.metadata.get("description", ""),
+                        "content_length": len(result.markdown),
+                        "links_count": len(result.links.get("internal", []))
+                        + len(result.links.get("external", [])),
+                        "images_count": len(result.media.get("images", [])),
+                    }
+                )
                 print(f"✅ {result.url}")
             else:
-                failed.append({
-                    "url": result.url,
-                    "error": result.error_message
-                })
+                failed.append({"url": result.url, "error": result.error_message})
                 print(f"❌ {result.url}: {result.error_message}")
 
     # Save results
@@ -79,7 +76,7 @@ async def crawl_batch(urls: List[str], max_concurrent: int = 5):
         "success_count": len(results),
         "failed_count": len(failed),
         "results": results,
-        "failed": failed
+        "failed": failed,
     }
 
     with open("batch_results.json", "w") as f:
@@ -109,6 +106,7 @@ async def crawl_batch(urls: List[str], max_concurrent: int = 5):
 
     return output
 
+
 async def crawl_with_extraction(urls: List[str], schema_file: str = None):
     """
     Batch crawl with structured data extraction
@@ -128,34 +126,32 @@ async def crawl_with_extraction(urls: List[str], schema_file: str = None):
             "fields": [
                 {"name": "headings", "selector": "h1, h2, h3", "type": "text", "all": True},
                 {"name": "paragraphs", "selector": "p", "type": "text", "all": True},
-                {"name": "links", "selector": "a[href]", "type": "attribute", "attribute": "href", "all": True}
-            ]
+                {
+                    "name": "links",
+                    "selector": "a[href]",
+                    "type": "attribute",
+                    "attribute": "href",
+                    "all": True,
+                },
+            ],
         }
 
     extraction_strategy = JsonCssExtractionStrategy(schema=schema)
 
     crawler_config = CrawlerRunConfig(
-        extraction_strategy=extraction_strategy,
-        cache_mode=CacheMode.BYPASS
+        extraction_strategy=extraction_strategy, cache_mode=CacheMode.BYPASS
     )
 
     extracted_data = []
 
     async with AsyncWebCrawler() as crawler:
-        results = await crawler.arun_many(
-            urls=urls,
-            config=crawler_config,
-            max_concurrent=5
-        )
+        results = await crawler.arun_many(urls=urls, config=crawler_config, max_concurrent=5)
 
         for result in results:
             if result.success and result.extracted_content:
                 try:
                     data = json.loads(result.extracted_content)
-                    extracted_data.append({
-                        "url": result.url,
-                        "data": data
-                    })
+                    extracted_data.append({"url": result.url, "data": data})
                     print(f"✅ Extracted from: {result.url}")
                 except json.JSONDecodeError:
                     print(f"⚠️ Failed to parse JSON from: {result.url}")
@@ -167,6 +163,7 @@ async def crawl_with_extraction(urls: List[str], schema_file: str = None):
     print(f"\n💾 Extracted data saved to: batch_extracted.json")
     return extracted_data
 
+
 def load_urls(source: str) -> List[str]:
     """Load URLs from file or string"""
     if Path(source).exists():
@@ -177,6 +174,7 @@ def load_urls(source: str) -> List[str]:
         urls = [url.strip() for url in source.split(",") if url.strip()]
 
     return urls
+
 
 async def main():
     if len(sys.argv) < 2:
@@ -231,6 +229,7 @@ Example urls.txt:
         await crawl_with_extraction(urls, schema_file)
     else:
         await crawl_batch(urls, max_concurrent)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -21,7 +21,9 @@ MINT_JSON = DOCS_ROOT / "docs.json"
 def load_nav_entries() -> list[str]:
     data = json.loads(MINT_JSON.read_text(encoding="utf-8"))
     nav = data.get("navigation", [])
-    groups = nav.get("groups", []) if isinstance(nav, dict) else nav if isinstance(nav, list) else []
+    groups = (
+        nav.get("groups", []) if isinstance(nav, dict) else nav if isinstance(nav, list) else []
+    )
     entries: list[str] = []
     for g in groups:
         if not isinstance(g, dict):
@@ -78,7 +80,9 @@ def main() -> int:
         print(f"\nnav entries: {len(nav_entries)} | mdx files: {len(mdx_files)} (incl. 404.mdx)")
         return 1
 
-    print(f"Nav completeness: PASS (nav entries: {len(nav_entries)} | mdx files: {len(mdx_files)} incl. 404.mdx)")
+    print(
+        f"Nav completeness: PASS (nav entries: {len(nav_entries)} | mdx files: {len(mdx_files)} incl. 404.mdx)"
+    )
     return 0
 
 

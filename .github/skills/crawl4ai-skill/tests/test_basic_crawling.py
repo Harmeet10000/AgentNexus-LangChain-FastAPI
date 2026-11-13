@@ -2,8 +2,10 @@
 """
 Test basic crawling examples from SKILL.md
 """
+
 import asyncio
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
 
 async def test_basic_crawl():
     """Test basic crawling setup"""
@@ -11,29 +13,21 @@ async def test_basic_crawl():
 
     # Test from SKILL.md Section 1
     browser_config = BrowserConfig(
-        headless=True,
-        viewport_width=1920,
-        viewport_height=1080,
-        user_agent="custom-agent"
+        headless=True, viewport_width=1920, viewport_height=1080, user_agent="custom-agent"
     )
 
     crawler_config = CrawlerRunConfig(
-        page_timeout=30000,
-        screenshot=True,
-        remove_overlay_elements=True
+        page_timeout=30000, screenshot=True, remove_overlay_elements=True
     )
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
-        result = await crawler.arun(
-            url="https://example.com",
-            config=crawler_config
-        )
+        result = await crawler.arun(url="https://example.com", config=crawler_config)
 
         # Verify result attributes
         assert result.success, f"Crawl failed: {result.error_message}"
-        assert hasattr(result, 'html'), "Missing html attribute"
-        assert hasattr(result, 'markdown'), "Missing markdown attribute"
-        assert hasattr(result, 'links'), "Missing links attribute"
+        assert hasattr(result, "html"), "Missing html attribute"
+        assert hasattr(result, "markdown"), "Missing markdown attribute"
+        assert hasattr(result, "links"), "Missing links attribute"
 
         # Test markdown as string (StringCompatibleMarkdown)
         markdown_str = str(result.markdown)
@@ -43,6 +37,7 @@ async def test_basic_crawl():
         print(f"✅ HTML length: {len(result.html)}")
         print(f"✅ Markdown length: {len(markdown_str)}")
         print(f"✅ Links found: {len(result.links)}")
+
 
 if __name__ == "__main__":
     asyncio.run(test_basic_crawl())

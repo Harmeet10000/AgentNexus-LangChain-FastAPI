@@ -1,4 +1,5 @@
 from returns.result import Success, Failure
+
 result = None
 match result:
     case Success(value):

@@ -1661,6 +1661,14 @@ class AgentSaulService:
             if recorded_version != STATE_SCHEMA_VERSION or "checkpoint_id" in fresh_values
             else None
         )
+        if legacy_update is not None and session_context is not None:
+            # Legacy checkpoints predate the operation policy; hydration fails
+            # their unknown scope closed. The resumed node must run under the
+            # LIVE session's server-derived operation set, never the empty
+            # placeholder — otherwise an upgradeable legacy thread would be
+            # refused at the first orchestrator dispatch.
+            legacy_update["allowed_operations"] = list(session_context.allowed_operations)
+            legacy_update["legal_roles"] = [role.value for role in session_context.legal_roles]
         # Final fence: no async work may occur between this check and handing
         # the Command to the graph loop.  A lost lease must never issue a
         # resume payload that can advance the checkpoint.

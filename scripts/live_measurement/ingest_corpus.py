@@ -56,9 +56,7 @@ async def main() -> None:
 
     creds = json.loads(CREDS.read_text())
     settings = get_settings()
-    mapping: dict[str, dict[str, str]] = (
-        json.loads(MAPPING.read_text()) if MAPPING.exists() else {}
-    )
+    mapping: dict[str, dict[str, str]] = json.loads(MAPPING.read_text()) if MAPPING.exists() else {}
 
     session_factory = await _build_session_factory()
     object_store = StorageService.from_settings(settings=settings)

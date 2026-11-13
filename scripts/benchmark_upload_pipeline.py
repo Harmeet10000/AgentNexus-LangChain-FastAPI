@@ -136,9 +136,7 @@ async def _run(*, fixture: Path) -> dict[str, Any]:
             "extraction_max_pages": settings.DOCUMENT_EXTRACTION_MAX_PAGES,
             "extraction_max_output_bytes": settings.DOCUMENT_EXTRACTION_MAX_OUTPUT_BYTES,
         },
-        "upload_validation": [
-            await _measure_upload(size, limit=limit) for size in upload_sizes
-        ],
+        "upload_validation": [await _measure_upload(size, limit=limit) for size in upload_sizes],
         "extraction_and_classification": await _measure_extraction(fixture, settings),
         "scope_note": "Measures the bounded upload and parser/classification stages at ingestion; DB/object-store/network/embedding/chunk-model work is excluded for deterministic offline benchmarking.",
     }

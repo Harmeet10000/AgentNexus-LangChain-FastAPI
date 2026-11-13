@@ -52,8 +52,7 @@ def main() -> int:
         checks = {
             "1.9 dev starts": r.status_code == 200,
             "7.2 nav": (
-                'href="/get-started/overview"' in r.text
-                and 'href="/api-reference' in r.text
+                'href="/get-started/overview"' in r.text and 'href="/api-reference' in r.text
             ),
             "7.8 SEO": (
                 'property="og:title"' in r.text

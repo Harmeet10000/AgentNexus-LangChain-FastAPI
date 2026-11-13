@@ -100,7 +100,11 @@ async def main() -> None:  # noqa: PLR0912, PLR0914, PLR0915 — one disposable 
         )
         if revoked != "analyst":
             _fail("Postgres role revocation did not take effect")
-        report["backends"]["postgres"] = {"tenant_filter": "pass", "allowlist": "pass", "role_revocation": "pass"}
+        report["backends"]["postgres"] = {
+            "tenant_filter": "pass",
+            "allowlist": "pass",
+            "role_revocation": "pass",
+        }
 
         redis = Redis.from_url(settings.REDIS_URL, decode_responses=True, socket_connect_timeout=5)
         cache_a = f"codex:tenant:{tenant_a}:query:shared"
@@ -123,11 +127,23 @@ async def main() -> None:  # noqa: PLR0912, PLR0914, PLR0915 — one disposable 
         coll = mongo[settings.MONGODB_DB_NAME][collection]
         await coll.insert_many(
             [
-                {"fixture": token, "tenant_id": tenant_a, "query": "shared confidentiality clause", "document_id": f"doc-a-{token}"},
-                {"fixture": token, "tenant_id": tenant_b, "query": "shared confidentiality clause", "document_id": f"doc-b-{token}"},
+                {
+                    "fixture": token,
+                    "tenant_id": tenant_a,
+                    "query": "shared confidentiality clause",
+                    "document_id": f"doc-a-{token}",
+                },
+                {
+                    "fixture": token,
+                    "tenant_id": tenant_b,
+                    "query": "shared confidentiality clause",
+                    "document_id": f"doc-b-{token}",
+                },
             ]
         )
-        mongo_rows = await coll.find({"fixture": token, "tenant_id": tenant_a}, {"_id": 0}).to_list(length=10)
+        mongo_rows = await coll.find({"fixture": token, "tenant_id": tenant_a}, {"_id": 0}).to_list(
+            length=10
+        )
         if {row["document_id"] for row in mongo_rows} != {f"doc-a-{token}"}:
             _fail("Mongo tenant filter leaked the B document")
         report["backends"]["mongodb"] = {"tenant_filter": "pass", "overlapping_query": "pass"}
@@ -160,7 +176,10 @@ async def main() -> None:  # noqa: PLR0912, PLR0914, PLR0915 — one disposable 
             graph_rows = await result.data()
             if {row["document_id"] for row in graph_rows} != {f"doc-a-{token}"}:
                 _fail("Neo4j tenant filter leaked the B document")
-        report["backends"]["neo4j_graphiti"] = {"tenant_filter": "pass", "overlapping_query": "pass"}
+        report["backends"]["neo4j_graphiti"] = {
+            "tenant_filter": "pass",
+            "overlapping_query": "pass",
+        }
         report["same_tenant_teammate_read"] = "pass"
         report["hitl_role_revocation_boundary"] = "pass"
         sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -168,7 +187,8 @@ async def main() -> None:  # noqa: PLR0912, PLR0914, PLR0915 — one disposable 
         if neo4j is not None:
             async with neo4j.session(database=settings.NEO4J_DATABASE) as session:
                 await session.run(
-                    "MATCH (n:CodexConfidentiality {fixture:$fixture}) DETACH DELETE n", fixture=token
+                    "MATCH (n:CodexConfidentiality {fixture:$fixture}) DETACH DELETE n",
+                    fixture=token,
                 )
             await neo4j.close()
         if mongo is not None:
@@ -183,7 +203,9 @@ async def main() -> None:  # noqa: PLR0912, PLR0914, PLR0915 — one disposable 
                 "DELETE FROM app_tenant_memberships WHERE tenant_id = ANY($1::text[])",
                 [tenant_a, tenant_b],
             )
-            await pg.execute("DELETE FROM app_tenants WHERE id = ANY($1::text[])", [tenant_a, tenant_b])
+            await pg.execute(
+                "DELETE FROM app_tenants WHERE id = ANY($1::text[])", [tenant_a, tenant_b]
+            )
             await pg.execute(f"DROP TABLE IF EXISTS {table}")
             await pg.close()
 

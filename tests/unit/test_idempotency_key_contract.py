@@ -114,6 +114,94 @@ def test_scoped_key_isolated_by_tenant_and_document_capability() -> None:
     assert first != second
 
 
+# ---------------------------------------------------------------------------
+# 3.10 — no cross-tenant or stale-version reuse over the tool cache window
+# ---------------------------------------------------------------------------
+
+
+def test_scoped_key_isolated_by_widened_document_allowlist() -> None:
+    """A cached result from a narrow scope must not serve a widened one."""
+    narrow = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1",),
+    )
+    widened = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1", "d2"),
+    )
+    assert narrow != widened
+
+
+def test_scoped_key_changes_when_a_document_version_changes() -> None:
+    """A re-ingested document (version bump) invalidates prior tool results:
+    a stale cached search must never be served against superseded text."""
+    version_one = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1",),
+        document_versions=[("d1", 1, "documents-v1")],
+    )
+    version_two = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1",),
+        document_versions=[("d1", 2, "documents-v1")],
+    )
+    assert version_one != version_two
+
+
+def test_scoped_key_changes_when_the_pipeline_version_changes() -> None:
+    """Chunks produced by a different extraction pipeline are different
+    evidence: the pipeline component of document_versions is in the key."""
+    old_pipeline = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1",),
+        document_versions=[("d1", 1, "documents-v1")],
+    )
+    new_pipeline = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1",),
+        document_versions=[("d1", 1, "documents-v2")],
+    )
+    assert old_pipeline != new_pipeline
+
+
+def test_scoped_key_changes_when_the_evidence_policy_changes() -> None:
+    graph_indexed_only = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1",),
+        evidence_policy="graph_indexed_only",
+    )
+    mechanically_verified = IdempotencyGuard.make_key(
+        step_id="s",
+        structural={"doc_id": "d1"},
+        user_id="u",
+        tenant_id="tenant-a",
+        allowed_doc_ids=("d1",),
+        evidence_policy="mechanically_verified",
+    )
+    assert graph_indexed_only != mechanically_verified
+
+
 @pytest.mark.asyncio
 async def test_postgres_idempotency_remains_available_without_redis(
     monkeypatch: pytest.MonkeyPatch,

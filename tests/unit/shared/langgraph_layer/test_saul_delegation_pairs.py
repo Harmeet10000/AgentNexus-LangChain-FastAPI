@@ -53,6 +53,7 @@ def _state() -> dict[str, Any]:
         "user_id": "u",
         "thread_id": "t",
         "doc_id": "d",
+        "allowed_operations": ["document.read", "evidence.read", "evidence.search"],
         "segments": [],
         "extracted_entities": [],
         "relationships": [],

@@ -177,6 +177,12 @@ def test_worker_compiles_once_and_two_service_invocations_reuse_the_graph(
             counts["bound_session"] += 1
             self.session = MagicMock(spec=AsyncSession)
             self.session.begin.return_value = Transaction()
+            # Status readers consume the executed result (stuck-age detection
+            # reads status/updated_at). A bare AsyncMock chain yields a
+            # coroutine from .mappings(); shape the awaited result instead.
+            self.session.execute.return_value = SimpleNamespace(
+                mappings=lambda: SimpleNamespace(one_or_none=lambda: None)
+            )
 
         async def __aenter__(self) -> AsyncSession:
             return self.session

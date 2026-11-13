@@ -68,7 +68,9 @@ def build_convention_index() -> dict[str, str]:
         pages = json.loads(pages_file.read_text())["pages"]
         for page in pages:
             page_no = page["page_no"] if "page_no" in page else page.get("page")
-            for ordinal, chunk_text in enumerate(chunks_for_page(normalize_page_text(page["text"])), 1):
+            for ordinal, chunk_text in enumerate(
+                chunks_for_page(normalize_page_text(page["text"])), 1
+            ):
                 index[f"{source_id}:p{page_no}:c{ordinal:02d}"] = normalize(chunk_text)
     return index
 
@@ -92,9 +94,7 @@ class LiveIndex:
         self._session_factory = (await init_db())[1]
         self._repo = DocumentRepository(self._session_factory())
         async with self.engine.connect() as conn:
-            res = await conn.execute(
-                text("select id, content, preamble, document_id from chunks")
-            )
+            res = await conn.execute(text("select id, content, preamble, document_id from chunks"))
             self._live_chunks = [
                 {
                     "chunk_id": str(r[0]),
@@ -142,8 +142,10 @@ class LiveIndex:
         if hasattr(result, "unwrap"):
             if isinstance(result, Failure):
                 failure = result.failure()
-                print(f"vector_search FAILURE: {getattr(failure, 'message', failure)!r} "
-                      f"details={getattr(failure, 'details', None)}")
+                print(
+                    f"vector_search FAILURE: {getattr(failure, 'message', failure)!r} "
+                    f"details={getattr(failure, 'details', None)}"
+                )
                 return []
             rows = result.unwrap()
         else:
@@ -167,7 +169,10 @@ def score(ranked: list[str], expected: set[str], k: int = K) -> dict[str, float]
         if hit:
             rr = 1.0 / pos
             break
-    dcg = sum(h / (1 + i) ** 0.65 if (h := 1 if cid in expected else 0) else 0 for i, cid in enumerate(top))
+    dcg = sum(
+        h / (1 + i) ** 0.65 if (h := 1 if cid in expected else 0) else 0
+        for i, cid in enumerate(top)
+    )
     idcg = sum(1 / (1 + i) ** 0.65 for i in range(min(len(expected), k)))
     ndcg = dcg / idcg if idcg else 0.0
     return {"recall@k": recall, "mrr": rr, "ndcg@k": ndcg, "hits": sum(hits)}

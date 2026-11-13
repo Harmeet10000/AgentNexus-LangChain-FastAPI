@@ -7,7 +7,7 @@ Last updated: 2026-11-09.
 
 | Process | Command | Notes |
 |---|---|---|
-| API | `cd /home/harmeet/Desktop/Projects/langchain-fastapi-production && nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 5000 > /tmp/uvicorn.log 2>&1 &` | **No make target** (API ships in docker; local dev is manual uvicorn). Boot takes **6–7 min** (heavy import graph + cloud connects). Log: `/tmp/uvicorn.log`. |
+| API | `cd /home/harmeet/Desktop/Projects/langchain-fastapi-production && nohup make backend BACKEND_HOST=127.0.0.1 > /tmp/uvicorn.log 2>&1 &` | `make backend` starts local Uvicorn; override `BACKEND_HOST` to bind only to localhost. Boot takes **6–7 min** (heavy import graph + cloud connects). Log: `/tmp/uvicorn.log`. |
 | Worker | `cd /home/harmeet/Desktop/Projects/langchain-fastapi-production && nohup make celery > /tmp/celery_worker.log 2>&1 &` | `make celery` = `uv run worker --role default --loglevel=info`. Do NOT pass `--concurrency` (the worker entrypoint owns it — duplicate flag errors). Log: `/tmp/celery_worker.log`. |
 | Beat (optional) | `make celery-beat` | Not needed for ingestion. |
 

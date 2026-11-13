@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4  # noqa: TC003 — UUID resolved at runtime by SQLAlchemy mapper
 
@@ -25,7 +26,51 @@ from sqlalchemy.orm import (  # noqa: TC002 — Mapped resolved at runtime by SQ
 from database.base import Base
 
 if TYPE_CHECKING:
+    from typing import Final
+
     from app.features.documents.domain.chunk import UnifiedChunk
+
+
+class DocumentStatus(StrEnum):
+    """Typed queued-ingestion lifecycle status (harden 3.11).
+
+    The ``documents.status`` column stores these exact string values; the
+    repository refuses any other value so a document can never drift into an
+    untyped status that downstream readiness gates cannot interpret.
+    """
+
+    RECEIVED = "received"
+    PROCESSING = "processing"
+    PARSED = "parsed"
+    STORED_POSTGRES = "stored_postgres"
+    COMPLETED = "completed"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
+    FAILED = "failed"
+
+
+DOCUMENT_STATUS_VALUES: Final[frozenset[str]] = frozenset(status.value for status in DocumentStatus)
+
+TERMINAL_DOCUMENT_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        DocumentStatus.COMPLETED.value,
+        DocumentStatus.COMPLETED_WITH_WARNINGS.value,
+        DocumentStatus.FAILED.value,
+    }
+)
+
+# Metadata keys that carry a typed ingestion/extraction failure reason. The
+# repository's extraction-reason guard consults these before letting an
+# ``extraction_incomplete=True`` write through without a reason.
+FAILURE_REASON_METADATA_KEYS: Final[tuple[str, ...]] = (
+    "knowledge_extraction_failure",
+    "ingestion_error",
+    "extraction_failure_reason",
+)
+
+# Persisted when a write marks extraction incomplete but carries no typed
+# reason — the live-run diagnosability gap (12/15 corpus documents failed with
+# ``extraction_incomplete: true`` and NO reason stored).
+EXTRACTION_FAILURE_UNRECORDED: Final[str] = "EXTRACTION_FAILURE_UNRECORDED"
 
 
 class UnifiedDocument(Base):

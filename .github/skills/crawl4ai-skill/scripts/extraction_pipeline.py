@@ -29,6 +29,7 @@ MIN_CRAWL4AI_VERSION = "0.7.4"
 try:
     from crawl4ai.__version__ import __version__
     from packaging import version
+
     if version.parse(__version__) < version.parse(MIN_CRAWL4AI_VERSION):
         print(f"⚠️  Warning: Crawl4AI {MIN_CRAWL4AI_VERSION}+ recommended (you have {__version__})")
 except ImportError:
@@ -38,6 +39,7 @@ except ImportError:
 # =============================================================================
 # APPROACH 1: Generate Schema (Most Efficient for Repetitive Patterns)
 # =============================================================================
+
 
 async def generate_schema(url: str, instruction: str, output_file: str = "generated_schema.json"):
     """
@@ -68,13 +70,11 @@ async def generate_schema(url: str, instruction: str, output_file: str = "genera
         }}
 
         Make selectors as specific as possible to avoid false matches.
-        """
+        """,
     )
 
     crawler_config = CrawlerRunConfig(
-        extraction_strategy=extraction_strategy,
-        wait_for="css:body",
-        remove_overlay_elements=True
+        extraction_strategy=extraction_strategy, wait_for="css:body", remove_overlay_elements=True
     )
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -96,8 +96,13 @@ async def generate_schema(url: str, instruction: str, output_file: str = "genera
                         "fields": [
                             {"name": "title", "selector": "h1, h2, h3", "type": "text"},
                             {"name": "description", "selector": "p", "type": "text"},
-                            {"name": "link", "selector": "a", "type": "attribute", "attribute": "href"}
-                        ]
+                            {
+                                "name": "link",
+                                "selector": "a",
+                                "type": "attribute",
+                                "attribute": "href",
+                            },
+                        ],
                     }
 
                 # Save schema
@@ -115,8 +120,11 @@ async def generate_schema(url: str, instruction: str, output_file: str = "genera
                 print("Raw output:", result.extracted_content[:500])
                 return None
         else:
-            print(f"❌ Failed to generate schema: {result.error_message if result else 'Unknown error'}")
+            print(
+                f"❌ Failed to generate schema: {result.error_message if result else 'Unknown error'}"
+            )
             return None
+
 
 async def use_generated_schema(url: str, schema_file: str):
     """
@@ -130,20 +138,16 @@ async def use_generated_schema(url: str, schema_file: str):
             schema = json.load(f)
     except FileNotFoundError:
         print(f"❌ Schema file not found: {schema_file}")
-        print("💡 Generate a schema first using: python extraction_pipeline.py --generate-schema <url> \"<instruction>\"")
+        print(
+            '💡 Generate a schema first using: python extraction_pipeline.py --generate-schema <url> "<instruction>"'
+        )
         return None
 
     print("🚀 Extracting data using generated schema (no LLM calls)...")
 
-    extraction_strategy = JsonCssExtractionStrategy(
-        schema=schema,
-        verbose=True
-    )
+    extraction_strategy = JsonCssExtractionStrategy(schema=schema, verbose=True)
 
-    crawler_config = CrawlerRunConfig(
-        extraction_strategy=extraction_strategy,
-        wait_for="css:body"
-    )
+    crawler_config = CrawlerRunConfig(extraction_strategy=extraction_strategy, wait_for="css:body")
 
     async with AsyncWebCrawler() as crawler:
         result = await crawler.arun(url=url, config=crawler_config)
@@ -169,9 +173,11 @@ async def use_generated_schema(url: str, schema_file: str):
             print(f"❌ Extraction failed: {result.error_message if result else 'Unknown error'}")
             return None
 
+
 # =============================================================================
 # APPROACH 2: Manual Schema Definition
 # =============================================================================
+
 
 async def extract_with_manual_schema(url: str, schema: dict = None):
     """
@@ -187,20 +193,21 @@ async def extract_with_manual_schema(url: str, schema: dict = None):
             "fields": [
                 {"name": "title", "selector": "h1", "type": "text"},
                 {"name": "paragraphs", "selector": "p", "type": "text", "all": True},
-                {"name": "links", "selector": "a", "type": "attribute", "attribute": "href", "all": True}
-            ]
+                {
+                    "name": "links",
+                    "selector": "a",
+                    "type": "attribute",
+                    "attribute": "href",
+                    "all": True,
+                },
+            ],
         }
 
     print("📐 Using manual CSS/JSON schema for extraction...")
 
-    extraction_strategy = JsonCssExtractionStrategy(
-        schema=schema,
-        verbose=True
-    )
+    extraction_strategy = JsonCssExtractionStrategy(schema=schema, verbose=True)
 
-    crawler_config = CrawlerRunConfig(
-        extraction_strategy=extraction_strategy
-    )
+    crawler_config = CrawlerRunConfig(extraction_strategy=extraction_strategy)
 
     async with AsyncWebCrawler() as crawler:
         result = await crawler.arun(url=url, config=crawler_config)
@@ -224,9 +231,11 @@ async def extract_with_manual_schema(url: str, schema: dict = None):
             print(f"❌ Extraction failed")
             return None
 
+
 # =============================================================================
 # APPROACH 3: Direct LLM Extraction
 # =============================================================================
+
 
 async def extract_with_llm(url: str, instruction: str):
     """
@@ -244,19 +253,14 @@ async def extract_with_llm(url: str, instruction: str):
         schema={
             "type": "object",
             "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {"type": "object"}
-                },
-                "summary": {"type": "string"}
-            }
-        }
+                "items": {"type": "array", "items": {"type": "object"}},
+                "summary": {"type": "string"},
+            },
+        },
     )
 
     crawler_config = CrawlerRunConfig(
-        extraction_strategy=extraction_strategy,
-        wait_for="css:body",
-        remove_overlay_elements=True
+        extraction_strategy=extraction_strategy, wait_for="css:body", remove_overlay_elements=True
     )
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -265,7 +269,7 @@ async def extract_with_llm(url: str, instruction: str):
         if result.success and result.extracted_content:
             try:
                 data = json.loads(result.extracted_content)
-                items = data.get('items', [])
+                items = data.get("items", [])
 
                 print(f"✅ LLM extracted {len(items)} items")
                 print(f"📝 Summary: {data.get('summary', 'N/A')}")
@@ -287,9 +291,11 @@ async def extract_with_llm(url: str, instruction: str):
             print(f"❌ LLM extraction failed")
             return None
 
+
 # =============================================================================
 # Main CLI Interface
 # =============================================================================
+
 
 async def main():
     if len(sys.argv) < 3:
@@ -329,7 +335,7 @@ Examples:
     if mode == "--generate-schema":
         if len(sys.argv) < 4:
             print("Error: Missing extraction instruction")
-            print("Usage: python extraction_pipeline.py --generate-schema <url> \"<instruction>\"")
+            print('Usage: python extraction_pipeline.py --generate-schema <url> "<instruction>"')
             sys.exit(1)
         instruction = sys.argv[3]
         output_file = sys.argv[4] if len(sys.argv) > 4 else "generated_schema.json"
@@ -349,7 +355,7 @@ Examples:
     elif mode == "--llm":
         if len(sys.argv) < 4:
             print("Error: Missing extraction instruction")
-            print("Usage: python extraction_pipeline.py --llm <url> \"<instruction>\"")
+            print('Usage: python extraction_pipeline.py --llm <url> "<instruction>"')
             sys.exit(1)
         instruction = sys.argv[3]
         await extract_with_llm(url, instruction)
@@ -358,6 +364,7 @@ Examples:
         print(f"Unknown mode: {mode}")
         print("Use --generate-schema, --use-schema, --manual, or --llm")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

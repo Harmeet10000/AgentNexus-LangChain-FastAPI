@@ -199,7 +199,7 @@ docker compose up -d rabbitmq timescale # local RabbitMQ + PostgreSQL/Timescale
 uv sync --extra dev
 uv run alembic upgrade head             # see caveat below
 
-uv run uvicorn app.main:app --host 0.0.0.0 --port 5000
+make backend
 make celery-ingestion                   # separate terminal — ingest your uploads
 ```
 
@@ -232,7 +232,8 @@ uv run worker --role ingestion --loglevel=info
 uv run worker --role crawler --loglevel=info
 uv run beat --loglevel=info
 
-# the same four commands, as make targets
+# local entry points, as make targets
+make backend            # FastAPI backend (BACKEND_HOST/BACKEND_PORT can override defaults)
 make celery              # default worker pool
 make celery-ingestion    # ingestion worker pool
 make celery-crawler      # crawler worker pool

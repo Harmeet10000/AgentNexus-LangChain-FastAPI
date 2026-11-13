@@ -32,7 +32,9 @@ FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 def load_nav_entries() -> list[str]:
     data = json.loads(MINT_JSON.read_text(encoding="utf-8"))
     nav = data.get("navigation", [])
-    groups = nav.get("groups", []) if isinstance(nav, dict) else nav if isinstance(nav, list) else []
+    groups = (
+        nav.get("groups", []) if isinstance(nav, dict) else nav if isinstance(nav, list) else []
+    )
     entries: list[str] = []
     for g in groups:
         if not isinstance(g, dict):
@@ -163,11 +165,17 @@ def main() -> int:
     print("Mintlify docs verification")
     print("--------------------------")
     print(f"nav entries: {len(nav_entries)} | mdx files: {len(mdx_files)} (incl. 404.mdx)")
-    print(f"  (a) nav -> file: {'PASS' if not missing_files else f'FAIL ({len(missing_files)} missing)'}")
+    print(
+        f"  (a) nav -> file: {'PASS' if not missing_files else f'FAIL ({len(missing_files)} missing)'}"
+    )
     print(f"  (b) file -> nav: {'PASS' if not orphans else f'FAIL ({len(orphans)} orphans)'}")
-    print(f"  (c) frontmatter: {'PASS' if not fm_failures else f'FAIL ({len(fm_failures)} issues)'}")
+    print(
+        f"  (c) frontmatter: {'PASS' if not fm_failures else f'FAIL ({len(fm_failures)} issues)'}"
+    )
     print(f"  (d) stub text:   {'PASS' if not stub_hits else f'FAIL ({len(stub_hits)} hits)'}")
-    print(f"  (e) int. links:  {'PASS' if not link_failures else f'FAIL ({len(link_failures)} broken)'}")
+    print(
+        f"  (e) int. links:  {'PASS' if not link_failures else f'FAIL ({len(link_failures)} broken)'}"
+    )
 
     if errors:
         print("\nFailures:")

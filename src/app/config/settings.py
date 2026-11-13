@@ -622,6 +622,11 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = Field(default=10 * 1024 * 1024, gt=0, le=64 * 1024 * 1024)
     DOCUMENT_EXTRACTION_TIMEOUT_SECONDS: float = Field(default=120.0, gt=0, le=900.0)
     DOCUMENT_EXTRACTION_MAX_PAGES: int = Field(default=250, ge=1, le=2_000)
+    # Stuck-age safety net (harden 3.11): a document sitting in a non-terminal
+    # ingestion status longer than this is logged at the worker boundary, so a
+    # lost terminal transition is observable even when the status/event paths
+    # disagree.
+    DOCUMENTS_STUCK_STATUS_HOURS: int = Field(default=2, ge=1)
     DOCUMENT_EXTRACTION_MAX_OUTPUT_BYTES: int = Field(
         default=50 * 1024 * 1024,
         gt=0,

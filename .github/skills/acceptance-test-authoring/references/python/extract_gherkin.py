@@ -92,7 +92,7 @@ def extract_file(md_path):
                 h1_count += 1
                 if h1_count > 1:
                     raise ExtractionError(
-                        '%s:%d: more than one H1 — a spec.md has exactly one '
+                        "%s:%d: more than one H1 — a spec.md has exactly one "
                         '"# <capability>" title' % (md_path, i + 1)
                     )
                 out.append("Feature: %s" % m.group(1))
@@ -107,7 +107,9 @@ def extract_file(md_path):
                 continue
             m = SCENARIO_RE.match(line)
             if m:
-                keyword = "Scenario Outline" if re.search(r"outline", m.group(1), re.I) else "Scenario"
+                keyword = (
+                    "Scenario Outline" if re.search(r"outline", m.group(1), re.I) else "Scenario"
+                )
                 pending_scenario = (i + 1, keyword, m.group(2))
                 out.append("    %s: %s" % (keyword, m.group(2)))
                 continue
@@ -183,7 +185,9 @@ def extract_all(openspec_dir=None, out_dir=None):
     wiped first -- a stale extraction would keep deleted or renamed
     capabilities executing."""
     here = Path(__file__).resolve().parent
-    openspec_dir = Path(openspec_dir).resolve() if openspec_dir else (here / ".." / "openspec").resolve()
+    openspec_dir = (
+        Path(openspec_dir).resolve() if openspec_dir else (here / ".." / "openspec").resolve()
+    )
     out_dir = Path(out_dir).resolve() if out_dir else (here / ".extracted").resolve()
 
     shutil.rmtree(out_dir, ignore_errors=True)

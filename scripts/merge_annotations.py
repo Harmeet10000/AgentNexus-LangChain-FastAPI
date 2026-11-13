@@ -203,7 +203,9 @@ def _recheck_iaa_gate(inputs: _MergeInputs) -> list[str]:
     errors: list[str] = []
     reported = report.get("disagreements")
     reported_entries = [
-        entry for entry in (reported if isinstance(reported, list) else []) if isinstance(entry, dict)
+        entry
+        for entry in (reported if isinstance(reported, list) else [])
+        if isinstance(entry, dict)
     ]
     if reported_entries != disagreements:
         errors.append(
@@ -231,9 +233,7 @@ def _recheck_iaa_gate(inputs: _MergeInputs) -> list[str]:
     )
     n = len(case_ids)
     gate_passed = (
-        raw >= 1.0
-        if n < _MIN_N_FOR_KAPPA_GATE
-        else kappa >= min_kappa and raw >= min_agreement
+        raw >= 1.0 if n < _MIN_N_FOR_KAPPA_GATE else kappa >= min_kappa and raw >= min_agreement
     )
     if not gate_passed:
         errors.append(
@@ -478,9 +478,7 @@ def _resolve_corpus_root(manifest_dir: Path, corpus_manifest_path: str | None) -
     return manifest_dir / root
 
 
-def _rebased_manifest_text(
-    manifest_text: str, source_manifest: Path, target_manifest: Path
-) -> str:
+def _rebased_manifest_text(manifest_text: str, source_manifest: Path, target_manifest: Path) -> str:
     """Return a copied manifest's text with its corpus path rebased for the move.
 
     The gold's manifest records its corpus directory relative to itself (the
@@ -706,7 +704,9 @@ def _merge_all(
     candidate_count = 0
     for row in inputs.rows:
         case_id = row["case_id"]
-        changes = merge_row(row, inputs.by_case_a[case_id], inputs.by_case_b[case_id], reopen=reopen)
+        changes = merge_row(
+            row, inputs.by_case_a[case_id], inputs.by_case_b[case_id], reopen=reopen
+        )
         row_changes.append((case_id, changes))
         if row["provenance"]["quality_tier"] == "release":
             release_count += 1

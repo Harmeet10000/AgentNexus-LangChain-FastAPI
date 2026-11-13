@@ -914,6 +914,11 @@ def _ingestion_state(record: dict[str, object], document_id: str) -> IngestionDo
         state = "failed"
     elif raw_status in {"completed", "complete", "succeeded", "ready"} and chunk_count > 0:
         state = "completed_with_warnings" if warning_count or extraction_incomplete else "ready"
+    elif raw_status == "completed_with_warnings" and chunk_count > 0:
+        # The queued pipeline's own terminal warning status: the fidelity and
+        # segmentation warning reasons ride the chunk warnings of this same
+        # record, so Saul's pre-dispatch ingestion state must surface them.
+        state = "completed_with_warnings"
     else:
         state = "index_not_ready"
     return IngestionDocumentState(

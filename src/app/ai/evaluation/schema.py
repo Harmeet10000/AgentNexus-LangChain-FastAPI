@@ -102,6 +102,7 @@ type AdjudicationStatus = Literal[
 
 GOLDEN_PROVENANCE_SCHEMA_VERSION = "golden_provenance_v1"
 GOLDEN_SET_V2_VERSION = "legal_retrieval_v2"
+INGESTION_FIDELITY_SET_VERSION = "ingestion_fidelity_v1"
 
 # Case types whose correct behaviour is to abstain because no usable evidence
 # can exist for the query.  The two ingestion-family categories extend the
@@ -626,6 +627,209 @@ class GoldenSetProvenanceError(ValueError):
 
 
 type GoldenSetLoadResult = Result[GoldenSet, MalformedGoldenRowError]
+
+# ---------------------------------------------------------------------------
+# Ingestion-fidelity gold set (I4): source-to-chunk coverage/order labels.
+#
+# The retrieval gold sets label what a correct ANSWER looks like; this set
+# labels what correct INGESTION looks like: how much of a recorded source the
+# chunk universe must cover, in what order, which structural signals must
+# survive, and which typed fidelity warnings are expected.  Rows never carry
+# retrieval relevance or claim entailment.
+# ---------------------------------------------------------------------------
+
+
+type IngestionFidelityLabel = Literal[
+    "coverage_order", "warning_reason", "boundary_identity", "clause_kind"
+]
+
+
+class IngestionFidelityExpectation(BaseModel):
+    """The labeled ingestion outcome for one corpus artifact.
+
+    Every field is optional: a row labels only the dimensions meaningful for
+    its artifact profile.  ``None`` means "not labeled here", never "any value
+    is fine" — the offline measurement always records what it saw.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    # Source-to-chunk coverage/order.
+    min_source_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
+    order_preserved: bool | None = None
+    exact_chunk_count: int | None = Field(default=None, ge=0)
+    min_chunk_count: int | None = Field(default=None, ge=1)
+    first_chunk_id: str | None = None
+    last_chunk_id: str | None = None
+    # Structural preservation.
+    min_sections_preserved_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_tables_total: int | None = Field(default=None, ge=0)
+    min_tables_preserved: int | None = Field(default=None, ge=0)
+    # Typed fidelity warnings: which must fire, which must never fire.
+    expected_warning_codes: list[str] = Field(default_factory=list)
+    forbidden_warning_codes: list[str] = Field(default_factory=list)
+    # OCR fidelity signal (measured live by docling; offline it is unavailable).
+    expected_ocr_status: Literal["measured", "unavailable"] | None = None
+    max_ocr_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Contract-boundary identity.
+    exact_contract_boundaries: int | None = Field(default=None, ge=1)
+    min_contract_boundaries: int | None = Field(default=None, ge=1)
+    # Clause numbering / loci and Phase-3-style clause kinds.
+    min_loci_recovered: int | None = Field(default=None, ge=0)
+    expected_locus_prefixes: list[str] = Field(default_factory=list)
+    expected_clause_kinds: dict[str, int] = Field(default_factory=dict)
+
+
+class IngestionFidelityRow(BaseModel):
+    """One source-to-chunk coverage/order expectation over a corpus artifact.
+
+    Deliberately separate from :class:`GoldenQuery`: an ingestion row has no
+    query, no retrieval relevance, and no claim entailment — its label is what
+    the ingestion pipeline must truthfully report for the document.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    case_id: str = Field(min_length=1)
+    label: IngestionFidelityLabel
+    document_id: str = Field(min_length=1)
+    profiles: list[str] = Field(default_factory=list)
+    expectation: IngestionFidelityExpectation
+    provenance: GoldenItemProvenance
+    notes: str = ""
+
+    @model_validator(mode="after")
+    def case_id_matches_label(self) -> IngestionFidelityRow:
+        if not self.case_id.startswith(f"{self.label}-"):
+            message = f"case_id {self.case_id!r} must start with its label slug {self.label!r}-"
+            raise ValueError(message)
+        return self
+
+
+class IngestionFidelitySet(BaseModel):
+    """A versioned collection of ingestion-fidelity expectations."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: str = Field(min_length=1)
+    rows: list[IngestionFidelityRow] = Field(min_length=1)
+    provenance_schema_version: str | None = None
+
+
+type IngestionFidelityLoadResult = Result[IngestionFidelitySet, MalformedGoldenRowError]
+
+
+async def load_ingestion_fidelity_set(path: Path) -> IngestionFidelityLoadResult:  # noqa: PLR0912 — one branch per fail-closed set/manifest rule
+    """Load and validate an ingestion-fidelity gold set plus its sibling manifest.
+
+    Fails closed without the provenance manifest (same discipline as
+    ``legal_retrieval_v2``): artifact checksums are recomputed and every row's
+    ``document_id`` must be declared in ``per_artifact``.  Set-level rules:
+    unique case ids, profile-bearing rows only reference declared artifacts.
+    """
+    try:
+        async with aiofiles.open(path, encoding="utf-8") as stream:
+            lines = await stream.readlines()
+    except FileNotFoundError as exc:
+        raise GoldenSetNotFoundException(path) from exc
+    except OSError as exc:
+        raise GoldenSetReadException(path, exc) from exc
+    except UnicodeDecodeError as exc:
+        raise GoldenSetReadException(path, exc) from exc
+    if not lines:
+        return _malformed(row_index=1, message="Ingestion fidelity gold set is empty")
+    try:
+        metadata = json.loads(lines[0])
+        version = metadata["version"]
+        provenance_schema_version = metadata.get("provenance_schema_version")
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        return _malformed(row_index=1, message=f"Malformed gold-set metadata: {exc}")
+    if version != INGESTION_FIDELITY_SET_VERSION:
+        return _malformed(
+            row_index=1,
+            message=(f"expected version {INGESTION_FIDELITY_SET_VERSION!r}, found {version!r}"),
+        )
+    raw_rows: list[object] = []
+    for row_index, line in enumerate(lines[1:], start=2):
+        try:
+            raw_rows.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            return _malformed(row_index=row_index, message=f"Malformed JSON: {exc.msg}")
+    try:
+        rows = TypeAdapter(list[IngestionFidelityRow]).validate_python(raw_rows)
+    except ValidationError as exc:
+        offset = exc.errors()[0]["loc"][0]
+        row_index = int(offset) + 2 if isinstance(offset, int) else 2
+        return _malformed(row_index=row_index, message=str(exc))
+    if not rows:
+        return _malformed(row_index=2, message="Ingestion fidelity gold set contains no rows")
+
+    manifest_path = manifest_path_for(path)
+    if not manifest_path.is_file():
+        return _malformed(
+            row_index=1,
+            message=(
+                f"ingestion fidelity gold set requires a sibling {manifest_path.name} "
+                f"provenance manifest (expected at {manifest_path})"
+            ),
+        )
+    try:
+        manifest = await _load_manifest(manifest_path)
+    except (OSError, ValueError) as exc:
+        return _malformed(
+            row_index=1,
+            message=f"Unable to load gold-set manifest: {exc}",
+            details={"manifest": str(manifest_path)},
+        )
+    issues: list[str] = []
+    if manifest.golden_set_version != version:
+        issues.append(
+            f"manifest golden_set_version {manifest.golden_set_version!r} does not match "
+            f"gold-set version {version!r}"
+        )
+    case_ids: dict[str, int] = {}
+    source_ids = {entry.source_id for entry in manifest.per_artifact}
+    for row_index, row in enumerate(rows, start=2):
+        if row.case_id in case_ids:
+            issues.append(
+                f"row {row_index}: case_id {row.case_id!r} duplicates row {case_ids[row.case_id]}"
+            )
+        else:
+            case_ids[row.case_id] = row_index
+        if row.document_id not in source_ids:
+            issues.append(
+                f"row {row_index}: document_id {row.document_id!r} is not declared in the "
+                "manifest per_artifact"
+            )
+        issues.extend(_row_provenance_issues(row_index, row))
+    if manifest.per_artifact:
+        artifact_root = _artifact_root(manifest, manifest_path.parent)
+        for entry in manifest.per_artifact:
+            issues.extend(await _audit_artifact_entry(entry, artifact_root))
+    if issues:
+        return _malformed(row_index=1, message=issues[0], details={"issues": issues})
+    return Success(
+        IngestionFidelitySet(
+            version=version,
+            provenance_schema_version=provenance_schema_version,
+            rows=rows,
+        )
+    )
+
+
+def _row_provenance_issues(row_index: int, row: IngestionFidelityRow) -> list[str]:
+    """Reuse the retrieval provenance rules for ingestion rows."""
+    provenance = row.provenance
+    issues: list[str] = []
+    if provenance.permission_status not in {
+        "public_terms_verified",
+        "synthetic_owned",
+        "written_permission",
+    }:
+        issues.append(f"row {row_index}: permission status is not admissible")
+    if provenance.source_type == "client" and provenance.permission_status != "written_permission":
+        issues.append(f"row {row_index}: client material lacks written permission")
+    return issues
 
 
 class GoldenSetNotFoundException(NotFoundException):

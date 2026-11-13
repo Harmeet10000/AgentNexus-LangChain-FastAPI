@@ -21,8 +21,12 @@ from app.features.auth.application.session_index_repair import SessionIndexRepai
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="mutate indexes (default is dry-run)")
-    parser.add_argument("--cursor", type=int, default=0, help="index SCAN cursor from a previous run")
-    parser.add_argument("--orphan-cursor", type=int, default=0, help="session SCAN cursor from a previous run")
+    parser.add_argument(
+        "--cursor", type=int, default=0, help="index SCAN cursor from a previous run"
+    )
+    parser.add_argument(
+        "--orphan-cursor", type=int, default=0, help="session SCAN cursor from a previous run"
+    )
     parser.add_argument("--batch-limit", type=int, default=100)
     parser.add_argument("--member-limit", type=int, default=1_000)
     parser.add_argument("--scan-count", type=int, default=100)

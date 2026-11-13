@@ -45,14 +45,27 @@ def _context(*, role_revision: int = 3) -> SaulThreadContext:
 
 
 class _MembershipService:
-    """Live authority: what the caller's membership looks like RIGHT NOW."""
+    """Live authority: what the caller's membership looks like RIGHT NOW.
 
-    def __init__(self, roles: tuple[LegalRole, ...], revision: int) -> None:
+    ``self_review_allowed`` is part of the LIVE membership fact: the tenant's
+    independent-reviewer policy is re-derived on every resume (3.6), so a
+    tenant that requires an independent reviewer refuses the owner's own
+    approval even when the owner genuinely holds the reviewer role.
+    """
+
+    def __init__(
+        self,
+        roles: tuple[LegalRole, ...],
+        revision: int,
+        *,
+        self_review_allowed: bool = True,
+    ) -> None:
         self._roles = roles
         self._revision = revision
+        self._self_review_allowed = self_review_allowed
 
     async def get_live_authorization(self, *, tenant_id: str, user_id: str) -> Any:
-        return Success((self._roles, True, self._revision))
+        return Success((self._roles, self._self_review_allowed, self._revision))
 
 
 class _DocumentSource:
@@ -97,6 +110,7 @@ class _CaptureSecurity:
 def _snapshot(
     *,
     interrupt_type: str = "human_review_required",
+    created_at: datetime | None = None,
 ) -> StateSnapshot:
     return StateSnapshot(
         values={
@@ -109,7 +123,7 @@ def _snapshot(
         next=("human_review",),
         config={"configurable": {"thread_id": "thread-1", "checkpoint_id": "cp-1"}},
         metadata={},
-        created_at=datetime.now(tz=UTC).isoformat(),
+        created_at=(created_at or datetime.now(tz=UTC)).isoformat(),
         parent_config=None,
         tasks=(SimpleNamespace(interrupts=({"value": {"type": interrupt_type}},)),),
         interrupts=(),
@@ -246,3 +260,57 @@ async def test_nonreviewer_cannot_borrow_approval_from_the_client_field() -> Non
     sent = service._ws_security.sent
     assert sent, "a refusal frame must reach the wire"
     assert sent[-1]["code"] == "REVIEWER_ROLE_REQUIRED"
+
+
+async def test_corpus_admin_cannot_approve_solely_by_being_admin() -> None:
+    """A live tenant corpus admin (never a reviewer) resuming an approval is
+    refused: admin authority manages documents, not report approval (3.6)."""
+    service = _service(
+        membership=_MembershipService((LegalRole.CORPUS_ADMIN,), revision=3),
+    )
+    service._graph = _StaticGraph(_snapshot())
+
+    command = await _apply(service)
+
+    assert command is None
+    sent = service._ws_security.sent
+    assert sent, "a refusal frame must reach the wire"
+    assert sent[-1]["code"] == "REVIEWER_ROLE_REQUIRED"
+
+
+async def test_tenant_without_self_review_refuses_owner_self_approval() -> None:
+    """The thread owner approving their own run is refused when the tenant
+    requires an independent reviewer — even though the owner IS a reviewer."""
+    # The LIVE tenant policy re-derived at resume is the authority: self-review
+    # is disabled for this tenant RIGHT NOW, regardless of the session snapshot.
+    membership = _MembershipService((LegalRole.REVIEWER,), revision=3, self_review_allowed=False)
+    service = _service(membership=membership)
+    service._graph = _StaticGraph(_snapshot())
+
+    command = await _apply(service)
+
+    assert command is None
+    sent = service._ws_security.sent
+    assert sent, "a refusal frame must reach the wire"
+    assert sent[-1]["code"] == "SELF_REVIEW_DISABLED"
+
+
+async def test_resume_past_24h_pause_window_is_expired_not_resumable() -> None:
+    """A paused turn past the 24 h retention window is closed, not resumed —
+    even a fully authorized live reviewer cannot revive it (3.13)."""
+    from datetime import timedelta
+
+    from app.features.agent_saul.application.transcript.projection import PAUSE_WINDOW
+
+    membership = _MembershipService((LegalRole.REVIEWER,), revision=3)
+    service = _service(membership=membership)
+    stale_created = datetime.now(tz=UTC) - PAUSE_WINDOW - timedelta(minutes=5)
+    service._graph = _StaticGraph(_snapshot(created_at=stale_created))
+
+    command = await _apply(service)
+
+    assert command is None
+    sent = service._ws_security.sent
+    assert sent, "an expiry refusal frame must reach the wire"
+    assert sent[-1]["code"] == "SESSION_PAUSE_EXPIRED"
+    assert sent[-1]["retryable"] is False

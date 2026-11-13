@@ -1,7 +1,8 @@
-.PHONY: help check-imports lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-crawler celery-beat celery-command celery-completeness image-build image-build-prod image-push image-tag
+.PHONY: help backend check-imports lint format type-check precommit test migrate-create migrate-up migrate-down migrate-current migrate-history celery celery-ingestion celery-crawler celery-beat celery-command celery-completeness image-build image-build-prod image-push image-tag
 
 help:
 	@echo "Available commands:"
+	@echo "  make backend        - Start the FastAPI backend (override BACKEND_HOST/BACKEND_PORT)"
 	@echo "  make lint           - Run ruff linter with auto-fix"
 	@echo "  make format         - Format code with ruff"
 	@echo "  make type-check     - Run ty type checker"
@@ -14,6 +15,7 @@ help:
 	@echo "  make migrate-history- Show migration history"
 	@echo "  make celery         - Start the default-queue Celery worker"
 	@echo "  make celery-ingestion - Start the ingestion-queue Celery worker"
+	@echo "  make celery-crawler - Start the crawler-queue Celery worker"
 	@echo "  make celery-beat    - Start the Celery scheduler"
 	@echo "  make celery-command - Print the worker and scheduler commands without running them"
 	@echo "  make celery-completeness - Check aggregate catalog queue coverage"
@@ -21,6 +23,14 @@ help:
 	@echo "  make image-build    - Build dev image with git-sha labels (IMAGE_TAG=sha-xxx)"
 	@echo "  make image-build-prod - Build prod image with git-sha labels"
 	@echo "  make image-push     - Push prod image to GHCR (requires IMAGE_TAG)"
+
+# Backend
+BACKEND_HOST ?= 0.0.0.0
+BACKEND_PORT ?= 5000
+BACKEND_CMD := uv run uvicorn app.main:app --host $(BACKEND_HOST) --port $(BACKEND_PORT)
+
+backend:
+	$(BACKEND_CMD)
 
 # Code Quality
 check-imports:

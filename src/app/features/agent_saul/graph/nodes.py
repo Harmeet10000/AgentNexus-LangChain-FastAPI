@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal, assert_never, cast
+from typing import Any, Final, Literal, assert_never, cast
 
 from langchain.agents.structured_output import StructuredOutputValidationError
 from langchain.tools import ToolRuntime
@@ -118,6 +118,25 @@ _VALID_WORKER_NODES = GRAPH_NODE_NAMES - frozenset(
         "human_review",
     }
 )
+
+# Pre-dispatch operation policy (openspec harden-agent-saul-evidence-pipeline
+# 3.6): every CONTINUE dispatch is checked against the server-derived
+# ``allowed_operations`` copied into state at session start and re-derived on
+# every resume. The model may choose a target, but it can never dispatch work
+# the session's role set does not authorize. Every valid worker node has an
+# explicit row — an unmapped node is a config bug, not an implicit grant.
+_WORKER_NODE_REQUIRED_OPERATION: Final[Mapping[str, str]] = {
+    "ingestion": "document.read",
+    "normalization": "document.read",
+    "segmentation": "document.read",
+    "entity_extraction": "evidence.read",
+    "relationship_mapping": "evidence.read",
+    "risk_analysis": "evidence.read",
+    "compliance": "evidence.read",
+    "grounding_verification": "evidence.read",
+    "finalization": "evidence.read",
+    "deep_research": "evidence.search",
+}
 
 
 def _fail(
@@ -1081,6 +1100,27 @@ def make_orchestrator_node(
                 code="INVALID_TARGET_NODE",
                 message=f"Orchestrator routed to unknown node: {action.target_node}",
             )
+
+        # Pre-dispatch operation policy (3.6): the session's server-derived
+        # operation set gates every worker dispatch. An orchestrator action can
+        # never route around the role the run was started with.
+        if action.action_type == OrchestratorActionType.CONTINUE:
+            required_operation = _WORKER_NODE_REQUIRED_OPERATION.get(action.target_node)
+            allowed_operations = frozenset(state.get("allowed_operations", ()))
+            if required_operation is not None and required_operation not in allowed_operations:
+                log.warning(
+                    "orchestrator_dispatch_unauthorized",
+                    target=action.target_node,
+                    required_operation=required_operation,
+                )
+                return _fail(
+                    node="orchestrator",
+                    code="OPERATION_NOT_PERMITTED",
+                    message=(
+                        "The session's role does not permit dispatching this worker: "
+                        f"{action.target_node}"
+                    ),
+                )
 
         log.info(
             "orchestrator_action_decided",

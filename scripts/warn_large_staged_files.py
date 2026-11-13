@@ -27,9 +27,7 @@ def main() -> int:
     if oversized:
         sys.stdout.write("WARNING: staged files exceed 5,000 approximate tokens (bytes / 4):\n")
         for filename, byte_count in oversized:
-            sys.stdout.write(
-                f"  {filename}: {byte_count / 4:,.0f} tokens ({byte_count:,} bytes)\n"
-            )
+            sys.stdout.write(f"  {filename}: {byte_count / 4:,.0f} tokens ({byte_count:,} bytes)\n")
         sys.stdout.write(
             "Split by responsibility: move cohesive classes or functions into "
             "focused modules, keep shared contracts in a small common module, "

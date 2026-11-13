@@ -626,6 +626,24 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
         jurisdiction=extraction_jurisdiction,
         document_type=classified.document_kind,
     )
+    if isinstance(phase1_outcome, ExtractionFailed):
+        # Worker-log trace for extraction failures (harden 3.11): the live
+        # measurement run found 12/15 documents failed with
+        # ``extraction_incomplete: true``, no persisted reason, and no
+        # worker-log trace. Every extraction failure is logged here with its
+        # typed code so the record is diagnosable from the worker log alone.
+        logger.bind(
+            document_id=job.document_id,
+            tenant_id=job.tenant_id,
+            document_version=job.document_version,
+            extraction_failure_code=str(phase1_outcome.code),
+            extraction_failure_message=phase1_outcome.message,
+            extraction_budget_dimension=(
+                str(phase1_outcome.budget_dimension)
+                if phase1_outcome.budget_dimension is not None
+                else None
+            ),
+        ).warning("document_extraction_failed")
     # Shared classification/legal metadata persisted by every status write in
     # this block (the writer shallow-merges metadata keys per call).
     classification_metadata: dict[str, object] = _classification_metadata(
@@ -1234,6 +1252,37 @@ async def _write_contract_events(
 
 
 @trace_layer("service")
+async def _warn_if_previous_attempt_stuck(
+    repo: DocumentRepository,
+    *,
+    document_id: str,
+    tenant_id: str,
+) -> None:
+    """Stuck-age safety net (harden 3.11): age-based detection at the worker.
+
+    A document still parked in a non-terminal status past the configured age
+    means a prior attempt lost its terminal transition. The observation is
+    logged at the worker boundary — never treated as authority; the attempt
+    proceeds normally.
+    """
+    observation = await repo.ingestion_status_age(document_id=document_id, tenant_id=tenant_id)
+    if not isinstance(observation, Success):
+        return
+    observed = observation.unwrap()
+    if observed is None:
+        return
+    previous_status, age_seconds = observed
+    stuck_threshold_seconds = get_settings().DOCUMENTS_STUCK_STATUS_HOURS * 3600
+    if age_seconds < stuck_threshold_seconds:
+        return
+    logger.bind(
+        document_id=document_id,
+        tenant_id=tenant_id,
+        stuck_status=previous_status,
+        age_seconds=round(age_seconds, 1),
+    ).warning("documents_ingest_stuck_detected")
+
+
 async def run_document_ingestion_task(
     *,
     document_id: str,
@@ -1267,6 +1316,9 @@ async def run_document_ingestion_task(
             async with session_local(bind=lock_connection) as session:
                 repo = DocumentRepository(session)
                 job_idempotency = idempotency.for_session(session)
+                await _warn_if_previous_attempt_stuck(
+                    repo, document_id=document_id, tenant_id=tenant_id
+                )
                 attempt_checkpoint = await repo.update_document_status(
                     document_id=document_id,
                     status="processing",

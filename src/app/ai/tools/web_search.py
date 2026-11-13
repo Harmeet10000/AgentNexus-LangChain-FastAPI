@@ -17,7 +17,7 @@ from langchain_core.tools import BaseTool, InjectedToolArg, tool
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
-from app.connections.tavily import get_tavily_client, _TavilyClient
+from app.connections.tavily import _TavilyClient, get_tavily_client
 from app.resilience.idempotency import ToolResult
 from app.utils import ExternalServiceException
 

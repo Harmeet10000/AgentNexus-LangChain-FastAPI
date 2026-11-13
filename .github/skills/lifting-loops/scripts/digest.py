@@ -63,9 +63,26 @@ SKIP_PREFIXES = (
 CODEX_INJECTED_RE = re.compile(r"^<[a-z_]+>")
 # Built-in commands say nothing about the task, so they never open a session.
 BUILTIN_COMMANDS = {
-    "/model", "/clear", "/resume", "/config", "/login", "/logout", "/effort",
-    "/fast", "/status", "/cost", "/compact", "/permissions", "/mcp", "/plugin",
-    "/help", "/exit", "/context", "/usage", "/init", "/memory",
+    "/model",
+    "/clear",
+    "/resume",
+    "/config",
+    "/login",
+    "/logout",
+    "/effort",
+    "/fast",
+    "/status",
+    "/cost",
+    "/compact",
+    "/permissions",
+    "/mcp",
+    "/plugin",
+    "/help",
+    "/exit",
+    "/context",
+    "/usage",
+    "/init",
+    "/memory",
 }
 
 
@@ -128,7 +145,7 @@ def local_midnight(text):
 def tilde(path):
     path = str(path)
     home = str(HOME)
-    return "~" + path[len(home):] if path.startswith(home) else path
+    return "~" + path[len(home) :] if path.startswith(home) else path
 
 
 def clip(text, limit):
@@ -140,8 +157,12 @@ def clean_turn(text):
     """Turn a raw user message into a digest line, or None to drop it."""
     text = re.sub(r"<system-reminder>.*?</system-reminder>", "", text, flags=re.DOTALL)
     # Context the user attached by hand is a sign of carrying context, keep a marker.
-    text = re.sub(r"<user-provided-context>.*?</user-provided-context>", " [attached context]",
-                  text, flags=re.DOTALL)
+    text = re.sub(
+        r"<user-provided-context>.*?</user-provided-context>",
+        " [attached context]",
+        text,
+        flags=re.DOTALL,
+    )
     text = text.strip()
     if not text or text.startswith(SKIP_PREFIXES):
         return None
@@ -282,7 +303,8 @@ def parse_pi(path, source):
             content = msg.get("content")
             if not isinstance(content, str):
                 content = " ".join(
-                    i.get("text", "") for i in content or [] if i.get("type") == "text")
+                    i.get("text", "") for i in content or [] if i.get("type") == "text"
+                )
             s.add_turn(content, d.get("timestamp"))
     return s.finish()
 
@@ -300,8 +322,11 @@ def parse_codex(path):
             s.cwd = payload.get("cwd")
             if payload.get("originator") == "codex_exec":
                 s.kind = "headless"
-        elif (d.get("type") == "response_item" and payload.get("type") == "message"
-              and payload.get("role") == "user"):
+        elif (
+            d.get("type") == "response_item"
+            and payload.get("type") == "message"
+            and payload.get("role") == "user"
+        ):
             for item in payload.get("content") or []:
                 text = item.get("text", "") if item.get("type") == "input_text" else ""
                 if text.startswith("<turn_aborted>"):
@@ -321,7 +346,8 @@ def minimax_meta():
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         rows = con.execute(
             "select session_id, session_kind, json_extract(record_json, '$.workspaceDir')"
-            " from local_runtime_sessions").fetchall()
+            " from local_runtime_sessions"
+        ).fetchall()
         con.close()
     except sqlite3.Error:
         return {}
@@ -346,8 +372,9 @@ def parse_minimax(path, meta):
     files = []
     for art in load_json(session_dir / "history-catalog.json", {}).get("artifacts", []):
         name = art.get("fileName", "")
-        files.append(session_dir / name if art.get("kind") == "active"
-                     else session_dir / "snapshots" / name)
+        files.append(
+            session_dir / name if art.get("kind") == "active" else session_dir / "snapshots" / name
+        )
     seen = set()
     for file in files or [session_dir / "messages.jsonl"]:
         for d in iter_jsonl(file):
@@ -365,7 +392,8 @@ def parse_minimax(path, meta):
             content = msg.get("content")
             if not isinstance(content, str):
                 content = " ".join(
-                    i.get("text", "") for i in content or [] if i.get("type") == "text")
+                    i.get("text", "") for i in content or [] if i.get("type") == "text"
+                )
             s.add_turn(content, msg.get("timestamp"))
     return s.finish()
 
@@ -380,8 +408,10 @@ def session_files(source):
         return sorted((MINIMAX_ROOT / "sessions").glob("*/*/*/*/manifest.json"))
     if source == "codex":
         root = HOME / ".codex"
-        return sorted(list((root / "sessions").rglob("*.jsonl"))
-                      + list((root / "archived_sessions").glob("*.jsonl")))
+        return sorted(
+            list((root / "sessions").rglob("*.jsonl"))
+            + list((root / "archived_sessions").glob("*.jsonl"))
+        )
     return []
 
 
@@ -390,7 +420,8 @@ def collect_sessions(source, since, until):
         parser = functools.partial(parse_minimax, meta=minimax_meta())
     else:
         parser = {"claude": parse_claude, "codex": parse_codex}.get(
-            source, lambda p: parse_pi(p, source))
+            source, lambda p: parse_pi(p, source)
+        )
     best = {}
     for path in session_files(source):
         # A MiniMax session writes its history next to the manifest, not into it.
@@ -452,7 +483,8 @@ def collect_claudeai(cfg, since, until):
             if msg.get("sender") != "human":
                 continue
             text = msg.get("text") or " ".join(
-                c.get("text", "") for c in msg.get("content") or [] if c.get("type") == "text")
+                c.get("text", "") for c in msg.get("content") or [] if c.get("type") == "text"
+            )
             s.add_turn(text, msg.get("created_at"))
         if s.turns:
             sessions.append(s.finish())
@@ -502,8 +534,10 @@ def render_sessions(source, sessions, since, until):
     out = [
         f"# {source} sessions · {day(since)} to {day(until)} · {host()}",
         "",
-        (f"{len(sessions)} sessions ({kind_text}), {followups} human follow-ups, "
-         f"{retries} retries, {interrupts} interrupts."),
+        (
+            f"{len(sessions)} sessions ({kind_text}), {followups} human follow-ups, "
+            f"{retries} retries, {interrupts} interrupts."
+        ),
         "",
     ]
     if recurring:
@@ -511,8 +545,10 @@ def render_sessions(source, sessions, since, until):
         for items in sorted(recurring.values(), key=len, reverse=True):
             touched = [s for s in items if s.followups]
             projects = ", ".join(sorted({tilde(s.cwd or "?") for s in items}))
-            out.append(f"### \"{clip(items[0].opening, 80)}\" × {len(items)}, "
-                       f"{len(touched)} with human follow-ups, latest {day(items[-1].first)}")
+            out.append(
+                f'### "{clip(items[0].opening, 80)}" × {len(items)}, '
+                f"{len(touched)} with human follow-ups, latest {day(items[-1].first)}"
+            )
             out.append(f"projects: {projects}")
             for s in touched:
                 out += session_block(s)
@@ -555,11 +591,12 @@ def render_memory():
     codex = HOME / ".codex/memories/MEMORY.md"
     if codex.exists():
         size = len(codex.read_text(errors="replace"))
-        out += ["## Codex memory (maintained by Codex, read-only)",
-                f"- {tilde(codex)} · {size} chars · {day(mtime_of(codex))}", ""]
+        out += [
+            "## Codex memory (maintained by Codex, read-only)",
+            f"- {tilde(codex)} · {size} chars · {day(mtime_of(codex))}",
+            "",
+        ]
     return "\n".join(out) + "\n", count
-
-
 
 
 def render_vault(cfg, since, until, first_run):
@@ -573,8 +610,11 @@ def render_vault(cfg, since, until, first_run):
 
     by_dir = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames
-                       if not d.startswith(".") and d not in ("attachments", "_attachments")]
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if not d.startswith(".") and d not in ("attachments", "_attachments")
+        ]
         rel_dir = os.path.relpath(dirpath, root)
         rel_dir = "" if rel_dir == "." else rel_dir
         if under(rel_dir, exclude):
@@ -592,10 +632,14 @@ def render_vault(cfg, since, until, first_run):
             ai = " · AI" if ai_note.search(text[:800]) else ""
             top = rel_dir.split("/")[0] or "(root)"
             by_dir.setdefault(top, []).append(
-                f"- {os.path.join(rel_dir, name)} · {day(mtime)} · {len(text)} chars{ai}")
+                f"- {os.path.join(rel_dir, name)} · {day(mtime)} · {len(text)} chars{ai}"
+            )
     count = sum(len(v) for v in by_dir.values())
-    out = [f"# Vault notes · {day(since)} to {day(until)}", "",
-           f"root: {tilde(root)}. {count} notes; those marked AI were written by an agent."]
+    out = [
+        f"# Vault notes · {day(since)} to {day(until)}",
+        "",
+        f"root: {tilde(root)}. {count} notes; those marked AI were written by an agent.",
+    ]
     if full:
         out.append(f"First run, so these folders list their full history: {', '.join(full)}.")
     out.append("")
@@ -621,8 +665,9 @@ def cmd_scan(args):
     now = dt.datetime.now().astimezone()
     until = local_midnight(args.until) if args.until else now
     sources = args.sources.split(",") if args.sources else ALL_SOURCES
-    run_dir = Path(args.out) if args.out else (
-        PRIVATE / "runs" / f"{now.strftime('%Y-%m-%d')}-{host()}")
+    run_dir = (
+        Path(args.out) if args.out else (PRIVATE / "runs" / f"{now.strftime('%Y-%m-%d')}-{host()}")
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     run = {"host": host(), "until": until.isoformat(), "sources": {}}
     print(f"run: {tilde(run_dir)}")
@@ -704,8 +749,9 @@ def cmd_status(_args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     scan = sub.add_parser("scan")
     scan.add_argument("--since")

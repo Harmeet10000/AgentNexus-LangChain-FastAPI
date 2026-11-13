@@ -143,7 +143,11 @@ def _allowed_operations(account: AuthAccount, roles: tuple[LegalRole, ...]) -> t
         operations.update({"document.upload", "document.manage"})
     if Permission.CONTENT_DELETE.value in account.permissions:
         operations.add("document.delete")
-    if any(role in roles for role in (LegalRole.REVIEWER, LegalRole.CORPUS_ADMIN)):
+    # Review authority is reviewer-only (openspec harden-agent-saul-evidence-
+    # pipeline 3.6): a corpus admin manages documents and the tenant, but MUST
+    # NOT approve, reject, or override a report solely by being an admin. A
+    # member who genuinely holds the reviewer role approves through that role.
+    if LegalRole.REVIEWER in roles:
         operations.update({"report.approve", "report.reject", "report.override"})
     if LegalRole.CORPUS_ADMIN in roles:
         operations.add("tenant.manage")

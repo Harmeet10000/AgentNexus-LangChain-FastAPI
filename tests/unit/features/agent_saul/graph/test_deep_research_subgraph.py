@@ -636,6 +636,7 @@ def _node_state(*, run_id: str = "run-1") -> dict[str, Any]:
         "run_id": run_id,
         "doc_id": DOC,
         "allowed_doc_ids": [DOC],
+        "allowed_operations": ["document.read", "evidence.read", "evidence.search"],
         "plan": [
             PlanStep(
                 step_id="research-1",
@@ -665,6 +666,7 @@ class _RunState(TypedDict, total=False):
     run_id: str
     doc_id: str
     allowed_doc_ids: list[str]
+    allowed_operations: list[str]
     plan: list[PlanStep]
     current_step: int
     plan_approved: bool
@@ -755,6 +757,7 @@ async def test_plan_execution_reaches_deep_research_and_lands_envelope() -> None
             "run_id": "run-1",
             "doc_id": DOC,
             "allowed_doc_ids": [DOC],
+            "allowed_operations": ["document.read", "evidence.read", "evidence.search"],
             # The orchestrator advances current_step before delegating, so the
             # research step sits at index 1 exactly as the planner emits it.
             "plan": [

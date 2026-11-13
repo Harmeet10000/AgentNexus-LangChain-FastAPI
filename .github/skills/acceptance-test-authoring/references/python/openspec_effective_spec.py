@@ -63,7 +63,11 @@ def collect_superseded_rules(delta_paths):
 
 
 def _rule_blocks(lines):
-    starts = [(i, m.group(1).strip()) for i, m in ((i, RULE_RE.match(line)) for i, line in enumerate(lines)) if m]
+    starts = [
+        (i, m.group(1).strip())
+        for i, m in ((i, RULE_RE.match(line)) for i, line in enumerate(lines))
+        if m
+    ]
     blocks = []
     for pos, (idx, name) in enumerate(starts):
         end = starts[pos + 1][0] if pos + 1 < len(starts) else len(lines)
@@ -85,7 +89,9 @@ def prune_source_of_truth_spec(spec_path, superseded_by_rule):
         for idx in range(start, end):
             scenario = SCENARIO_RE.match(lines[idx])
             if scenario:
-                entry["scenarios"].append({"name": scenario.group(1).strip() or "(unnamed scenario)", "line": idx + 1})
+                entry["scenarios"].append(
+                    {"name": scenario.group(1).strip() or "(unnamed scenario)", "line": idx + 1}
+                )
             blanked.add(idx)
         excluded.append(entry)
 
@@ -126,7 +132,9 @@ def _rel(path):
 
 def effective_locations():
     delta_paths = sorted(
-        _rel(p) for p in (HERE / ".extracted" / "changes").glob("*/specs/**/*.feature") if "changes/archive/" not in _rel(p)
+        _rel(p)
+        for p in (HERE / ".extracted" / "changes").glob("*/specs/**/*.feature")
+        if "changes/archive/" not in _rel(p)
     )
     sot_paths = sorted(_rel(p) for p in (HERE / ".extracted" / "specs").glob("**/*.feature"))
 

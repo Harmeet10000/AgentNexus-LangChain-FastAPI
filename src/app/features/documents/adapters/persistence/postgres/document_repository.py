@@ -35,7 +35,13 @@ from app.features.documents.domain.constants import (
     PHRASE_OVERFETCH_MULTIPLE,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
-from app.features.documents.domain.document import UnifiedDocument
+from app.features.documents.domain.document import (
+    DOCUMENT_STATUS_VALUES,
+    EXTRACTION_FAILURE_UNRECORDED,
+    FAILURE_REASON_METADATA_KEYS,
+    TERMINAL_DOCUMENT_STATUSES,
+    UnifiedDocument,
+)
 from app.features.documents.domain.errors import (
     DocumentChunkConflictError,
     DocumentConflictError,
@@ -43,6 +49,7 @@ from app.features.documents.domain.errors import (
     DocumentEmbeddingWidthError,
     DocumentNotFoundError,
     DocumentStatusNotFoundError,
+    DocumentValidationError,
 )
 from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
@@ -116,6 +123,29 @@ def _resolve_tenant_id(tenant_id: str | None, user_id: str) -> str:
     migration jobs without hiding an implicit tenant choice in every query.
     """
     return tenant_id if tenant_id is not None else personal_tenant_id(user_id)
+
+
+def _invalid_status_error(status: str, *, operation: str) -> DocumentValidationError | None:
+    """Typed refusal for a status outside the lifecycle mapping (harden 3.11).
+
+    The ``documents.status`` column has no DB CHECK constraint yet; this
+    application-level constraint keeps an untyped/misspelled status from
+    creating a row the readiness gates cannot interpret.
+    """
+    if status in DOCUMENT_STATUS_VALUES:
+        return None
+    return DocumentValidationError(
+        message=f"Unknown document ingestion status: {status!r}",
+        details={"operation": operation, "status": status},
+        source="document_repository",
+    )
+
+
+def _metadata_has_failure_reason(metadata: dict[str, object] | None) -> bool:
+    """True when a write already carries a typed ingestion/extraction reason."""
+    if not isinstance(metadata, dict):
+        return False
+    return any(key in metadata for key in FAILURE_REASON_METADATA_KEYS)
 
 
 def _phrase_like_pattern(phrase: str) -> str:
@@ -352,6 +382,9 @@ class DocumentRepository:
         metadata_: dict[str, object],
     ) -> DocumentResult[UnifiedDocument]:
         tenant_id = _resolve_tenant_id(tenant_id, user_id)
+        status_error = _invalid_status_error(status, operation="create_document")
+        if status_error is not None:
+            return Failure(status_error)
         try:
             document = UnifiedDocument(
                 user_id=user_id,
@@ -407,6 +440,21 @@ class DocumentRepository:
         extraction_incomplete: bool | None = None,
         ingestion_identity: dict[str, object] | None = None,
     ) -> DocumentResult[None]:
+        status_error = _invalid_status_error(status, operation="update_document_status")
+        if status_error is not None:
+            return Failure(status_error)
+        # Extraction-reason guard (harden 3.11): a write that marks the record
+        # extraction-incomplete MUST carry a typed failure reason. The live
+        # measurement run found 12/15 documents failed with
+        # ``extraction_incomplete: true`` and NO reason persisted — an
+        # undiagnosable record. When the caller supplies none, persist the
+        # explicit unrecorded marker instead of silently leaving the row bare.
+        effective_metadata = metadata_
+        if extraction_incomplete is True and not _metadata_has_failure_reason(metadata_):
+            effective_metadata = {
+                **(metadata_ or {}),
+                "extraction_failure_reason": EXTRACTION_FAILURE_UNRECORDED,
+            }
         try:
             identity_tenant = (
                 str(ingestion_identity.get("tenant_id", ""))
@@ -444,7 +492,9 @@ class DocumentRepository:
             metadata_json = cast(
                 bindparam(
                     "metadata_",
-                    value=json.dumps(metadata_) if metadata_ is not None else None,
+                    value=(
+                        json.dumps(effective_metadata) if effective_metadata is not None else None
+                    ),
                     type_=String,
                 ),
                 JSONB,
@@ -638,6 +688,55 @@ class DocumentRepository:
                     source="document_repository",
                 )
             )
+
+    @trace_layer("repository")
+    async def ingestion_status_age(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+    ) -> DocumentResult[tuple[str, float] | None]:
+        """Age of the document's current NON-terminal status (harden 3.11).
+
+        Stuck-age safety net (design D6): status/event disagreement is healed
+        by age-based detection at the worker boundary. Returns
+        ``(status, age_seconds)`` while the document sits in a non-terminal
+        status, ``None`` when the row is absent, foreign to the tenant, or
+        already terminal — terminal statuses are never "stuck".
+        """
+        try:
+            row = (
+                (
+                    await self.session.execute(
+                        select(UnifiedDocument.status, UnifiedDocument.updated_at).where(
+                            UnifiedDocument.id == uuid_param("document_id", document_id),
+                            UnifiedDocument.tenant_id == tenant_id,
+                        )
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while reading document status age",
+                    details={"document_id": document_id, "tenant_id": tenant_id},
+                    source="document_repository",
+                )
+            )
+        if row is None:
+            return Success(None)
+        status = str(row["status"] or "")
+        if status in TERMINAL_DOCUMENT_STATUSES:
+            return Success(None)
+        updated_at = row["updated_at"]
+        if not isinstance(updated_at, datetime):
+            return Success(None)
+        age_seconds = max(0.0, (datetime.now(tz=UTC) - updated_at).total_seconds())
+        return Success((status, age_seconds))
 
     @trace_layer("repository")
     async def fetch_structural_trees(

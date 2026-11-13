@@ -25,7 +25,9 @@ def main(argv):
     except ExtractionError as err:
         sys.stderr.write("[extract-gherkin] %s\n" % err)
         return 1
-    sys.stderr.write("[extract-gherkin] %d spec.md file(s) extracted to %s\n" % (len(written), out_dir))
+    sys.stderr.write(
+        "[extract-gherkin] %d spec.md file(s) extracted to %s\n" % (len(written), out_dir)
+    )
 
     if lint:
         return subprocess.call(["npx", "gherkin-lint", ".extracted"])

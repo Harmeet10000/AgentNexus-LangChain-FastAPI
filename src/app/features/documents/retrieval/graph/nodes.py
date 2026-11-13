@@ -1256,9 +1256,7 @@ def make_generator_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str,
         refusals = _charge_stage(context, STAGE_GENERATE, _state_document_class(state))
         if refusals:
             refusal_state = _violation_state(refusals)
-            refusal_warnings = cast(
-                "list[StageWarning]", refusal_state.get("stage_warnings", [])
-            )
+            refusal_warnings = cast("list[StageWarning]", refusal_state.get("stage_warnings", []))
             return {
                 **(await _fallback_outcome(state, redis, extra_warnings=refusal_warnings)),
                 **_stage_usage(STAGE_GENERATE, 0),
