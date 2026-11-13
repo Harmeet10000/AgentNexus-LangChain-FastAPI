@@ -1,24 +1,17 @@
-"""Regression coverage for incomplete normalization model output."""
+"""Regression coverage for document-structure model shapes.
 
-import asyncio
-from typing import TYPE_CHECKING, Any, cast
+Task 6.1 (harden-agent-saul-evidence-pipeline) removed the LLM normalization
+and segmentation paths: structure comes exclusively from the deterministic
+persisted-chunk adapter (covered by ``test_canonical_chunks.py``). What remains
+model-produced is the structured-output *schema*, so the shape contracts below
+keep guarding what a provider payload must satisfy when the schema types are
+still accepted across checkpoint hydration.
+"""
 
 import pytest
-from langchain_core.exceptions import OutputParserException
 from pydantic import ValidationError
 
-from app.features.agent_saul.domain.state import (
-    DocumentSection,
-    NormalizedDocument,
-    WorkflowStatus,
-)
-from app.features.agent_saul.graph.nodes import make_normalization_node, make_segmentation_node
-from app.features.agent_saul.graph.prompts import _NORMALIZATION_SYSTEM_PROMPT
-
-if TYPE_CHECKING:
-    from langchain_core.runnables import Runnable
-
-    from app.features.agent_saul.domain.state import LegalAgentState
+from app.features.agent_saul.domain.state import DocumentSection, NormalizedDocument
 
 
 def test_document_section_infers_omitted_level_only_from_numeric_hierarchy() -> None:
@@ -47,7 +40,7 @@ def test_normalized_document_discards_empty_artifact_but_requires_real_sections(
         {
             "document_id": "doc-1",
             "sections": [
-                {"section_id": "3", "title": "Rent", "content": "Monthly rent.", "level": 1},
+                {"section_id": "3", "title": "Rent", "content": "Pay monthly.", "level": 1},
                 {},
             ],
         }
@@ -61,62 +54,3 @@ def test_normalized_document_discards_empty_artifact_but_requires_real_sections(
         NormalizedDocument.model_validate(
             {"document_id": "doc-1", "sections": [{"section_id": "3"}]}
         )
-
-
-def test_normalization_parse_failure_returns_graph_error_state() -> None:
-    class InvalidOutputRunnable:
-        async def ainvoke(self, input: Any, config: Any = None) -> NormalizedDocument:
-            message = "model omitted required section fields"
-            raise OutputParserException(message)
-
-    node = make_normalization_node(
-        cast("Runnable[list[Any], NormalizedDocument]", InvalidOutputRunnable())
-    )
-    state = cast(
-        "LegalAgentState",
-        {"doc_id": "doc-1", "document_text": "Section 3.1: Pay monthly."},
-    )
-
-    result = asyncio.run(node(state))
-
-    assert result["status"] == WorkflowStatus.FAILED
-    errors = result["errors"]
-    assert errors[0].node == "normalization"
-    assert errors[0].code == "INVALID_NORMALIZED_DOCUMENT"
-    assert errors[0].retryable is True
-
-
-def test_normalization_prompt_requires_level_for_every_section() -> None:
-    assert "Every section must include section_id, title, content, and level" in (
-        _NORMALIZATION_SYSTEM_PROMPT
-    )
-    assert "1-based hierarchy depth" in _NORMALIZATION_SYSTEM_PROMPT
-
-
-def test_segmentation_parse_failure_returns_graph_error_state() -> None:
-    class InvalidOutputRunnable:
-        async def ainvoke(self, input: Any, config: Any = None) -> Any:
-            message = "model omitted required segment fields"
-            raise OutputParserException(message)
-
-    node = make_segmentation_node(cast("Runnable[list[Any], Any]", InvalidOutputRunnable()))
-    state = cast(
-        "LegalAgentState",
-        {
-            "doc_id": "doc-1",
-            "normalized_document": NormalizedDocument(
-                document_id="doc-1",
-                sections=[
-                    DocumentSection(section_id="1", title="Rent", content="Pay monthly.", level=1)
-                ],
-            ),
-            "messages": [],
-        },
-    )
-
-    result = asyncio.run(node(state))
-
-    assert result["status"] == WorkflowStatus.FAILED
-    assert result["errors"][0].node == "segmentation"
-    assert result["errors"][0].code == "INVALID_CLAUSE_SEGMENTATION"
-    assert result["errors"][0].retryable is True

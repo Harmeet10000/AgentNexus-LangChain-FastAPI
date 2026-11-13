@@ -15,6 +15,8 @@ from app.features.agent_saul.adapters.document_source import (
 from app.features.agent_saul.domain.state import (
     ClauseSegment,
     ClauseType,
+    PlanActionType,
+    PlanStep,
     WorkflowStatus,
     hydrate_state,
 )
@@ -70,6 +72,21 @@ def _state(*doc_ids: str) -> dict[str, Any]:
         "tenant_id": "tenant-1",
         "retry_count": 0,
         "segments": [],
+        # A plan that consumes clause-level entities keeps the extraction
+        # fan-out enabled for the pipeline-shape tests below (task 6.3 gates
+        # the fan-out on the approved plan).
+        "plan": [
+            PlanStep(
+                step_id="S-1",
+                action=PlanActionType.EXTRACT_CLAUSES,
+                description="extract clause entities",
+            ),
+            PlanStep(
+                step_id="S-2",
+                action=PlanActionType.RISK_ANALYSIS,
+                description="analyze risks",
+            ),
+        ],
     }
 
 
@@ -151,9 +168,9 @@ async def test_canonical_path_bypasses_both_structural_llm_nodes() -> None:
             message = "canonical chunks must not call a structural LLM"
             raise AssertionError(message)
 
-    normalized = await make_normalization_node(_UnexpectedLLM())(state)  # type: ignore[arg-type]
+    normalized = await make_normalization_node()(state)  # type: ignore[arg-type]
     state = {**state, **normalized}
-    segmented = await make_segmentation_node(_UnexpectedLLM())(state)  # type: ignore[arg-type]
+    segmented = await make_segmentation_node()(state)  # type: ignore[arg-type]
     assert segmented["status"] is WorkflowStatus.EXTRACTING_ENTITIES
 
 
@@ -165,13 +182,20 @@ async def test_missing_canonical_structure_is_typed_incomplete_for_multi_documen
     assert result["errors"][0].code == "INGESTION_INCOMPLETE"
 
 
-async def test_legacy_single_document_checkpoint_keeps_explicit_fallback() -> None:
+async def test_legacy_single_document_source_is_typed_incomplete_not_resegmented() -> None:
+    """Task 6.1: a legacy text-only source has no structure to adapt.
+
+    The ingestion node refuses with ``ingestion_incomplete`` instead of
+    concatenating raw text and re-segmenting it via a model — for a
+    single-document scope exactly as it already did for multi-document scope.
+    """
     result = await make_ingestion_node()(
         _state("doc-a"),
         {"configurable": {DOCUMENT_SOURCE_CONFIG_KEY: _LegacySource()}},  # type: ignore[arg-type]
     )
-    assert result["legacy_structure_fallback"] is True
-    assert result["status"] is WorkflowStatus.NORMALIZING
+    assert result["errors"][0].code == "INGESTION_INCOMPLETE"
+    assert result["status"] is WorkflowStatus.FAILED
+    assert result["ingestion_state"][0].error_code == "INGESTION_INCOMPLETE"
 
 
 def test_v3_checkpoint_migrates_with_canonical_state_defaults() -> None:

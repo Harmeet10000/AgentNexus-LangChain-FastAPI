@@ -27,11 +27,13 @@ from typing import TYPE_CHECKING, Annotated
 from langchain.tools import ToolRuntime
 from langchain_core.tools import InjectedToolArg, tool
 
+from app.observability.degradation import GRAPHITI_UNAVAILABLE, record_degradation
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.graphiti.schemas import GraphitiAvailability
 
 from .authorization import trusted_tool_context
+from .deadlines import GRAPHTI_DEADLINE_MISSED, with_graphiti_deadline
 
 if TYPE_CHECKING:
     from langchain_core.tools.base import BaseTool
@@ -104,20 +106,29 @@ def make_get_obligation_chain_tool(
             log.debug("obligation_chain_cache_hit")
             return cached_result.model_dump()
 
-        graph_results = await graphiti_service.get_obligation_chain(
-            entity_name=entity_name,
-            user_id=authz.tenant_id,
-            doc_id=doc_id,
-            depth=depth,
-            allowed_doc_ids=authz.allowed_doc_ids,
-            tenant_id=authz.tenant_id,
-            document_versions=tuple(
-                (document_id, version) for document_id, version, _ in authz.document_versions
+        graph_results, _deadline_missed = await with_graphiti_deadline(
+            "get_obligation_chain",
+            lambda: graphiti_service.get_obligation_chain(
+                entity_name=entity_name,
+                user_id=authz.tenant_id,
+                doc_id=doc_id,
+                depth=depth,
+                allowed_doc_ids=authz.allowed_doc_ids,
+                tenant_id=authz.tenant_id,
+                document_versions=tuple(
+                    (document_id, version) for document_id, version, _ in authz.document_versions
+                ),
+                document_contracts=authz.document_contracts,
             ),
-            document_contracts=authz.document_contracts,
         )
+        if graph_results is GRAPHTI_DEADLINE_MISSED:
+            return ToolResult.unavailable_result(
+                reason="Knowledge graph deadline expired before an obligation chain was produced.",
+                tool="get_obligation_chain",
+            ).model_dump()
         availability = getattr(graph_results, "availability", GraphitiAvailability.AVAILABLE)
         if availability == GraphitiAvailability.UNAVAILABLE:
+            record_degradation(GRAPHITI_UNAVAILABLE, surface="get_obligation_chain")
             return ToolResult.unavailable_result(
                 reason="Knowledge graph is unavailable; no obligation chain was produced.",
                 tool="get_obligation_chain",

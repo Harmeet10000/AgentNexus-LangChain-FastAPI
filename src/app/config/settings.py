@@ -364,6 +364,13 @@ class Settings(BaseSettings):
     # cognee's vector migrations (Decision 6 / NG6). The partition name built by
     # AgentMemoryService.memory_partition is the tenant boundary instead.
     COGNEE_ACCESS_CONTROL_ENABLED: bool = Field(default=False)
+    # Agent Saul long-term memory persistence (task 6.10,
+    # harden-agent-saul-evidence-pipeline). The write seam is already gated on
+    # an authorized human approval at the node; this flag is the deployment
+    # gate on top of it — while False, even approved reports perform zero
+    # memory writes. Fail-closed default: rollout enables it only after the
+    # approved-output gates (9.5) pass.
+    AGENT_SAUL_MEMORY_PERSIST_ENABLED: bool = Field(default=False)
 
     # --- LangSmith ---
     # Renamed to match the variable in your ENV file: LANGSMITH_TRACING=true
@@ -488,6 +495,26 @@ class Settings(BaseSettings):
     # construction (they resolve from hydrated chunk rows, never from the
     # hydrated section text).
     DOCUMENTS_SECTION_HYDRATION_ENABLED: bool = Field(default=False)
+
+    # --- Explicit retrieval dependency timeouts (harden 5.2) ---
+    # Every retrieval-surface dependency (Postgres fusion, Redis cache,
+    # Graphiti narrowing) gets an explicit deadline so an outage surfaces as a
+    # typed timeout/transient status — never an indistinguishable empty
+    # result. The reranker's deadline is the existing RERANKER_TIMEOUT_SECONDS
+    # (the HostedReranker's httpx timeout); no second knob is added.
+    DOCUMENTS_RETRIEVAL_POSTGRES_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0)
+    DOCUMENTS_RETRIEVAL_REDIS_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0)
+    DOCUMENTS_RETRIEVAL_GRAPHITI_TIMEOUT_SECONDS: float = Field(default=15.0, gt=0)
+
+    # --- Sustained-rise degradation alerts (harden 5.9 / legal-corpus O1) ---
+    # A degradation counter that rises above `threshold` events inside
+    # `window_seconds` fires the structured `document_degradation_alert` log
+    # event (tenant-safe correlation only — no legal text). The G6 budget
+    # alert (DOCUMENTS_STAGE_BUDGET_ALERT_*) is the retrieval-loop instance of
+    # the same convention.
+    DOCUMENTS_DEGRADATION_ALERTS_ENABLED: bool = Field(default=True)
+    DOCUMENTS_DEGRADATION_ALERT_THRESHOLD: int = Field(default=5, ge=1)
+    DOCUMENTS_DEGRADATION_ALERT_WINDOW_SECONDS: int = Field(default=300, ge=1)
 
     # --- Redis Cache for Crawler ---
     REDIS_CRAWL_CACHE_TTL: int = Field(default=3600)  # 1 hour

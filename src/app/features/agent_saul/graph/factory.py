@@ -13,11 +13,11 @@ from app.ai.tools.registry import (
     register_default_tools,
     register_portfolio_traversal_tools,
 )
+from app.config import get_settings
 from app.features.agent_saul.domain.state import (
     ComplianceOutput,
     FinalReport,
     GroundingVerificationOutput,
-    NormalizedDocument,
     OrchestratorAction,
     RiskAnalysisOutput,
 )
@@ -29,11 +29,11 @@ from app.features.documents.application.tools.portfolio import (
     make_portfolio_traversal_tools,
     require_traversal_gate,
 )
+from app.features.documents.application.tools.registry import assert_role_bindings
 from app.retrieval.graphiti.client import BoundGraphitiService
 
 from .deep_research import make_deep_research_tool
 from .nodes import (
-    ClauseSegmentationOutput,
     EntityExtractionOutput,
     PlannerOutput,
     QnAOutput,
@@ -82,11 +82,10 @@ class AgentRegistry(BaseModel):
     risk_agent: Any  # CompiledStateGraph
     compliance_agent: Any  # CompiledStateGraph
 
-    # Structured output LLM chains
+    # Structured output LLM chains. Normalization and segmentation have no
+    # chain: they are deterministic projections of persisted chunks (task 6.1).
     qna_llm: Runnable[list[Any], QnAOutput]
     planner_llm: Runnable[list[Any], PlannerOutput]
-    normalization_llm: Runnable[list[Any], NormalizedDocument]
-    segmentation_llm: Runnable[list[Any], ClauseSegmentationOutput]
     entity_llm: Runnable[list[Any], EntityExtractionOutput]
     relationship_llm: Runnable[list[Any], RelationshipMappingOutput]
     grounding_llm: Runnable[list[Any], GroundingVerificationOutput]
@@ -210,11 +209,16 @@ def build_agent_registry(  # noqa: PLR0914 — one readable composition of agent
             # Both specialists use the same scoped evidence seam; both receive
             # readiness (D3 parity) so missing or incomplete uploaded
             # authorities cannot be interpreted as a complete analysis.
+            # Compliance keeps statute retrieval (agent-tool-registry: the
+            # documented binding is evidence search/read + statute retrieval
+            # + handoff) — the pre-seam reset dropped it, which the 5.8
+            # binding assertion surfaced as registry drift.
             compliance_tools = [
                 _transfer("transfer_to_orchestrator"),
                 _transfer("transfer_to_risk"),
                 tools.search_evidence,
                 tools.read_evidence_by_id,
+                tools.retrieve_statute_section,
             ]
             risk_tools = [
                 _transfer("transfer_to_orchestrator"),
@@ -237,6 +241,19 @@ def build_agent_registry(  # noqa: PLR0914 — one readable composition of agent
         cross_document_obligations, find_conflicting_clauses, party_obligation_map = traversal_tools
         risk_tools.append(cross_document_obligations)
         compliance_tools.extend([find_conflicting_clauses, party_obligation_map])
+
+    # Harden 5.8: every projection is asserted against the authoritative
+    # registry at construction — an unknown tool, a Graphiti write tool, an
+    # unbound-pending experiment tool, or an orchestrator evidence read fails
+    # the build loudly instead of drifting silently.
+    assert_role_bindings(
+        {
+            "risk": risk_tools,
+            "compliance": compliance_tools,
+            "orchestrator": (),
+        },
+        evidence_seam_provisioned=(tools is not None and tools.search_evidence is not None),
+    )
 
     risk_agent = create_agent(
         model=pro_llm,
@@ -270,14 +287,6 @@ def build_agent_registry(  # noqa: PLR0914 — one readable composition of agent
         "Runnable[list[Any], PlannerOutput]",
         flash_llm.with_structured_output(PlannerOutput),
     )
-    normalization_llm = cast(
-        "Runnable[list[Any], NormalizedDocument]",
-        flash_llm.with_structured_output(NormalizedDocument),
-    )
-    segmentation_llm = cast(
-        "Runnable[list[Any], ClauseSegmentationOutput]",
-        flash_llm.with_structured_output(ClauseSegmentationOutput),
-    )
     entity_llm = cast(
         "Runnable[list[Any], EntityExtractionOutput]",
         flash_llm.with_structured_output(EntityExtractionOutput),
@@ -297,8 +306,6 @@ def build_agent_registry(  # noqa: PLR0914 — one readable composition of agent
         compliance_agent=compliance_agent,
         qna_llm=qna_llm,
         planner_llm=planner_llm,
-        normalization_llm=normalization_llm,
-        segmentation_llm=segmentation_llm,
         entity_llm=entity_llm,
         relationship_llm=relationship_llm,
         grounding_llm=grounding_llm,
@@ -332,8 +339,8 @@ def _build_graph_nodes(
         planner_generate=make_plan_generation_node(registry.planner_llm),
         planner=make_plan_approval_node(),
         ingestion=make_ingestion_node(),
-        normalization=make_normalization_node(registry.normalization_llm),
-        segmentation=make_segmentation_node(registry.segmentation_llm),
+        normalization=make_normalization_node(),
+        segmentation=make_segmentation_node(),
         entity_extraction=make_entity_extraction_node(registry.entity_llm),
         relationship_mapping=make_relationship_mapping_node(registry.relationship_llm),
         risk_analysis=make_risk_analysis_node(registry.risk_agent),
@@ -347,7 +354,11 @@ def _build_graph_nodes(
         human_review=review_node,
         human_review_sink=review_sink,
         finalization=make_finalization_node(registry.finalization_llm),
-        persist_memory=make_persist_memory_node(memory_service),
+        # Task 6.10: memory persistence rides the deployment feature flag on
+        # top of the node's human-approval gate.
+        persist_memory=make_persist_memory_node(
+            memory_service, enabled=get_settings().AGENT_SAUL_MEMORY_PERSIST_ENABLED
+        ),
         deep_research=make_deep_research_node(
             deep_research_tool=registry.deep_research_tool,
             evidence_service=tool_registry.evidence_service,

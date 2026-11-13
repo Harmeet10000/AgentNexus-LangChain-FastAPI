@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import time
@@ -20,8 +21,11 @@ from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.generation import TextGenerationRequest
 from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.config import get_settings
+from app.features.documents.retrieval import row_hydration
 from app.features.documents.retrieval.reranking.reranker import get_configured_reranker
+from app.features.documents.retrieval.service import _is_graphiti_branch_failure
 from app.kernel.result import log_expected_failure
+from app.observability.degradation import GRADER_FALLBACK, GRAPHITI_UNAVAILABLE, record_degradation
 from app.observability.logging import logger
 from app.retrieval.edge_expansion import EdgeSeedChunk, expand_along_edges
 from app.retrieval.graphiti.client import fetch_relationship_edges
@@ -171,6 +175,24 @@ def _stage_usage(stage: str, calls: int) -> dict[str, object]:
     return {"stage_usage": [StageUsage(stage=stage, calls=calls)]}
 
 
+async def _with_redis_deadline(operation: str, call: Callable[[], Awaitable[Any]]) -> Any | None:
+    """Run one Redis cache call under the explicit Redis deadline (harden 5.2).
+
+    The ask cache is an optimization: a deadline miss or transport failure
+    degrades to a cache miss — never to an empty retrieval or a failed ask.
+    The deadline is DOCUMENTS_RETRIEVAL_REDIS_TIMEOUT_SECONDS.
+    """
+    settings = get_settings()
+    try:
+        async with asyncio.timeout(settings.DOCUMENTS_RETRIEVAL_REDIS_TIMEOUT_SECONDS):
+            return await call()
+    except Exception as exc:  # noqa: BLE001 — cache degradation by contract
+        logger.bind(operation=operation, error=type(exc).__name__).warning(
+            "retrieval_cache_degraded_to_miss"
+        )
+        return None
+
+
 _BUDGET_WARNING_CODE = "STAGE_BUDGET_EXHAUSTED"
 
 
@@ -298,7 +320,9 @@ async def _plan_and_cache(
     answer_cache_key = _answer_cache_key(state)
     redis = context.redis
     if redis is not None:
-        cached = await redis.get(answer_cache_key)
+        cached = await _with_redis_deadline(
+            "ask_plan_cache_read", lambda: redis.get(answer_cache_key)
+        )
         if cached:
             try:
                 envelope = CachedAskEnvelope.model_validate_json(str(cached))
@@ -588,12 +612,16 @@ def make_hybrid_retrieval_node() -> Callable[[RetrievalState, Any], Awaitable[di
     return hybrid_retrieval_node
 
 
-async def _retrieve_fused_state(
+async def _retrieve_fused_state(  # noqa: PLR0914 — scope, fusion, and outage attribution stay together
     state: RetrievalState,
     context: RetrievalGraphContext,
 ) -> dict[str, object]:
     plan = state["query_plan"]
     redis = context.redis
+    # The invocation context is provisioned per ask (the engine opens the
+    # session); a repository-less context is a provisioning bug, not a
+    # retrievable state.
+    repo = cast("DocumentRepository", context.repo)
     graphiti = context.graphiti
     # `QUERY`, not `DOCUMENT`. This is the side of the asymmetry that was never declared:
     # the prior helper passed no task type at all, so a query vector was drawn from the
@@ -669,7 +697,7 @@ async def _retrieve_fused_state(
     )
     rows_result = await retry_immediate(
         lambda: retrieve_fused(
-            repo=context.repo,
+            repo=repo,
             user_id=state["user_id"],
             tenant_id=state.get("tenant_id"),
             query_text=plan.rewritten_query,
@@ -687,15 +715,42 @@ async def _retrieve_fused_state(
         ),
         label="postgres_fused_search",
     )
+    graphiti_degraded = False
     if isinstance(rows_result, Failure):
         error = rows_result.failure()
-        log_expected_failure(error, operation="postgres_fused_search")
-        raise InfrastructureException(
-            detail=error.message,
-            error_code=error.code,
-            retryable=error.retryable,
-            data=error.details,
-        )
+        if _is_graphiti_branch_failure(error):
+            # Harden 5.2 / legal-corpus-retrieval: a Graphiti outage is a
+            # coverage degradation, not an ask failure. The canonical-only
+            # fusion reruns (same branch registry, same weights minus the
+            # graph leg) so canonical chunks stand and the coverage signal
+            # degrades honestly — Graphiti is never legal truth.
+            record_degradation(GRAPHITI_UNAVAILABLE, surface="ask_hybrid_node")
+            graphiti_degraded = True
+            rows_result = await retrieve_fused(
+                repo=repo,
+                user_id=state["user_id"],
+                tenant_id=state.get("tenant_id"),
+                query_text=plan.rewritten_query,
+                query_embedding=embedding,
+                candidate_limit=HYBRID_CANDIDATE_LIMIT,
+                limit=20,
+                filter_params=filter_params,
+                weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM],
+                bm25_threshold=plan.bm25_threshold,
+                exact_phrase=plan.exact_phrase,
+                graphiti=None,
+                document_versions=state.get("document_versions", []),
+                document_contracts=state.get("document_contracts", []),
+            )
+        if isinstance(rows_result, Failure):
+            error = rows_result.failure()
+            log_expected_failure(error, operation="postgres_fused_search")
+            raise InfrastructureException(
+                detail=error.message,
+                error_code=error.code,
+                retryable=error.retryable,
+                data=error.details,
+            )
     fused, lookup = rows_result.unwrap()
     rows = lookup_to_rows(fused, lookup)
     return {
@@ -704,6 +759,23 @@ async def _retrieve_fused_state(
         # edge-span resolution (task 1.4 / task 1.1).
         "retrieved_rows": rows,
         **_stage_usage("retrieve_fusion", 1),
+        **(
+            {
+                "stage_warnings": [
+                    StageWarning(
+                        stage="retrieve_fusion",
+                        code="GRAPHITI_UNAVAILABLE",
+                        message=(
+                            "The relationship graph was unavailable; coverage is degraded and "
+                            "canonical chunks were returned."
+                        ),
+                        severity="warning",
+                    )
+                ]
+            }
+            if graphiti_degraded
+            else {}
+        ),
     }
 
 
@@ -1156,6 +1228,7 @@ async def _grade_context(
         log_expected_failure(error, operation="documents_context_grader")
         # Same degrade the legacy parse-failure path chose: an unavailable grade
         # proceeds to generation rather than failing the whole ask() loop.
+        record_degradation(GRADER_FALLBACK, surface="ask_context_grader", reason="seam_failure")
         return ContextGrade(sufficient=True, missing_aspects=[])
     return ContextGrade.model_validate(result.unwrap().output)
 
@@ -1170,6 +1243,7 @@ async def _grade_context_via_llm(*, grader_llm: Any, payload: str) -> ContextGra
         )
         return ContextGrade.model_validate(raw)
     except (ValueError, TypeError):
+        record_degradation(GRADER_FALLBACK, surface="ask_context_grader", reason="parse_failure")
         return ContextGrade(sufficient=True, missing_aspects=[])
 
 
@@ -1405,7 +1479,12 @@ async def _cache_ask_envelope(
         DEFAULT_SEARCH_CACHE_TTL_SECONDS,
     )
 
-    await redis.setex(cache_key, DEFAULT_SEARCH_CACHE_TTL_SECONDS, envelope.model_dump_json())
+    await _with_redis_deadline(
+        "ask_envelope_cache_write",
+        lambda: redis.setex(
+            cache_key, DEFAULT_SEARCH_CACHE_TTL_SECONDS, envelope.model_dump_json()
+        ),
+    )
 
 
 def _finalise_ask_state(state: RetrievalState, answer: GeneratedAnswer) -> dict[str, object]:
@@ -1507,35 +1586,10 @@ def _normalize_plan(plan: QueryPlan) -> QueryPlan:
 
 
 def _row_to_chunk(row: dict[str, Any]) -> RetrievedChunk:
-    chunk_index = row.get("chunk_index")
-    return RetrievedChunk(
-        chunk_id=str(row["chunk_id"]),
-        chunk_text=str(row["chunk_text"]),
-        preamble=str(row["preamble"] or ""),
-        clause_type=str(row["clause_type"]),
-        parent_doc_id=str(row["parent_doc_id"]),
-        chunk_index=int(chunk_index) if chunk_index is not None else 0,
-        # The contract index is never populated on the field the LLM could
-        # see — it rides in metadata, exactly as the inline `_row_to_chunk`
-        # leaves it — so the chunk payloads the grader and generator consume
-        # are byte-identical across both paths.
-        # The same server-metadata enrichment the inline `_row_to_chunk`
-        # performs: quality warnings, graph-indexing state, document version,
-        # pipeline version, and contract index ride in metadata so edge-seed
-        # resolution and citation provenance read them from one place.
-        metadata_={
-            **dict(row["metadata_"] or {}),
-            "quality_warnings": row.get("quality_warnings", []),
-            "graphiti_verified": bool(row.get("graphiti_verified")),
-            "graph_indexed": bool(row.get("graphiti_verified")),
-            "document_version": row.get("document_version", 1),
-            "pipeline_version": row.get("pipeline_version"),
-            "contract_index": row.get("contract_index"),
-            "graph_indexed_at": row.get("graph_indexed_at"),
-        },
-        custom_metadata=dict(row["custom_metadata"] or {}),
-        score=float(row["rrf_score"]),
-    )
+    # Harden 5.3: hydration is centralized in `retrieval.row_hydration` — this
+    # module-level alias keeps the parity suite's import surface stable while
+    # nodes and the evidence service share one implementation.
+    return row_hydration.row_to_chunk(row)
 
 
 def _answer_cache_key(state: Mapping[str, Any]) -> str:
@@ -1660,7 +1714,9 @@ def _citation_response(citation: Citation, row: dict[str, object] | None) -> Gro
             "pipeline_version": (
                 str(row["pipeline_version"]) if row.get("pipeline_version") is not None else None
             ),
-            "page_no": int(cast("int | str", row.get("page_no", 0))),
+            # Harden 5.3: page numbers come from the centralized hydration
+            # path (None/absent → 0), never a bare int() over the raw row.
+            "page_no": row_hydration.page_no(row),
         }
     )
 

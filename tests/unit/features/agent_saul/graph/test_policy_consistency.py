@@ -2,7 +2,7 @@
 
 Covers openspec ``tool-capability-catalog`` tasks 2.1 (context capability set
 == policy entry per role) and 3.2 (model-visible toolset ⊆ policy-authorized,
-≤7 projection cap, failing with the policy row named).
+per-role projection cap (≤7; compliance ≤8 since harden 5.8), failing with the policy row named).
 """
 
 from __future__ import annotations
@@ -180,11 +180,14 @@ def test_traversal_binding_keeps_projections_within_cap_and_authorized(
         "get_ingestion_state",
         "cross_document_obligations",
     ]
+    # Harden 5.8: compliance keeps its documented statute-retrieval seat
+    # alongside the scoped evidence seam (the pre-assertion reset dropped it).
     assert toolsets["compliance"] == [
         "transfer_to_orchestrator",
         "transfer_to_risk",
         "search_evidence",
         "read_evidence_by_id",
+        "retrieve_statute_section",
         "get_ingestion_state",
         "find_conflicting_clauses",
         "party_obligation_map",
@@ -193,7 +196,12 @@ def test_traversal_binding_keeps_projections_within_cap_and_authorized(
     registry = get_tool_registry()
     for role, visible in toolsets.items():
         grants = grants_for(role)
-        assert len(visible) <= 7, f"policy row {role!r} exceeds the ≤7 cap: {visible}"
+        # ≤7 projection cap; compliance is ≤8 since harden 5.8: the
+        # agent-tool-registry spec mandates the statute-retrieval seat
+        # alongside the scoped evidence seam, and the traversal seats were
+        # bound under the no-swap decision before that seat existed.
+        cap = 8 if role == "compliance" else 7
+        assert len(visible) <= cap, f"policy row {role!r} exceeds the ≤{cap} cap: {visible}"
         for name in visible:
             try:
                 capability = registry.authority(name).capability

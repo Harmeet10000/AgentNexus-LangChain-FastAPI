@@ -34,13 +34,15 @@ from app.features.documents.domain.constants import (
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
 from app.kernel.result import add_database_error_note
+from app.observability.degradation import GRAPHITI_UNAVAILABLE, record_degradation
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
-from app.retrieval.graphiti.schemas import GraphitiAvailability
+from app.retrieval.graphiti.schemas import GraphitiAvailability, GraphitiSearchOutcome
 from app.utils.sql_binds import uuid_any
 
 from .authorization import trusted_tool_context
+from .deadlines import GRAPHTI_DEADLINE_MISSED, with_graphiti_deadline
 
 _MIN_SOURCE_THRESHOLD: int = 2
 _STATUTE_SEARCH_LIMIT: int = 5
@@ -118,18 +120,29 @@ def make_search_legal_precedents_tool(
             return cached.model_dump()
 
         # --- Graphiti: precedent chains from prior reviewed documents -------
-        graphiti_results = await graphiti_service.search_for_precedent_chains(
-            query=query,
-            user_id=authz.user_id,
-            allowed_doc_ids=authz.allowed_doc_ids,
-            jurisdiction=jurisdiction,
-            num_results=5,
-            tenant_id=authz.tenant_id,
-            document_versions=tuple(
-                (document_id, version) for document_id, version, _ in authz.document_versions
+        # Under the explicit Graphiti deadline (harden 5.2): a deadline miss is
+        # an unavailable layer — the sufficiency verdict stays basis-unknown,
+        # exactly like a transport failure, never a fabricated empty corpus.
+        graphiti_results, _deadline_missed = await with_graphiti_deadline(
+            "search_legal_precedents",
+            lambda: graphiti_service.search_for_precedent_chains(
+                query=query,
+                user_id=authz.user_id,
+                allowed_doc_ids=authz.allowed_doc_ids,
+                jurisdiction=jurisdiction,
+                num_results=5,
+                tenant_id=authz.tenant_id,
+                document_versions=tuple(
+                    (document_id, version) for document_id, version, _ in authz.document_versions
+                ),
+                document_contracts=authz.document_contracts,
             ),
-            document_contracts=authz.document_contracts,
         )
+        if graphiti_results is GRAPHTI_DEADLINE_MISSED:
+            graphiti_results = GraphitiSearchOutcome(
+                availability=GraphitiAvailability.UNAVAILABLE,
+                coverage={"error": "timeout"},
+            )
 
         # --- Postgres: statute text retrieval --------------------------------
         # Contract (agent-tool-contract): when one leg is unreachable the
@@ -140,6 +153,7 @@ def make_search_legal_precedents_tool(
             graphiti_results, "availability", GraphitiAvailability.AVAILABLE
         )
         if graphiti_availability == GraphitiAvailability.UNAVAILABLE:
+            record_degradation(GRAPHITI_UNAVAILABLE, surface="search_legal_precedents")
             unavailable_layers.append("graphiti")
         try:
             statute_results = await _search_statutes_postgres(

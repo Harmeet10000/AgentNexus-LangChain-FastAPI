@@ -49,7 +49,6 @@ from app.features.documents.api.http.dto import (
     EvidenceSearchItem,
     EvidenceSearchResponse,
 )
-from app.features.documents.application.evidence import service as evidence_module
 from app.features.documents.application.evidence.service import (
     EvidenceService,
     InMemoryEvidenceHandleStore,
@@ -57,6 +56,7 @@ from app.features.documents.application.evidence.service import (
 from app.features.documents.application.tools.portfolio import (
     make_portfolio_traversal_tools,
 )
+from app.features.documents.retrieval import service as retrieval_service
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -508,8 +508,10 @@ def real_service(monkeypatch: pytest.MonkeyPatch) -> EvidenceService:
             )
         )
 
-    monkeypatch.setattr(evidence_module, "embed_text", _embed)
-    monkeypatch.setattr(evidence_module, "retrieve_fused", _retrieve)
+    monkeypatch.setattr(retrieval_service, "embed_text", _embed)
+    from app.features.documents.application.queries import documents as queries_documents
+
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _retrieve)
     return EvidenceService(repo=repo, handle_store=InMemoryEvidenceHandleStore())
 
 

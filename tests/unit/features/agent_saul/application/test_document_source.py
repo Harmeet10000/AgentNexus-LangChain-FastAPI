@@ -21,6 +21,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.features.agent_saul.adapters.document_source import (
     DOCUMENT_SOURCE_CONFIG_KEY,
+    CanonicalDocumentChunk,
     DocumentTextFailure,
     DocumentTextFailureCode,
     PostgresDocumentContentSource,
@@ -218,6 +219,8 @@ def test_latest_version_statement_compiles_with_the_truth_columns() -> None:
 
 # ---------------------------------------------------------------------------
 # Ingestion node maps provider outcomes to the existing state-error taxonomy
+# (task 6.1: the canonical chunk seam is the only structure — a legacy
+# fetch_text-only source is typed ingestion_incomplete, never re-segmented)
 # ---------------------------------------------------------------------------
 
 
@@ -234,24 +237,49 @@ class _StaticSource:
     async def ensure_document(self, *, user_id: str, doc_id: str) -> object:  # pragma: no cover
         return Success(None)
 
-    async def fetch_text(self, *, user_id: str, doc_id: str) -> object:
+    async def fetch_segments(
+        self, *, user_id: str, doc_ids: tuple[str, ...], tenant_id: str | None = None
+    ) -> object:
         return self._outcome
 
 
 class _CoughingSource(_StaticSource):
-    async def fetch_text(self, *, user_id: str, doc_id: str) -> object:
+    async def fetch_segments(
+        self, *, user_id: str, doc_ids: tuple[str, ...], tenant_id: str | None = None
+    ) -> object:  # type: ignore[override]
         leak = RuntimeError("provider exploded")
         raise leak
 
 
-async def test_node_success_feeds_document_text_and_status_with_no_errors() -> None:
+class _LegacyTextOnlySource:
+    """A pre-canonical source: only the anonymous text seam exists."""
+
+    async def ensure_document(self, *, user_id: str, doc_id: str) -> object:  # pragma: no cover
+        return Success(None)
+
+    async def fetch_text(self, *, user_id: str, doc_id: str) -> object:
+        return Success("MASTER SERVICES AGREEMENT\nsignature (~) clause")
+
+
+async def test_node_success_feeds_canonical_segments_with_no_errors() -> None:
     node = make_ingestion_node()
-    source = _StaticSource(Success("MASTER SERVICES AGREEMENT\nsignature (~) clause"))
+    chunk = CanonicalDocumentChunk(
+        chunk_id=f"{_DOC_ID}-chunk-0",
+        document_id=_DOC_ID,
+        document_version=1,
+        chunk_index=0,
+        content="MASTER SERVICES AGREEMENT",
+        page_no=1,
+        clause_type="payment",
+        locus="4.1",
+    )
+    source = _StaticSource(Success((chunk,)))
 
     output = await node(_state(), _node_config(source))  # type: ignore[arg-type]
 
-    assert output["document_text"] == "MASTER SERVICES AGREEMENT\nsignature (~) clause"
     assert output["status"] is WorkflowStatus.NORMALIZING
+    assert output["canonical_structure_ready"] is True
+    assert output["segments"][0].chunk_id == f"{_DOC_ID}-chunk-0"
     assert "errors" not in output
 
 
@@ -259,7 +287,7 @@ async def test_node_success_feeds_document_text_and_status_with_no_errors() -> N
     ("code", "expected_state_code", "retryable"),
     [
         (DocumentTextFailureCode.NOT_FOUND, "DOCUMENT_NOT_FOUND", False),
-        (DocumentTextFailureCode.EMPTY, "DOCUMENT_EMPTY_TEXT", False),
+        (DocumentTextFailureCode.EMPTY, "INGESTION_INCOMPLETE", False),
         (DocumentTextFailureCode.UNAVAILABLE, "DOCUMENT_SOURCE_UNAVAILABLE", True),
     ],
 )
@@ -292,9 +320,21 @@ async def test_node_missing_injection_is_a_clean_state_error_not_a_raise() -> No
     assert error.code == "DOCUMENT_SOURCE_NOT_WIRED"
 
 
+async def test_legacy_text_only_source_is_typed_incomplete_not_resegmented() -> None:
+    node = make_ingestion_node()
+    source = _LegacyTextOnlySource()
+
+    output = await node(_state(), _node_config(source))  # type: ignore[arg-type]
+
+    error = output["errors"][0]
+    assert output["status"] is WorkflowStatus.FAILED
+    assert error.code == "INGESTION_INCOMPLETE"
+    assert output["ingestion_state"][0].error_code == "INGESTION_INCOMPLETE"
+
+
 async def test_node_leaked_provider_failure_is_counted_not_raised() -> None:
     node = make_ingestion_node()
-    source = _CoughingSource(Success("never"))
+    source = _CoughingSource(Success(()))
 
     output = await node(_state(), _node_config(source))  # type: ignore[arg-type]
 
@@ -306,7 +346,7 @@ async def test_node_leaked_provider_failure_is_counted_not_raised() -> None:
 
 async def test_node_still_respects_the_retry_budget_before_any_read() -> None:
     node = make_ingestion_node()
-    source = _StaticSource(Success("text"))
+    source = _StaticSource(Success(()))
 
     output = await node(_state(retry_count=3), _node_config(source))  # type: ignore[arg-type]
 

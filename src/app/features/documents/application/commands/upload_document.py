@@ -105,6 +105,7 @@ from app.features.documents.ingestion.enrichment.legal_metadata import (
 )
 from app.features.documents.ingestion.parsing.parser import parse_document
 from app.kernel.result import log_expected_failure
+from app.observability.degradation import STUCK_DOCUMENTS, record_degradation
 from app.observability.logging import logger, trace_layer
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
 from app.retrieval.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
@@ -1281,6 +1282,7 @@ async def _warn_if_previous_attempt_stuck(
         stuck_status=previous_status,
         age_seconds=round(age_seconds, 1),
     ).warning("documents_ingest_stuck_detected")
+    record_degradation(STUCK_DOCUMENTS, surface="ingest_task", stuck_status=previous_status)
 
 
 async def run_document_ingestion_task(

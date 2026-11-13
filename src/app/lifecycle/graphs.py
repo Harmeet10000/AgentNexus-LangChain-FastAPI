@@ -171,6 +171,7 @@ async def provide_saul_graph(
             session_factory=session_factory,
             redis=redis,
             handle_ttl_seconds=settings.EVIDENCE_HANDLE_TTL_SECONDS,
+            graphiti=graphiti,
         )
     tool_bundle = build_tool_bundle(
         graphiti_service=graphiti,

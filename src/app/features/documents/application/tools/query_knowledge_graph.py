@@ -21,11 +21,13 @@ from langchain.tools import ToolRuntime
 from langchain_core.tools import InjectedToolArg, tool
 from langchain_core.tools.base import BaseTool
 
+from app.observability.degradation import GRAPHITI_UNAVAILABLE, record_degradation
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.graphiti.schemas import GraphitiAvailability
 
 from .authorization import trusted_tool_context
+from .deadlines import GRAPHTI_DEADLINE_MISSED, with_graphiti_deadline
 
 if TYPE_CHECKING:
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
@@ -98,21 +100,30 @@ def make_query_knowledge_graph_tool(
             log.debug("knowledge_graph_cache_hit")
             return cached.model_dump()
 
-        results = await graphiti_service.search_for_risk_context(
-            query=query,
-            user_id=authz.tenant_id,
-            doc_id=doc_id,
-            num_results=num_results,
-            allowed_doc_ids=authz.allowed_doc_ids,
-            tenant_id=authz.tenant_id,
-            document_versions=tuple(
-                (document_id, version) for document_id, version, _ in authz.document_versions
+        results, _deadline_missed = await with_graphiti_deadline(
+            "query_knowledge_graph",
+            lambda: graphiti_service.search_for_risk_context(
+                query=query,
+                user_id=authz.tenant_id,
+                doc_id=doc_id,
+                num_results=num_results,
+                allowed_doc_ids=authz.allowed_doc_ids,
+                tenant_id=authz.tenant_id,
+                document_versions=tuple(
+                    (document_id, version) for document_id, version, _ in authz.document_versions
+                ),
+                document_contracts=authz.document_contracts,
             ),
-            document_contracts=authz.document_contracts,
         )
+        if results is GRAPHTI_DEADLINE_MISSED:
+            return ToolResult.unavailable_result(
+                reason="Knowledge graph deadline expired before a result was produced.",
+                tool="query_knowledge_graph",
+            ).model_dump()
 
         availability = getattr(results, "availability", GraphitiAvailability.AVAILABLE)
         if availability == GraphitiAvailability.UNAVAILABLE:
+            record_degradation(GRAPHITI_UNAVAILABLE, surface="query_knowledge_graph")
             return ToolResult.unavailable_result(
                 reason="Knowledge graph is unavailable; no graph result was produced.",
                 tool="query_knowledge_graph",

@@ -106,3 +106,60 @@ def test_deep_research_wrapper_is_built_and_registered_once(
     # The specialists' bound toolsets never gained the wrapper.
     specialist_tools = [t.name for t in captured[_RISK_ANALYSIS_SYSTEM_PROMPT[:24]]["tools"]]
     assert "deep_research" not in specialist_tools
+
+
+def test_registry_rejects_unknown_tools_and_write_tools() -> None:
+    """Harden 5.8: drift fails loudly — unknown, write, and conflict tools."""
+    from app.features.documents.application.tools.registry import (
+        ToolBindingError,
+        assert_role_bindings,
+    )
+
+    # Unknown tool.
+    with pytest.raises(ToolBindingError, match="outside the registry"):
+        assert_role_bindings(
+            {"risk": [_stub_tool("mystery_tool")], "compliance": [], "orchestrator": []}
+        )
+    # Graphiti write tools stay unwired.
+    with pytest.raises(ToolBindingError, match="Graphiti write"):
+        assert_role_bindings(
+            {
+                "risk": [_stub_tool("write_clause_episodes_to_graphiti")],
+                "compliance": [],
+                "orchestrator": [],
+            },
+            evidence_seam_provisioned=False,
+        )
+    # The experiment-pending conflict tool stays unbound too.
+    with pytest.raises(ToolBindingError, match="outside the registry"):
+        assert_role_bindings(
+            {"risk": [_stub_tool("detect_graph_conflicts")], "compliance": [], "orchestrator": []},
+            evidence_seam_provisioned=False,
+        )
+    # Missing required tools under a provisioned seam.
+    with pytest.raises(ToolBindingError, match="missing required"):
+        assert_role_bindings(
+            {"risk": [], "compliance": [], "orchestrator": []},
+        )
+
+
+def test_orchestrator_projection_cannot_read_evidence() -> None:
+    """Harden 5.8: the orchestrator never carries an evidence read/search tool."""
+    from app.features.documents.application.tools.registry import (
+        EVIDENCE_READ_TOOLS,
+        ToolBindingError,
+        assert_role_bindings,
+    )
+
+    for name in sorted(EVIDENCE_READ_TOOLS):
+        with pytest.raises(ToolBindingError, match="must never read legal evidence"):
+            assert_role_bindings(
+                {"risk": [], "compliance": [], "orchestrator": [_stub_tool(name)]},
+                evidence_seam_provisioned=False,
+            )
+    # The documented orchestrator binding: delegation only (typed action);
+    # ingestion state rides with the specialists it schedules.
+    assert_role_bindings(
+        {"risk": [], "compliance": [], "orchestrator": []},
+        evidence_seam_provisioned=False,
+    )

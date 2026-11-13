@@ -140,6 +140,19 @@ class ComplianceStatus(StrEnum):
     NOT_ASSESSABLE = "not_assessable"
 
 
+class ComplianceNotAssessableReason(StrEnum):
+    """The typed reason codes a `not_assessable` compliance result must carry.
+
+    Spec (agent-saul-grounded-findings): ``not_assessable`` MUST carry one or
+    more of these codes so absence of analysis is never rendered as a clean
+    negative or a clean positive.
+    """
+
+    STATUTE_NOT_IN_CORPUS = "statute_not_in_corpus"
+    INSUFFICIENT_COVERAGE = "insufficient_coverage"
+    INGESTION_INCOMPLETE = "ingestion_incomplete"
+
+
 class GroundingStatus(StrEnum):
     """Outcome of the mandatory grounding gate."""
 
@@ -462,6 +475,10 @@ class ComplianceOutput(BaseModel, frozen=True):
     overall_compliant: bool | None = None
     summary: str
     compliance_status: ComplianceStatus = ComplianceStatus.NOT_ASSESSABLE
+    # Typed reason codes carried whenever the status is ``not_assessable``
+    # (task 6.4). Optional with a deterministic inference for checkpoints and
+    # provider payloads that predate the field.
+    not_assessable_reasons: list[ComplianceNotAssessableReason] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -493,6 +510,12 @@ class ComplianceOutput(BaseModel, frozen=True):
             payload["overall_compliant"] = False
         else:
             payload["overall_compliant"] = None
+        # A not-assessable compliance result without a typed reason would read
+        # as a clean negative; the spec requires at least one reason code.
+        if status == ComplianceStatus.NOT_ASSESSABLE and not payload.get("not_assessable_reasons"):
+            payload["not_assessable_reasons"] = [
+                ComplianceNotAssessableReason.INSUFFICIENT_COVERAGE
+            ]
         return payload
 
 
@@ -544,6 +567,11 @@ class ReviewOverride(BaseModel):
     override_label: str
     reason_code: str
     comment: str | None = None
+    # Contract identity recorded with the override (task 6.7): an override of
+    # a multi-contract finding must name the contract it re-classifies. The
+    # review node stamps this from the checkpointed segments/claim ledger; the
+    # reviewer never supplies it.
+    contract_index: int | None = None
 
 
 class HumanReviewOutput(BaseModel):
@@ -571,6 +599,13 @@ class FinalReport(BaseModel, frozen=True):
     grounding_status: GroundingStatus = GroundingStatus.NOT_ASSESSABLE
     evidence_policy: str = "mechanically_verified"
     coverage: dict[str, int] = Field(default_factory=dict)
+    # Task 6.8: disclosure without reconstruction. The report carries the
+    # authoritative verification inputs — unresolved/contradicted claims, the
+    # compliance not-assessable reason codes, and ingestion warnings — copied
+    # from state, never a regenerated summary of them.
+    unresolved_claims: list[str] = Field(default_factory=list)
+    not_assessable_reasons: list[str] = Field(default_factory=list)
+    ingestion_warnings: list[str] = Field(default_factory=list)
     # Review provenance is part of the report contract, not hidden in graph
     # state. These values are copied from the server-authorized review fact.
     self_reviewed: bool = False

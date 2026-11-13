@@ -41,6 +41,7 @@ from app.features.documents.domain.constants import (
     RRF_K,
 )
 from app.features.documents.domain.errors import DocumentDatabaseError
+from app.features.documents.retrieval import row_hydration
 from app.features.documents.retrieval.context_assembly import (
     SearchChunkRecord,
     assemble_rag_context,
@@ -401,11 +402,19 @@ def lookup_to_rows(
                 "graph_indexed_at": record.get("graph_indexed_at"),
                 "document_version": record.get("document_version", 1),
                 "contract_index": record.get("contract_index"),
-                "pipeline_version": record.get("pipeline_version"),
+                # Harden 5.3: hydrated through the ONE provenance reader — a
+                # legacy row without the column still carries the version its
+                # chunk/document metadata recorded.
+                "pipeline_version": row_hydration.pipeline_version(record),
                 "rrf_score": item.score,
                 "title": record.get("title"),
                 "chunk_index": record.get("chunk_index"),
                 "chunk_kind": record.get("chunk_kind"),
+                # Harden 5.3: the row hydration DTOs carry the page number so
+                # citation provenance (`_citation_response`) and the evidence
+                # refs read it from the same hydrated row — it used to be
+                # dropped here, pinning ask-citation pages at 0.
+                "page_no": record.get("page_no"),
             }
         )
     return rows

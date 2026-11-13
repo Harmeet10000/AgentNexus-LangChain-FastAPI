@@ -53,6 +53,7 @@ from app.features.agent_saul.domain.state import (
     ClaimSupportStatus,
     ClauseSegment,
     ClauseType,
+    ComplianceNotAssessableReason,
     ComplianceOutput,
     ComplianceStatus,
     EvidenceRef,
@@ -65,7 +66,6 @@ from app.features.agent_saul.domain.state import (
     IngestionDocumentStatus,
     LegalAgentState,
     LegalRelationship,
-    NormalizedDocument,
     OrchestratorAction,
     OrchestratorActionType,
     PlanActionType,
@@ -85,17 +85,14 @@ from .prompts import (
     _ENTITY_EXTRACTION_SYSTEM_PROMPT,
     _FINALIZATION_SYSTEM_PROMPT,
     _GROUNDING_SYSTEM_PROMPT,
-    _NORMALIZATION_SYSTEM_PROMPT,
     _ORCHESTRATOR_SYSTEM_PROMPT,
     _PLANNER_SYSTEM_PROMPT,
     _QNA_SYSTEM_PROMPT,
     _RELATIONSHIP_MAPPING_SYSTEM_PROMPT,
     _RISK_ANALYSIS_SYSTEM_PROMPT,
-    _SEGMENTATION_SYSTEM_PROMPT,
 )
 
 _CLARIFICATION_THRESHOLD = 0.72
-_OCR_CONFIDENCE_THRESHOLD = 0.85
 _MAX_RETRIES = 3
 _HUMAN_REVIEW_SEGMENT_PREVIEW = 20
 _REFLECTION_LOG_CHARS = 120
@@ -424,10 +421,6 @@ class QnAOutput(BaseModel):
 class PlannerOutput(BaseModel):
     steps: list[PlanStep] = Field(min_length=1, max_length=10)
     rationale: str = Field(description="Why this plan was chosen")
-
-
-class ClauseSegmentationOutput(BaseModel):
-    segments: list[ClauseSegment] = Field(min_length=1)
 
 
 class EntityExtractionOutput(BaseModel):
@@ -1066,7 +1059,7 @@ def make_orchestrator_node(
             "plan_approved": state.get("plan_approved", False),
             "plan": [step.model_dump(mode="json") for step in state.get("plan", [])],
             "errors": [error.model_dump(mode="json") for error in state.get("errors", [])],
-            "has_document_text": bool(state.get("document_text")),
+            "canonical_structure_ready": state.get("canonical_structure_ready", False),
             "has_normalized_document": state.get("normalized_document") is not None,
             "segment_count": len(state.get("segments", [])),
             "risk_summary": risk_analysis.summary if risk_analysis is not None else None,
@@ -1321,7 +1314,7 @@ def make_ingestion_node() -> ConfiguredStateNode:
     raise for them, and must never silently continue with empty text.
     """
 
-    async def ingestion_node(state: LegalAgentState, config: RunnableConfig) -> dict[str, Any]:  # noqa: PLR0912, PLR0914
+    async def ingestion_node(state: LegalAgentState, config: RunnableConfig) -> dict[str, Any]:
         allowed_doc_ids = tuple(dict.fromkeys(state.get("allowed_doc_ids") or [state["doc_id"]]))
         log = logger.bind(
             node="ingestion",
@@ -1379,169 +1372,87 @@ def make_ingestion_node() -> ConfiguredStateNode:
                 retryable=True,
             )
 
-        if canonical_fetch is not None:
-            if isinstance(canonical_fetch, Failure):
-                failure = canonical_fetch.failure()
-                return _ingestion_document_failure(failure, canonical=True) | {
-                    "ingestion_state": _ingestion_snapshot(
-                        allowed_doc_ids,
-                        IngestionDocumentStatus.FAILED,
-                        error_code=str(failure.code),
-                        retryable=failure.code is DocumentTextFailureCode.UNAVAILABLE,
-                    )
-                }
-            chunks = canonical_fetch.unwrap()
-            segments = _validate_canonical_segments(chunks, allowed_doc_ids)
-            if segments is None:
-                return _fail(
-                    "ingestion",
-                    "INGESTION_INCOMPLETE",
-                    "Selected documents do not contain usable canonical chunk structure",
-                ) | {
-                    "ingestion_state": _ingestion_snapshot(
-                        allowed_doc_ids,
-                        IngestionDocumentStatus.FAILED,
-                        error_code="INGESTION_INCOMPLETE",
-                    )
-                }
-            scope_versions = tuple(
-                (document_id, version, None)
-                for document_id, version in sorted(
-                    {(segment.document_id, segment.document_version) for segment in segments}
-                )
-            )
-            contract_values: dict[tuple[str, int], list[int | None]] = {}
-            for segment in segments:
-                contract_values.setdefault(
-                    (segment.document_id, segment.document_version), []
-                ).append(segment.contract_index)
-            scope_contracts = tuple(
-                (
-                    document_id,
-                    version,
-                    tuple(sorted({index for index in indexes if index is not None})),
-                    bool(indexes) and all(index is None for index in indexes),
-                )
-                for (document_id, version), indexes in sorted(contract_values.items())
-            )
-            # ``segments`` is an append-only LangGraph channel because entity
-            # extraction fans out with Send. Avoid duplicating canonical rows
-            # when a paused legacy checkpoint replays the ingestion node.
-            existing_ids = {segment.clause_id for segment in state.get("segments", [])}
-            new_segments = [
-                segment for segment in segments if segment.clause_id not in existing_ids
-            ]
-            log.info("canonical_ingestion_completed", segment_count=len(segments))
-            return {
-                "canonical_segments": list(segments),
-                "canonical_structure_ready": True,
-                "legacy_structure_fallback": False,
-                "document_text": None,
-                "segments": new_segments,
-                "document_versions": list(scope_versions),
-                "document_contracts": list(scope_contracts),
-                "ingestion_state": _ingestion_snapshot(
-                    allowed_doc_ids,
-                    IngestionDocumentStatus.READY,
-                ),
-                "status": WorkflowStatus.NORMALIZING,
-            }
-
-        if len(allowed_doc_ids) > 1:
-            # A legacy source can only return one anonymous text blob. Refuse
-            # it for a multi-document scope rather than losing boundaries.
+        if canonical_fetch is None:
+            # Task 6.1 (harden-agent-saul-evidence-pipeline): segmentation is a
+            # deterministic adaptation of persisted chunks. A source without a
+            # canonical chunk seam has no trustworthy structure — refuse with
+            # ``ingestion_incomplete`` instead of re-segmenting raw text via a
+            # model (which would fabricate clause identities and concatenate
+            # chunks into invented boundaries).
+            log.error("ingestion_canonical_structure_missing")
             return _fail(
                 "ingestion",
                 "INGESTION_INCOMPLETE",
-                "Multi-document analysis requires a canonical chunk source",
+                "No canonical chunk structure is available for the authorized documents",
             ) | {
                 "ingestion_state": _ingestion_snapshot(
                     allowed_doc_ids,
-                    IngestionDocumentStatus.NOT_READY,
+                    IngestionDocumentStatus.FAILED,
                     error_code="INGESTION_INCOMPLETE",
                 )
             }
 
-        try:
-            fetch_kwargs: dict[str, str] = {
-                "user_id": state["user_id"],
-                "doc_id": state["doc_id"],
+        if isinstance(canonical_fetch, Failure):
+            failure = canonical_fetch.failure()
+            return _ingestion_document_failure(failure, canonical=True) | {
+                "ingestion_state": _ingestion_snapshot(
+                    allowed_doc_ids,
+                    IngestionDocumentStatus.FAILED,
+                    error_code=str(failure.code),
+                    retryable=failure.code is DocumentTextFailureCode.UNAVAILABLE,
+                )
             }
-            if state.get("tenant_id"):
-                fetch_kwargs["tenant_id"] = state["tenant_id"]
-            fetch = await source.fetch_text(**fetch_kwargs)
-        except Exception as exc:  # noqa: BLE001 — node boundary: a provider must not abort the WS turn with a raise
-            exc.add_note(f"doc_id={state['doc_id']}, operation=ingestion_fetch_document_text")
-            logger.bind(
-                node="ingestion", doc_id=state["doc_id"], user_id=state["user_id"]
-            ).exception("Document content provider leaked a failure")
+        chunks = canonical_fetch.unwrap()
+        segments = _validate_canonical_segments(chunks, allowed_doc_ids)
+        if segments is None:
             return _fail(
                 "ingestion",
-                "DOCUMENT_SOURCE_UNAVAILABLE",
-                "Document content provider failed unexpectedly",
-                retryable=True,
+                "INGESTION_INCOMPLETE",
+                "Selected documents do not contain usable canonical chunk structure",
             ) | {
                 "ingestion_state": _ingestion_snapshot(
                     allowed_doc_ids,
                     IngestionDocumentStatus.FAILED,
-                    error_code="DOCUMENT_SOURCE_UNAVAILABLE",
-                    retryable=True,
+                    error_code="INGESTION_INCOMPLETE",
                 )
             }
-
-        if isinstance(fetch, Failure):
-            error = fetch.failure()
-            log.warning(
-                "ingestion_document_unreadable",
-                failure_code=str(error.code),
-                failure_message=error.message,
+        scope_versions = tuple(
+            (document_id, version, None)
+            for document_id, version in sorted(
+                {(segment.document_id, segment.document_version) for segment in segments}
             )
-            return _ingestion_document_failure(error) | {
-                "ingestion_state": _ingestion_snapshot(
-                    allowed_doc_ids,
-                    IngestionDocumentStatus.FAILED,
-                    error_code=str(error.code),
-                    retryable=error.code is DocumentTextFailureCode.UNAVAILABLE,
-                )
-            }
-
-        text: str = fetch.unwrap()
-        confidence: float = 1.0
-
-        if confidence < _OCR_CONFIDENCE_THRESHOLD:
-            log.warning("ingestion_low_ocr_confidence", confidence=confidence)
-            human_response: dict[str, Any] = interrupt(
-                {
-                    "type": HITLInterruptType.OCR_REUPLOAD,
-                    "confidence": confidence,
-                    "message": (
-                        f"Document OCR confidence ({confidence:.0%}) is below threshold. "
-                        "Please re-upload a higher-quality scan."
-                    ),
-                }
+        )
+        contract_values: dict[tuple[str, int], list[int | None]] = {}
+        for segment in segments:
+            contract_values.setdefault((segment.document_id, segment.document_version), []).append(
+                segment.contract_index
             )
-            new_doc_id: str | None = human_response.get("new_doc_id")
-            if new_doc_id:
-                return {
-                    "doc_id": new_doc_id,
-                    "retry_count": retry_count + 1,
-                    "status": WorkflowStatus.INGESTING,
-                }
-            return _fail(
-                "ingestion",
-                "LOW_OCR_CONFIDENCE",
-                f"OCR confidence {confidence:.0%} - user declined re-upload",
+        scope_contracts = tuple(
+            (
+                document_id,
+                version,
+                tuple(sorted({index for index in indexes if index is not None})),
+                bool(indexes) and all(index is None for index in indexes),
             )
-
-        log.info("ingestion_completed", text_length=len(text), confidence=confidence)
+            for (document_id, version), indexes in sorted(contract_values.items())
+        )
+        # ``segments`` is an append-only LangGraph channel because entity
+        # extraction fans out with Send. Avoid duplicating canonical rows
+        # when a paused legacy checkpoint replays the ingestion node.
+        existing_ids = {segment.clause_id for segment in state.get("segments", [])}
+        new_segments = [segment for segment in segments if segment.clause_id not in existing_ids]
+        log.info("canonical_ingestion_completed", segment_count=len(segments))
         return {
-            "document_text": text,
-            "canonical_segments": [],
-            "canonical_structure_ready": False,
-            "legacy_structure_fallback": True,
+            "canonical_segments": list(segments),
+            "canonical_structure_ready": True,
+            "legacy_structure_fallback": False,
+            "document_text": None,
+            "segments": new_segments,
+            "document_versions": list(scope_versions),
+            "document_contracts": list(scope_contracts),
             "ingestion_state": _ingestion_snapshot(
                 allowed_doc_ids,
-                IngestionDocumentStatus.WARNINGS,
+                IngestionDocumentStatus.READY,
             ),
             "status": WorkflowStatus.NORMALIZING,
         }
@@ -1549,138 +1460,95 @@ def make_ingestion_node() -> ConfiguredStateNode:
     return ingestion_node
 
 
-def make_normalization_node(
-    normalization_llm: Runnable[list[Any], NormalizedDocument],
-) -> StateNode:
+def make_normalization_node() -> StateNode:
+    """Deterministic canonical-structure confirmation (task 6.1).
+
+    Normalization no longer re-derives document structure with a model: the
+    persisted chunks are the only trusted structure, adapted at ingestion.
+    A run that reaches this node without canonical segments is an ingestion
+    contract violation and fails typed rather than inventing sections.
+    """
+
     async def normalization_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(node="normalization", doc_id=state["doc_id"])
 
-        ledger, blocked = _budget_gate(state, BudgetDimension.MODEL_CALLS)
-        if blocked is not None:
-            return {**blocked, "budget_ledger": ledger}
-
-        if state.get("canonical_structure_ready"):
-            segments = state.get("canonical_segments", [])
-            if not segments:
-                return _fail(
-                    "normalization",
-                    "INGESTION_INCOMPLETE",
-                    "Canonical ingestion reported ready without any canonical segments",
-                )
-            log.info("normalization_bypassed_canonical_structure", segment_count=len(segments))
-            return {"status": WorkflowStatus.SEGMENTING}
-
-        if not state.get("document_text"):
+        segments = state.get("canonical_segments", [])
+        if not state.get("canonical_structure_ready") or not segments:
             return _fail(
                 "normalization",
-                "MISSING_DOCUMENT_TEXT",
-                "document_text not populated by ingestion",
+                "INGESTION_INCOMPLETE",
+                "Canonical chunk structure is missing; normalization cannot proceed deterministically",
             )
-
-        try:
-            result: NormalizedDocument = await _invoke_structured(
-                normalization_llm,
-                _NORMALIZATION_SYSTEM_PROMPT,
-                state["document_text"],
-            )
-        except OutputParserException as exc:
-            exc.add_note(f"node=normalization, doc_id={state['doc_id']}")
-            log.bind(error=str(exc)).exception("normalization_output_invalid")
-            return _fail(
-                "normalization",
-                "INVALID_NORMALIZED_DOCUMENT",
-                "The model returned document structure that did not match the required schema",
-                retryable=True,
-            )
-        ledger, blocked = _charge_model_result(ledger, result)
-        if blocked is not None:
-            return {**blocked, "budget_ledger": ledger}
-        log.info("normalization_completed", section_count=len(result.sections))
-
-        return {
-            "normalized_document": result,
-            "budget_ledger": ledger,
-            "status": WorkflowStatus.SEGMENTING,
-        }
+        log.info("normalization_confirmed_canonical_structure", segment_count=len(segments))
+        return {"status": WorkflowStatus.SEGMENTING}
 
     return normalization_node
 
 
-def make_segmentation_node(
-    segmentation_llm: Runnable[list[Any], ClauseSegmentationOutput],
-) -> StateNode:
+def make_segmentation_node() -> StateNode:
+    """Deterministic persisted-chunk-to-segment projection (task 6.1).
+
+    Segmentation no longer re-segments with a model. The canonical segments
+    adapted at ingestion — one persisted chunk per clause, ``chunk_id`` carried
+    as the clause evidence identity, chunks never concatenated — are the only
+    segmentation. Missing structure is a typed ``ingestion_incomplete`` failure,
+    and no model-call budget unit is consumed for a deterministic projection.
+    """
+
     async def segmentation_node(state: LegalAgentState) -> dict[str, Any]:
         log = logger.bind(node="segmentation", doc_id=state["doc_id"])
 
-        if state.get("canonical_structure_ready"):
-            segments = state.get("canonical_segments", [])
-            if not segments:
-                return _fail(
-                    "segmentation",
-                    "INGESTION_INCOMPLETE",
-                    "Canonical ingestion reported ready without any canonical segments",
-                )
-            log.info("segmentation_bypassed_canonical_structure", segment_count=len(segments))
-            # Canonical segmentation is a deterministic projection of the
-            # already-ingested chunks; no model invocation occurred here, so
-            # it must not consume a model-call budget unit per chunk.
-            return {"status": WorkflowStatus.EXTRACTING_ENTITIES}
-
-        ledger, blocked = _budget_gate(state, BudgetDimension.MODEL_CALLS)
-        if blocked is not None:
-            return {**blocked, "budget_ledger": ledger}
-
-        normalized_document = state["normalized_document"]
-        if normalized_document is None:
+        segments = state.get("canonical_segments", [])
+        if not state.get("canonical_structure_ready") or not segments:
             return _fail(
                 "segmentation",
-                "MISSING_NORMALIZED_DOCUMENT",
-                "normalized_document not populated by normalization node",
+                "INGESTION_INCOMPLETE",
+                "Canonical chunk structure is missing; segmentation cannot proceed deterministically",
             )
-
-        doc_text = "\n".join(s.content for s in normalized_document.sections)
-        try:
-            result: ClauseSegmentationOutput = await _invoke_structured(
-                segmentation_llm,
-                _SEGMENTATION_SYSTEM_PROMPT,
-                doc_text,
-            )
-        except OutputParserException as exc:
-            exc.add_note(f"node=segmentation, doc_id={state['doc_id']}")
-            log.bind(error=str(exc)).exception("segmentation_output_invalid")
-            return _fail(
-                "segmentation",
-                "INVALID_CLAUSE_SEGMENTATION",
-                "The model returned clause segments that did not match the required schema",
-                retryable=True,
-            )
-        ledger, blocked = _charge_model_result(ledger, result)
-        if blocked is not None:
-            return {**blocked, "budget_ledger": ledger}
-        log.info("segmentation_completed", segment_count=len(result.segments))
-
-        try:
-            ledger = ledger.consume(BudgetDimension.MODEL_CALLS, len(result.segments))
-        except BudgetExhaustedError as exc:
-            return {
-                **_fail("budget", "BUDGET_EXHAUSTED", str(exc), retryable=False),
-                "budget_ledger": ledger.model_copy(
-                    update={"exhausted": True, "exhausted_dimension": exc.dimension}
-                ),
-            }
-
-        return {
-            "segments": list(result.segments),
-            "budget_ledger": ledger,
-            "status": WorkflowStatus.EXTRACTING_ENTITIES,
-        }
+        log.info("segmentation_projected_canonical_chunks", segment_count=len(segments))
+        # Plan-conditional (task 6.3): a plan that consumes no entities goes
+        # straight to the relationship stage; the extraction fan-out is skipped.
+        if not _plan_requires(state.get("plan", []), _ENTITY_PLAN_ACTIONS):
+            return {"status": WorkflowStatus.MAPPING_RELATIONSHIPS}
+        return {"status": WorkflowStatus.EXTRACTING_ENTITIES}
 
     return segmentation_node
 
 
-def dispatch_entity_extraction(state: LegalAgentState) -> list[Send]:
+# Task 6.3: plan-conditionality. Entity extraction only serves plans that
+# need clause-level entities (clause extraction, risk, compliance); relationship
+# mapping only serves plans that need the cross-clause graph (risk, compliance).
+# A plan of research/summary steps must never spend model calls deriving
+# entities or relationships nobody consumes.
+_ENTITY_PLAN_ACTIONS: Final[frozenset[PlanActionType]] = frozenset(
+    {
+        PlanActionType.EXTRACT_CLAUSES,
+        PlanActionType.RISK_ANALYSIS,
+        PlanActionType.COMPLIANCE_CHECK,
+    }
+)
+_RELATIONSHIP_PLAN_ACTIONS: Final[frozenset[PlanActionType]] = frozenset(
+    {PlanActionType.RISK_ANALYSIS, PlanActionType.COMPLIANCE_CHECK}
+)
+
+
+def _plan_requires(plan: Sequence[PlanStep], actions: frozenset[PlanActionType]) -> bool:
+    return any(step.action in actions for step in plan)
+
+
+def dispatch_entity_extraction(state: LegalAgentState) -> list[Send] | str:
+    """Fan clauses out to entity extraction only when the plan needs entities.
+
+    Task 6.3: a plan whose steps never consume clause-level entities routes
+    deterministically past the extraction fan-out — no Send tasks, no model
+    calls — and the pipeline continues at relationship mapping.
+    """
     if state.get("status") == WorkflowStatus.FAILED:
         return []
+    plan = state.get("plan", [])
+    entities_required = _plan_requires(plan, _ENTITY_PLAN_ACTIONS)
+    if not entities_required:
+        return "relationship_mapping"
     document_context: dict[str, Any] = {
         "jurisdiction": state["working_memory"].get("jurisdiction", "India"),
         "document_type": state["working_memory"].get("document_type", "unknown"),
@@ -1688,6 +1556,7 @@ def dispatch_entity_extraction(state: LegalAgentState) -> list[Send]:
         "user_id": state["user_id"],
         "tenant_id": state.get("tenant_id", ""),
         "allowed_doc_ids": tuple(state.get("allowed_doc_ids", (state["doc_id"],))),
+        "entities_required": entities_required,
     }
     return [
         Send(
@@ -1755,6 +1624,31 @@ def make_entity_extraction_node(
                     retryable=True,
                 )
 
+        # Task 6.3 (belt and braces): the fan-out router already gated this on
+        # the plan; a Send payload without entity demand performs no model call.
+        if not doc_context.get("entities_required", True):
+            return {}
+
+        # Task 6.3: prefer the LangExtract metadata persisted at ingestion over
+        # model-invented scope. A chunk whose persisted extraction completed
+        # constrains the extraction to the persisted class set; a chunk whose
+        # persisted extraction failed must never be silently upgraded to a
+        # complete extraction.
+        persisted_extraction = clause.metadata.get("knowledge_extraction")
+        persisted_classes = clause.metadata.get("knowledge_extraction_classes")
+        if persisted_extraction == "complete" and isinstance(persisted_classes, list):
+            persisted_note = (
+                "Persisted LangExtract extraction classes for this chunk (authoritative "
+                f"scope): {', '.join(str(item) for item in persisted_classes)}\n\n"
+            )
+        elif persisted_extraction is not None:
+            persisted_note = (
+                "Persisted LangExtract extraction for this chunk did not complete; "
+                "extract only what the clause text itself supports.\n\n"
+            )
+        else:
+            persisted_note = ""
+
         prompt = (
             f"Document type: {doc_context.get('document_type', 'unknown')}\n"
             f"Jurisdiction: {doc_context.get('jurisdiction', 'India')}\n"
@@ -1765,6 +1659,7 @@ def make_entity_extraction_node(
             f"Clause ID: {clause.clause_id}\n"
             f"Clause type: {clause.clause_type}\n\n"
             f"Contract index: {clause.contract_index}\n\n"
+            f"{persisted_note}"
             f"Clause text:\n{clause.text}"
         )
         messages = [
@@ -1812,6 +1707,20 @@ def make_relationship_mapping_node(
             node="relationship_mapping",
             entity_count=len(state["extracted_entities"]),
         )
+
+        # Task 6.3: relationship mapping is plan-conditional. Plans whose steps
+        # never consume the cross-clause relationship graph (and runs that
+        # produced no entities) skip the model call entirely — absence of
+        # relationships must not be manufactured for an uninterested plan.
+        if (
+            not _plan_requires(state.get("plan", []), _RELATIONSHIP_PLAN_ACTIONS)
+            or not state["extracted_entities"]
+        ):
+            log.info(
+                "relationship_mapping_skipped_plan_conditional",
+                entity_count=len(state["extracted_entities"]),
+            )
+            return {"status": WorkflowStatus.ANALYZING_RISKS}
 
         ledger, blocked = _budget_gate(state, BudgetDimension.MODEL_CALLS)
         if blocked is not None:
@@ -2148,13 +2057,19 @@ def make_compliance_node(compliance_agent: Any) -> StateNode:
     return compliance_node
 
 
-def _not_assessable_compliance_output(reason: str) -> ComplianceOutput:
+def _not_assessable_compliance_output(
+    reason: str,
+    reasons: Sequence[ComplianceNotAssessableReason] | None = None,
+) -> ComplianceOutput:
     return ComplianceOutput(
         findings=[],
         jurisdiction="India",
         overall_compliant=None,
         summary=reason,
         compliance_status=ComplianceStatus.NOT_ASSESSABLE,
+        not_assessable_reasons=list(
+            reasons or (ComplianceNotAssessableReason.INSUFFICIENT_COVERAGE,)
+        ),
     )
 
 
@@ -2822,6 +2737,46 @@ def make_human_review_node(
             risk_findings=len(risk_analysis.findings if risk_analysis else []),
         )
 
+        def _unsupported_item(source: str, finding: Any) -> dict[str, Any]:
+            status = getattr(finding, "support_status", ClaimSupportStatus.NOT_ASSESSABLE)
+            return {
+                "analysis": source,
+                "finding_id": str(
+                    getattr(finding, "risk_id", None) or getattr(finding, "finding_id", "")
+                ),
+                "support_status": status.value if hasattr(status, "value") else str(status),
+                "title": str(getattr(finding, "title", "") or getattr(finding, "explanation", "")),
+                "contract_index": getattr(finding, "contract_index", None),
+            }
+
+        # Task 6.7: the review payload must render every item a reviewer is
+        # being asked to approve that is not machine-supported — unsupported,
+        # contradicted, or not-assessed findings and unresolved ledger claims —
+        # so approval is never granted over invisible weaknesses.
+        unsupported_items: list[dict[str, Any]] = []
+        for source, analysis in (("risk", risk_analysis), ("compliance", compliance_result)):
+            unsupported_items.extend(
+                _unsupported_item(source, finding)
+                for finding in (analysis.findings if analysis else [])
+                if getattr(finding, "support_status", None) != ClaimSupportStatus.SUPPORTED
+            )
+        for entry in state.get("claim_ledger", []):
+            entry_model = (
+                entry
+                if isinstance(entry, ClaimLedgerEntry)
+                else ClaimLedgerEntry.model_validate(entry)
+            )
+            if entry_model.support_status != ClaimSupportStatus.SUPPORTED:
+                unsupported_items.append(
+                    {
+                        "analysis": "claim_ledger",
+                        "finding_id": entry_model.claim_id,
+                        "support_status": entry_model.support_status.value,
+                        "title": entry_model.claim,
+                        "contract_index": entry_model.contract_index,
+                    }
+                )
+
         review_payload: dict[str, Any] = {
             "type": HITLInterruptType.HUMAN_REVIEW_REQUIRED,
             "risk_summary": risk_analysis.summary if risk_analysis else None,
@@ -2837,6 +2792,12 @@ def make_human_review_node(
             "compliance_status": (
                 compliance_result.compliance_status.value if compliance_result else "not_assessable"
             ),
+            "compliance_not_assessable_reasons": (
+                [reason.value for reason in compliance_result.not_assessable_reasons]
+                if compliance_result
+                else []
+            ),
+            "unsupported_items": unsupported_items,
             "segments": [
                 seg.model_dump() for seg in state["segments"][:_HUMAN_REVIEW_SEGMENT_PREVIEW]
             ],
@@ -2882,7 +2843,28 @@ def make_human_review_node(
             }
 
         raw_overrides = human_response.get("overrides") or []
-        overrides = [ReviewOverride.model_validate(o) for o in raw_overrides]
+        # Task 6.7: the reviewer supplies the override decision and reason; the
+        # contract identity is stamped from the checkpointed evidence — never
+        # accepted from the resume payload — so an override of a multi-contract
+        # finding always records the contract it re-classifies.
+        contract_by_clause: dict[str, int | None] = {}
+        for seg in state.get("segments", []):
+            contract_by_clause.setdefault(seg.clause_id, seg.contract_index)
+        for entry in state.get("claim_ledger", []):
+            entry_model = (
+                entry
+                if isinstance(entry, ClaimLedgerEntry)
+                else ClaimLedgerEntry.model_validate(entry)
+            )
+            contract_by_clause.setdefault(entry_model.claim_id, entry_model.contract_index)
+        overrides: list[ReviewOverride] = []
+        for raw in raw_overrides:
+            override = ReviewOverride.model_validate(raw)
+            if override.contract_index is None and override.clause_id in contract_by_clause:
+                override = override.model_copy(
+                    update={"contract_index": contract_by_clause[override.clause_id]}
+                )
+            overrides.append(override)
 
         review_output = HumanReviewOutput(
             reviewer_id=human_response.get("reviewer_id") or "unknown",
@@ -2948,10 +2930,10 @@ def make_human_review_entry() -> tuple[HumanReviewSink, StateNode]:
     return sink, node
 
 
-def make_finalization_node(
+def make_finalization_node(  # noqa: PLR0915 — one readable gate + disclosure assembly
     finalization_llm: Runnable[list[Any], FinalReport],
 ) -> StateNode:
-    async def finalization_node(state: LegalAgentState) -> dict[str, Any]:
+    async def finalization_node(state: LegalAgentState) -> dict[str, Any]:  # noqa: PLR0912 — fail-closed gates then disclosure assembly
         log = logger.bind(node="finalization", doc_id=state["doc_id"])
         ledger, blocked = _budget_gate(state, BudgetDimension.MODEL_CALLS)
         if blocked is not None:
@@ -2991,6 +2973,42 @@ def make_finalization_node(
                 "Finalization is blocked until an authorized human reviewer approves the analysis.",
                 retryable=True,
             )
+        if not state.get("plan_approved", False):
+            # Task 6.8: finalization consumes an approved plan. A run whose
+            # plan was never approved cannot present a finalized report.
+            log.warning("finalization_blocked_by_unapproved_plan")
+            return _fail(
+                "finalization",
+                "PLAN_NOT_APPROVED",
+                "Finalization is blocked because the execution plan was never approved.",
+                retryable=True,
+            )
+
+        unresolved_claims = [
+            entry.claim
+            for entry in (
+                item
+                if isinstance(item, ClaimLedgerEntry)
+                else ClaimLedgerEntry.model_validate(item)
+                for item in state.get("claim_ledger", [])
+            )
+            if entry.support_status
+            in {ClaimSupportStatus.UNSUPPORTED, ClaimSupportStatus.CONTRADICTED}
+        ] + list(grounding.unverified_claims if grounding else [])
+        ingestion_warnings = [
+            (
+                f"document {readiness.document_id} {readiness.status.value}"
+                + (f" ({readiness.error_code})" if readiness.error_code else "")
+            )
+            for readiness in (
+                item
+                if isinstance(item, IngestionDocumentState)
+                else IngestionDocumentState.model_validate(item)
+                for item in state.get("ingestion_state", [])
+            )
+            if readiness.status
+            in {IngestionDocumentStatus.WARNINGS, IngestionDocumentStatus.FAILED}
+        ]
 
         context_parts: list[str] = [
             f"Document ID: {state['doc_id']}",
@@ -2998,7 +3016,25 @@ def make_finalization_node(
             f"User query: {state['user_query']}",
             f"Grounding status: {grounding.status}",
             f"Compliance status: {compliance_result.compliance_status}",
+            # Task 6.8: the approved plan is a finalization input, not just a
+            # routing artifact — the report must answer the plan that was
+            # approved.
+            "APPROVED PLAN (authoritative state):\n"
+            + json.dumps(
+                [step.model_dump(mode="json") for step in state.get("plan", [])],
+                ensure_ascii=False,
+            ),
         ]
+        if unresolved_claims:
+            context_parts.append(
+                "UNRESOLVED OR CONTRADICTED CLAIMS (must be disclosed, never argued away):\n"
+                + json.dumps(unresolved_claims, ensure_ascii=False)
+            )
+        if ingestion_warnings:
+            context_parts.append(
+                "INGESTION STATE WARNINGS (disclose; absence of evidence is not a negative answer):\n"
+                + json.dumps(ingestion_warnings, ensure_ascii=False)
+            )
         if risk_analysis:
             context_parts.append(
                 "RISK ANALYSIS (authoritative state):\n"
@@ -3080,6 +3116,17 @@ def make_finalization_node(
                 "grounding_status": GroundingStatus.VERIFIED,
                 "evidence_policy": state.get("evidence_policy", "mechanically_verified"),
                 "coverage": dict(state.get("coverage", {})),
+                # Task 6.8: disclose verification inputs without reconstruction.
+                "unresolved_claims": unresolved_claims,
+                "not_assessable_reasons": [
+                    reason.value
+                    for reason in (
+                        compliance_result.not_assessable_reasons
+                        if compliance_result.compliance_status == ComplianceStatus.NOT_ASSESSABLE
+                        else []
+                    )
+                ],
+                "ingestion_warnings": ingestion_warnings,
                 "self_reviewed": bool(state.get("self_reviewed", False)),
                 "reviewer_id": getattr(human_review, "reviewer_id", None),
                 "reviewer_role": getattr(human_review, "reviewer_role", None),
@@ -3113,15 +3160,17 @@ def make_finalization_node(
     return finalization_node
 
 
-def make_persist_memory_node(memory_service: Any) -> StateNode:
+def make_persist_memory_node(memory_service: Any, *, enabled: bool = True) -> StateNode:
     """Persist the approved final report through the agent-memory service.
 
-    Gated on human approval (7.1): an unapproved run performs zero memory writes
-    at any trust level and still completes. Fail-open by contract (7.2): a
-    memory failure records ``COGNEE_WRITE_FAILED`` and never aborts a completed
-    legal analysis. The document knowledge graph is not touched here at all
-    (7.3) — agent memory and the entity graph are different stores with
-    different owners.
+    Gated twice (task 6.10): the node-level human-approval gate (an unapproved
+    run performs zero memory writes at any trust level and still completes) and
+    the deployment feature flag ``AGENT_SAUL_MEMORY_PERSIST_ENABLED`` — while
+    the flag is off, even approved reports perform zero writes. Fail-open by
+    contract (7.2): a memory failure records ``COGNEE_WRITE_FAILED`` and never
+    aborts a completed legal analysis. The document knowledge graph is not
+    touched here at all (7.3) — agent memory and the entity graph are different
+    stores with different owners.
     """
 
     async def persist_memory_node(state: LegalAgentState) -> dict[str, Any]:
@@ -3138,6 +3187,19 @@ def make_persist_memory_node(memory_service: Any) -> StateNode:
         final_report = state.get("final_report")
         if final_report is None or not approved:
             log.info("persist_memory_skipped", approved=approved)
+            return {
+                "long_term_refs": long_term_refs,
+                "status": (
+                    WorkflowStatus.FAILED
+                    if state.get("status") == WorkflowStatus.FAILED
+                    else WorkflowStatus.COMPLETED
+                ),
+            }
+        if not enabled:
+            # Feature flag gate (task 6.10): a rejected/unapproved report can
+            # never be stored, and an approved report is stored only when the
+            # deployment enabled persistence.
+            log.info("persist_memory_disabled_by_flag")
             return {
                 "long_term_refs": long_term_refs,
                 "status": (

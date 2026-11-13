@@ -9,7 +9,6 @@ import pytest
 from returns.result import Success
 
 from app.features.documents.api.http.dto import EvidenceSearchRequest
-from app.features.documents.application.evidence import service as evidence_module
 from app.features.documents.application.evidence.service import (
     EvidenceHandle,
     EvidenceService,
@@ -78,8 +77,14 @@ def service(monkeypatch: pytest.MonkeyPatch) -> tuple[EvidenceService, _Repo]:
             )
         )
 
-    monkeypatch.setattr(evidence_module, "embed_text", _embed)
-    monkeypatch.setattr(evidence_module, "retrieve_fused", _retrieve)
+    # Harden 5.1: the evidence search delegates to the shared `retrieve`
+    # service, so the fused seam these tests stub lives in that module (the
+    # service calls `retrieve_fused` through the queries module at call time).
+    from app.features.documents.application.queries import documents as queries_documents
+    from app.features.documents.retrieval import service as retrieval_service
+
+    monkeypatch.setattr(retrieval_service, "embed_text", _embed)
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _retrieve)
     return EvidenceService(repo=repo, handle_store=InMemoryEvidenceHandleStore()), repo
 
 
@@ -233,3 +238,127 @@ async def test_search_distinguishes_not_ready_from_no_evidence(
 
     assert result.status == "index_not_ready"
     assert result.coverage.documents_not_ready == 1
+
+
+class _OutagedGraphiti:
+    """Graphiti stub whose search always fails (harden 5.2 outage fixture)."""
+
+    async def search(self, **_kwargs: object) -> list[object]:
+        from graphiti_core.errors import GraphitiError
+
+        message = "simulated outage"
+        raise GraphitiError(message)
+
+
+class _ThreeLegRepo(_Repo):
+    """Adds the fused-search legs to the handle-test double."""
+
+    async def bm25_search(self, **_kwargs: object) -> Any:
+        return Success([{"chunk_id": str(self.row["chunk_id"]), "score": -5.0}])
+
+    async def vector_search(self, **_kwargs: object) -> Any:
+        return Success([])
+
+    async def trigram_search(self, **_kwargs: object) -> Any:
+        return Success([])
+
+
+@pytest.mark.asyncio
+async def test_graphiti_outage_preserves_canonical_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legal-path outage (harden 5.2): graph coverage degrades, chunks stand."""
+    from app.config.settings import get_settings
+
+    repo = _ThreeLegRepo()
+
+    async def _embed(*_: object, **__: object) -> list[float]:
+        return [0.0]
+
+    from app.features.documents.retrieval import service as retrieval_service
+
+    monkeypatch.setattr(retrieval_service, "embed_text", _embed)
+    monkeypatch.setenv("DOCUMENTS_GRAPHITI_FUSION_ENABLED", "true")
+    get_settings.cache_clear()
+    try:
+        service = EvidenceService(
+            repo=repo,
+            handle_store=InMemoryEvidenceHandleStore(),
+            graphiti=_OutagedGraphiti(),
+        )
+        result = await service.search_evidence(
+            principal_id="alice",
+            tenant_id="tenant-a",
+            allowed_doc_ids=(DOC_A,),
+            thread_id="thread-a",
+            run_id="run-a",
+            request=EvidenceSearchRequest(query="termination"),
+            document_versions=((DOC_A, 1, None),),
+            document_contracts=((DOC_A, 1, (None,), True),),
+        )
+    finally:
+        get_settings.cache_clear()
+    assert result.status == "ok"
+    assert len(result.items) == 1
+    # The canonical chunk is present; the outage is disclosed as a coverage
+    # warning (row-level `graph_indexed` stays per-chunk truthful — the chunk
+    # itself is indexed, the graph SERVICE was down).
+    assert [warning.code for warning in result.warnings] == ["GRAPHITI_UNAVAILABLE"]
+    assert result.items[0].evidence.graph_indexed is True
+
+
+@pytest.mark.asyncio
+async def test_embedding_deadline_is_timeout_not_no_evidence(
+    service: tuple[EvidenceService, _Repo], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.features.documents.retrieval import service as retrieval_service
+
+    evidence, _repo = service
+
+    message = "embedding deadline"
+
+    async def _deadlined(*_: object, **__: object) -> list[float]:
+        raise TimeoutError(message)
+
+    monkeypatch.setattr(retrieval_service, "embed_text", _deadlined)
+    result = await evidence.search_evidence(
+        principal_id="alice",
+        tenant_id="tenant-a",
+        allowed_doc_ids=(DOC_A,),
+        thread_id="thread-a",
+        run_id="run-a",
+        request=EvidenceSearchRequest(query="termination"),
+    )
+    assert result.status == "timeout"
+    assert result.retryable is True
+    assert result.items == []
+
+
+@pytest.mark.asyncio
+async def test_no_evidence_is_not_retryable_and_reports_coverage(
+    service: tuple[EvidenceService, _Repo], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.features.documents.application.queries import documents as queries_documents
+    from app.features.documents.retrieval import service as retrieval_service
+
+    evidence, _repo = service
+
+    async def _embed(*_: object, **__: object) -> list[float]:
+        return [0.0]
+
+    async def _empty(**_: object) -> Any:
+        return Success(([], {}))
+
+    monkeypatch.setattr(retrieval_service, "embed_text", _embed)
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _empty)
+    result = await evidence.search_evidence(
+        principal_id="alice",
+        tenant_id="tenant-a",
+        allowed_doc_ids=(DOC_A,),
+        thread_id="thread-a",
+        run_id="run-a",
+        request=EvidenceSearchRequest(query="termination"),
+    )
+    assert result.status == "no_evidence"
+    assert result.retryable is False
+    assert result.coverage.documents_requested == 1

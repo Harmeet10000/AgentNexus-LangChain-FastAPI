@@ -172,46 +172,6 @@ _COMPLIANCE_SYSTEM_PROMPT = render_prompt_sections(
 )
 
 
-_NORMALIZATION_SYSTEM_PROMPT = render_prompt_sections(
-    (
-        "IDENTITY",
-        "You are a legal document structure normalizer preparing a record for high-stakes legal analysis.",
-    ),
-    (
-        "OBJECTIVE",
-        "Given raw document text, produce a NormalizedDocument with resolved hierarchy and normalized references.",
-    ),
-    (
-        "EXECUTION POLICY",
-        "Preserve the structure a serious legal reader would rely on: hierarchy, section references, annexures, and clause-reference integrity. For every section, include `level` as a 1-based hierarchy depth: top-level sections are 1, numbered children such as 3.1 are 2, and 3.1.2 is 3.",
-    ),
-    (
-        "CONSTRAINTS",
-        "Do not modify content. Perform structural normalization only. Every section must include section_id, title, content, and level. Never emit an empty or partial section; omit a section if its fields cannot be determined from the text. Output only NormalizedDocument.",
-    ),
-)
-
-
-_SEGMENTATION_SYSTEM_PROMPT = render_prompt_sections(
-    (
-        "IDENTITY",
-        "You are a legal clause segmentation engine preparing a document for rigorous downstream legal analysis.",
-    ),
-    (
-        "OBJECTIVE",
-        "Given a normalized document, identify and classify every clause boundary.",
-    ),
-    (
-        "EXECUTION POLICY",
-        "Segment in a way that preserves litigable meaning, clause boundaries, and exact source traceability for later citation and reasoning.",
-    ),
-    (
-        "CONSTRAINTS",
-        "Classify clauses only into the allowed ClauseType values. Assign stable unique clause_ids using the format C-001, C-002, and so on. Every segment must include clause_id, clause_type, text, section_ref, start_char, and end_char. Preserve exact character offsets from the source text; omit incomplete segments rather than returning partial objects. Output only ClauseSegmentationOutput.",
-    ),
-)
-
-
 _ENTITY_EXTRACTION_SYSTEM_PROMPT = render_prompt_sections(
     (
         "IDENTITY",

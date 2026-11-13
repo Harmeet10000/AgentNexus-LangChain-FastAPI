@@ -1,0 +1,495 @@
+{
+  "experiment": "multi-hop A/B for the compiled retrieval graph (harden 5.10 / agentic-retrieval-loop)",
+  "golden_set_version": "legal_retrieval_v2",
+  "commit_identifier": "0703ed55d02a4621ded24f4528ae7e96fa822c75",
+  "cutoff": 10,
+  "arms": {
+    "control": {
+      "report": "evals/reports/ab_multihop_control_legal_retrieval_v2.json",
+      "branches": "bm25,trigram",
+      "weights": "bm25=1.0,trigram=1.0",
+      "wall_clock_seconds": 81.9,
+      "aggregates": {
+        "recall_at_k": 0.5774193548387097,
+        "reciprocal_rank": 0.3888863287250384,
+        "ndcg_at_k": 0.4304632615580462,
+        "precision_at_k": 0.06064516129032258
+      },
+      "provider_tokens": 0,
+      "provider_cost_usd": 0.0
+    },
+    "treatment_graph_branch": {
+      "report": "evals/reports/ab_multihop_graph_legal_retrieval_v2.json",
+      "branches": "bm25,trigram,graph",
+      "weights": "bm25=1.0,trigram=1.0,graph=0.1",
+      "wall_clock_seconds": 86.4,
+      "aggregates": {
+        "recall_at_k": 0.603225806451613,
+        "reciprocal_rank": 0.4070071684587813,
+        "ndcg_at_k": 0.45075539445453705,
+        "precision_at_k": 0.06387096774193549
+      },
+      "provider_tokens": 0,
+      "provider_cost_usd": 0.0
+    }
+  },
+  "measurement_note": "Offline deterministic harness over the recorded corpus artifacts; the 'graph' leg is the recorded entity-anchor OFFLINE PROXY for the live Graphiti read (same proxy and weights as evals/reports/graphiti_branch_legal_retrieval_v2_wave4.measurements.json). Latency is harness wall-clock (CPU-bound ranking), NOT serving latency. Provider tokens/cost are zero offline; the LIVE compiled-graph multi-hop A/B (graph_neo4j node on/off, measured p95 and token spend) remains PENDING: quota-blocked on the Gemini free tier per scripts/live_measurement/RUNBOOK.md (root cause recorded 2026-11-10). The retain-or-delete decision for the compiled graph is therefore recorded as PENDING, conditional on that live run; the frozen shape test (tests/unit/shared/langgraph_layer/test_retrieval_graph_shape.py) keeps the topology pinned until then.",
+  "quality_stratified_by_question_type": {
+    "amendment_overrides": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 0.75,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.4281
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 0.75,
+        "reciprocal_rank": 0.3274,
+        "ndcg_at_k": 0.4224
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": -0.0059,
+        "ndcg_at_k": -0.0057
+      }
+    },
+    "annexure_as_main": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 0.25,
+        "reciprocal_rank": 0.0833,
+        "ndcg_at_k": 0.125
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.2083,
+        "ndcg_at_k": 0.2827
+      },
+      "delta": {
+        "recall_at_k": 0.25,
+        "reciprocal_rank": 0.125,
+        "ndcg_at_k": 0.1577
+      }
+    },
+    "conflicting_clauses": {
+      "control": {
+        "n": 5,
+        "recall_at_k": 0.6,
+        "reciprocal_rank": 0.34,
+        "ndcg_at_k": 0.3583
+      },
+      "graph_branch": {
+        "n": 5,
+        "recall_at_k": 0.6,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3522
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": -0.0067,
+        "ndcg_at_k": -0.0061
+      }
+    },
+    "cross_tenant_isolation": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "definition_exception_trap": {
+      "control": {
+        "n": 5,
+        "recall_at_k": 0.6,
+        "reciprocal_rank": 0.2619,
+        "ndcg_at_k": 0.3379
+      },
+      "graph_branch": {
+        "n": 5,
+        "recall_at_k": 0.6,
+        "reciprocal_rank": 0.2571,
+        "ndcg_at_k": 0.3333
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": -0.0048,
+        "ndcg_at_k": -0.0046
+      }
+    },
+    "direct_answer": {
+      "control": {
+        "n": 52,
+        "recall_at_k": 0.75,
+        "reciprocal_rank": 0.5704,
+        "ndcg_at_k": 0.6139
+      },
+      "graph_branch": {
+        "n": 52,
+        "recall_at_k": 0.75,
+        "reciprocal_rank": 0.5707,
+        "ndcg_at_k": 0.6137
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0003,
+        "ndcg_at_k": -0.0002
+      }
+    },
+    "footnote_as_operative": {
+      "control": {
+        "n": 3,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      "graph_branch": {
+        "n": 3,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "handle_integrity": {
+      "control": {
+        "n": 3,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3333
+      },
+      "graph_branch": {
+        "n": 3,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3333
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "index_not_ready": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "injection_content": {
+      "control": {
+        "n": 5,
+        "recall_at_k": 0.9,
+        "reciprocal_rank": 0.5733,
+        "ndcg_at_k": 0.5974
+      },
+      "graph_branch": {
+        "n": 5,
+        "recall_at_k": 0.9,
+        "reciprocal_rank": 0.5686,
+        "ndcg_at_k": 0.5929
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": -0.0047,
+        "ndcg_at_k": -0.0045
+      }
+    },
+    "multi_contract_boundary": {
+      "control": {
+        "n": 12,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.2465,
+        "ndcg_at_k": 0.347
+      },
+      "graph_branch": {
+        "n": 12,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.3021,
+        "ndcg_at_k": 0.3893
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0556,
+        "ndcg_at_k": 0.0423
+      }
+    },
+    "multi_document": {
+      "control": {
+        "n": 6,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.2222,
+        "ndcg_at_k": 0.2324
+      },
+      "graph_branch": {
+        "n": 6,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.2685,
+        "ndcg_at_k": 0.3292
+      },
+      "delta": {
+        "recall_at_k": 0.1667,
+        "reciprocal_rank": 0.0463,
+        "ndcg_at_k": 0.0968
+      }
+    },
+    "multi_hop": {
+      "control": {
+        "n": 6,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.3667,
+        "ndcg_at_k": 0.3924
+      },
+      "graph_branch": {
+        "n": 6,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.3667,
+        "ndcg_at_k": 0.3924
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "near_miss_clause": {
+      "control": {
+        "n": 6,
+        "recall_at_k": 0.8333,
+        "reciprocal_rank": 0.4167,
+        "ndcg_at_k": 0.5258
+      },
+      "graph_branch": {
+        "n": 6,
+        "recall_at_k": 0.8333,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.5873
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0833,
+        "ndcg_at_k": 0.0615
+      }
+    },
+    "no_evidence_vs_ingestion_failure": {
+      "control": {
+        "n": 5,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "graph_branch": {
+        "n": 5,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "ocr_semantic_flip": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.375
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.5
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.1667,
+        "ndcg_at_k": 0.125
+      }
+    },
+    "partial_coverage_answer": {
+      "control": {
+        "n": 3,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.6667,
+        "ndcg_at_k": 0.6667
+      },
+      "graph_branch": {
+        "n": 3,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.6667,
+        "ndcg_at_k": 0.6667
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "stale_version": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 0.25,
+        "reciprocal_rank": 0.0833,
+        "ndcg_at_k": 0.125
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 0.75,
+        "reciprocal_rank": 0.1548,
+        "ndcg_at_k": 0.2917
+      },
+      "delta": {
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.0715,
+        "ndcg_at_k": 0.1667
+      }
+    },
+    "statute_not_in_corpus": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "table_misalignment": {
+      "control": {
+        "n": 4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.6042,
+        "ndcg_at_k": 0.6967
+      },
+      "graph_branch": {
+        "n": 4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.6042,
+        "ndcg_at_k": 0.6967
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "unanswerable": {
+      "control": {
+        "n": 5,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "graph_branch": {
+        "n": 5,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "unknown": {
+      "control": {
+        "n": 1,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      "graph_branch": {
+        "n": 1,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "wrong_date_version_authority": {
+      "control": {
+        "n": 3,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.1667,
+        "ndcg_at_k": 0.2103
+      },
+      "graph_branch": {
+        "n": 3,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.1667,
+        "ndcg_at_k": 0.2103
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "wrong_jurisdiction": {
+      "control": {
+        "n": 3,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.8333,
+        "ndcg_at_k": 0.877
+      },
+      "graph_branch": {
+        "n": 3,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.8333,
+        "ndcg_at_k": 0.877
+      },
+      "delta": {
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    }
+  }
+}

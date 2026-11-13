@@ -110,3 +110,28 @@ async def test_no_knowledge_graph_client_method_is_called_during_persistence() -
     state = _state(graphiti=_GraphClientProbe())  # a hostile client, had it been used
     result = await node(state)
     assert result["long_term_refs"], "the approved write must have happened"
+
+
+# ---------------------------------------------------------------------------
+# Task 6.10: the deployment feature flag gates the write seam on top of the
+# approval gate — an approved report is stored only when persistence is
+# enabled, so a rejected/unapproved report can never be stored either way.
+# ---------------------------------------------------------------------------
+
+
+async def test_flag_disabled_approved_run_writes_zero_times() -> None:
+    service = _RecordingService()
+    node = make_persist_memory_node(service, enabled=False)
+    result = await node(_state())
+    assert service.calls == []
+    status = result["status"]
+    assert getattr(status, "value", status) == "completed"
+    assert result["long_term_refs"] == []
+
+
+async def test_flag_enabled_approved_run_still_writes_once() -> None:
+    service = _RecordingService()
+    node = make_persist_memory_node(service, enabled=True)
+    result = await node(_state())
+    assert len(service.calls) == 1
+    assert result["long_term_refs"]

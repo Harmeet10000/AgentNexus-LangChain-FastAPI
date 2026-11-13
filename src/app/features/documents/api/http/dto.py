@@ -168,7 +168,15 @@ class EvidenceCoverage(BaseModel):
 
 
 class EvidenceResultEnvelope(BaseModel):
-    """Common status/provenance envelope for evidence operations."""
+    """Common status/provenance envelope for evidence operations.
+
+    Harden 5.6: the typed availability vocabulary plus truthful retryability.
+    Provenance rides in `evidence_policy`, `request_id`, and the per-item
+    `EvidenceRef` (document/pipeline version, page, contract, graph state);
+    `retryable` is derived from the status — a transient outage or deadline is
+    retryable, a valid negative (`no_evidence`), an authorization boundary,
+    and an exhausted per-run budget are not.
+    """
 
     model_config = _READ_MODEL_CONFIG
 
@@ -177,7 +185,31 @@ class EvidenceResultEnvelope(BaseModel):
     coverage: EvidenceCoverage = Field(default_factory=EvidenceCoverage)
     request_id: str | None = None
     message: str | None = None
+    retryable: bool = False
     warnings: list[QualityWarningDTO] = Field(default_factory=list)
+
+
+#: Harden 5.6: empty-result ambiguity is resolved by status, and retryability
+#: is a status-level fact, not a per-response judgment call.
+EVIDENCE_STATUS_RETRYABLE: dict[str, bool] = {
+    "ok": False,
+    "no_evidence": False,
+    "index_not_ready": False,
+    "ingestion_failed": False,
+    "failed": False,
+    "unauthorized": False,
+    "invalid_handle": False,
+    "stale_version": False,
+    "expired": False,
+    "transient_failure": True,
+    "timeout": True,
+    "budget_exhausted": False,
+}
+
+
+def evidence_status_retryable(status: str) -> bool:
+    """The canonical retryability for an evidence status."""
+    return EVIDENCE_STATUS_RETRYABLE.get(status, False)
 
 
 class EvidenceSearchRequest(BaseModel):

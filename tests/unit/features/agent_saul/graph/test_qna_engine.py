@@ -347,11 +347,13 @@ def test_no_toolset_gains_a_retrieval_engine_surface(monkeypatch: pytest.MonkeyP
         "read_evidence_by_id",
         "get_ingestion_state",
     ]
+    # Harden 5.8: compliance keeps its documented statute-retrieval seat.
     assert compliance_tools == [
         "transfer_to_orchestrator",
         "transfer_to_risk",
         "search_evidence",
         "read_evidence_by_id",
+        "retrieve_statute_section",
         "get_ingestion_state",
     ]
     # No registered tool exposes the engine, and the projection keeps its

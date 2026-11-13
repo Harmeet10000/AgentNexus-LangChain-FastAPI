@@ -350,3 +350,191 @@ async def test_verdict_escalations_never_leak_across_threads() -> None:
     payload_b = paused_b["__interrupt__"][0].value
     assert "escalations" not in payload_b
     assert payload_b["grounding_verified"] is True
+
+
+# ---------------------------------------------------------------------------
+# Task 6.7: rendering of unsupported/contradicted/not-assessed items and
+# override recording (reason, identity, self_reviewed, contract identity).
+# ---------------------------------------------------------------------------
+
+
+def _review_state() -> dict[str, Any]:
+    from app.features.agent_saul.domain.state import ClauseSegment, ClauseType
+
+    state = _state()
+    state["segments"] = [
+        ClauseSegment(
+            clause_id="canonical:doc-a:v1:chunk:1",
+            clause_type=ClauseType.INDEMNITY,
+            section_ref="7.1",
+            start_char=0,
+            end_char=10,
+            document_id="doc-a",
+            document_version=1,
+            chunk_id="chunk-1",
+            chunk_index=1,
+            contract_index=0,
+        ),
+        ClauseSegment(
+            clause_id="canonical:doc-a:v1:chunk:2",
+            clause_type=ClauseType.TERMINATION,
+            section_ref="12.1",
+            start_char=0,
+            end_char=10,
+            document_id="doc-a",
+            document_version=1,
+            chunk_id="chunk-2",
+            chunk_index=2,
+            contract_index=1,
+        ),
+    ]
+    return state
+
+
+async def test_review_payload_renders_unsupported_contradicted_and_not_assessed() -> None:
+    """Every item a reviewer approves that is not machine-supported is rendered."""
+    from app.features.agent_saul.domain.state import (
+        Citation,
+        ClaimLedgerEntry,
+        ClaimSupportStatus,
+        ComplianceStatus,
+        RiskFinding,
+    )
+
+    _sink, review_node = make_human_review_entry()
+    state = _review_state()
+    state["risk_analysis"] = RiskAnalysisOutput(
+        findings=[
+            RiskFinding(
+                risk_id="R-1",
+                clause_id="canonical:doc-a:v1:chunk:1",
+                label=RiskLabel.HIGH,
+                title="Uncapped indemnity",
+                explanation="no cap",
+                citations=[Citation(claim="c", source="evh-1", confidence=0.9)],
+                contract_index=0,
+                support_status=ClaimSupportStatus.UNSUPPORTED,
+            )
+        ],
+        summary="one unsupported finding",
+    )
+    state["compliance_result"] = ComplianceOutput(
+        findings=[
+            ComplianceFinding(
+                finding_id="F-1",
+                clause_id="canonical:doc-a:v1:chunk:2",
+                statute="Act s1",
+                is_compliant=False,
+                explanation="contradicted by authority",
+                citations=[Citation(claim="c", source="evh-2", confidence=0.9)],
+                contract_index=1,
+                support_status=ClaimSupportStatus.NOT_ASSESSABLE,
+            )
+        ],
+        jurisdiction="India",
+        summary="one not-assessable finding",
+        compliance_status=ComplianceStatus.NOT_ASSESSABLE,
+    )
+    state["claim_ledger"] = [
+        ClaimLedgerEntry(
+            claim_id="L-1",
+            claim="indemnity is capped",
+            evidence_ids=["evh-1"],
+            contract_index=0,
+            support_status=ClaimSupportStatus.CONTRADICTED,
+        )
+    ]
+
+    builder = StateGraph(LegalAgentState)
+    builder.add_node("review", review_node)
+    builder.add_edge(START, "review")
+    builder.add_edge("review", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+
+    paused = await graph.ainvoke(state, {"configurable": {"thread_id": "thread-render"}})
+
+    payload = paused["__interrupt__"][0].value
+    rendered = {item["finding_id"]: item for item in payload["unsupported_items"]}
+    assert rendered["R-1"]["support_status"] == "unsupported"
+    assert rendered["R-1"]["contract_index"] == 0
+    assert rendered["F-1"]["support_status"] == "not_assessable"
+    assert rendered["F-1"]["contract_index"] == 1
+    assert payload["compliance_status"] == "not_assessable"
+    assert payload["compliance_not_assessable_reasons"] == ["insufficient_coverage"]
+    assert rendered["L-1"]["support_status"] == "contradicted"
+    assert rendered["L-1"]["title"] == "indemnity is capped"
+
+
+async def test_supported_items_do_not_render_as_unsupported() -> None:
+    from app.features.agent_saul.domain.state import Citation, ClaimSupportStatus, RiskFinding
+
+    _sink, review_node = make_human_review_entry()
+    state = _review_state()
+    state["risk_analysis"] = RiskAnalysisOutput(
+        findings=[
+            RiskFinding(
+                risk_id="R-ok",
+                clause_id="canonical:doc-a:v1:chunk:1",
+                label=RiskLabel.LOW,
+                title="Supported",
+                explanation="fine",
+                citations=[Citation(claim="c", source="evh-1", confidence=0.9)],
+                support_status=ClaimSupportStatus.SUPPORTED,
+            )
+        ],
+        summary="supported",
+    )
+
+    builder = StateGraph(LegalAgentState)
+    builder.add_node("review", review_node)
+    builder.add_edge(START, "review")
+    builder.add_edge("review", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+
+    paused = await graph.ainvoke(state, {"configurable": {"thread_id": "thread-clean"}})
+
+    assert paused["__interrupt__"][0].value["unsupported_items"] == []
+
+
+async def test_override_records_reason_identity_and_contract_identity() -> None:
+    """The override reason and stamped contract identity survive into the report."""
+    _sink, review_node = make_human_review_entry()
+    state = _review_state()
+
+    builder = StateGraph(LegalAgentState)
+    builder.add_node("review", review_node)
+    builder.add_edge(START, "review")
+    builder.add_edge("review", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-override"}}
+
+    await graph.ainvoke(state, config)
+    resumed = await graph.ainvoke(
+        Command(
+            resume={
+                "action": "approve",
+                "reviewer_id": "reviewer-9",
+                "reviewer_role": "reviewer",
+                "overrides": [
+                    {
+                        "clause_id": "canonical:doc-a:v1:chunk:2",
+                        "original_label": "high",
+                        "override_label": "medium",
+                        "reason_code": "REVIEWER_JUDGEMENT",
+                        "comment": "re-classified after authority re-read",
+                    }
+                ],
+            }
+        ),
+        config,
+    )
+
+    review = resumed["human_review"]
+    assert review.approved is True
+    assert review.reviewer_id == "reviewer-9"
+    override = review.overrides[0]
+    assert override.reason_code == "REVIEWER_JUDGEMENT"
+    # Contract identity is stamped from the checkpointed segment, never taken
+    # from the resume payload.
+    assert override.contract_index == 1
+    assert resumed["self_reviewed"] is False

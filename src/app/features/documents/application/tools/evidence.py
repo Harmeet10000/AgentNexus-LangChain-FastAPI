@@ -56,6 +56,10 @@ def make_search_evidence_tool(service: EvidenceService) -> BaseTool:
                 document_kind=document_kind,
                 require_graph_indexed=require_graph_indexed,
             ),
+            # Server-derived version/contract scope: the Graphiti partition
+            # fan-out in the fused retrieval leg resolves from these.
+            document_versions=authz.document_versions,
+            document_contracts=authz.document_contracts,
         )
         return result.model_dump(mode="json")
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 import httpx
 
 from app.config import get_settings
+from app.observability.degradation import RERANK_FALLBACK, record_degradation
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -66,6 +67,7 @@ class HostedReranker:
             logger.bind(operation="hosted_rerank").warning(
                 "hosted_reranker_key_absent_degrading_to_fused_order"
             )
+            record_degradation(RERANK_FALLBACK, surface="hosted_rerank", reason="key_absent")
             return chunks[:limit]
         try:
             return await self._rerank_remote(query, chunks, limit=limit)
@@ -74,6 +76,7 @@ class HostedReranker:
             logger.bind(model=self._model, operation="hosted_rerank", error=str(exc)).warning(
                 "hosted_rerank_failed"
             )
+            record_degradation(RERANK_FALLBACK, surface="hosted_rerank", reason="provider_failure")
             return chunks[:limit]
 
     async def _rerank_remote(

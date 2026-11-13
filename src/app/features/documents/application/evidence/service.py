@@ -16,10 +16,8 @@ from typing import TYPE_CHECKING, Protocol, cast
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
-from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
-    build_search_filter_params,
 )
 from app.features.documents.api.http.dto import (
     EvidenceCoverage,
@@ -32,6 +30,7 @@ from app.features.documents.api.http.dto import (
     EvidenceSearchResponse,
     IngestionDocumentState,
     IngestionStateResponse,
+    QualityWarningDTO,
 )
 from app.features.documents.application.access_audit import (
     DocumentAccessAuditEvent,
@@ -39,8 +38,19 @@ from app.features.documents.application.access_audit import (
     InMemoryDocumentAccessAuditRecorder,
     SqlDocumentAccessAuditRecorder,
 )
-from app.features.documents.application.queries.documents import retrieve_fused
 from app.features.documents.domain.errors import DocumentStatusNotFoundError
+from app.features.documents.retrieval import row_hydration
+from app.features.documents.retrieval.service import (
+    RetrievalFilters,
+    RetrievalRequestContext,
+    retrieve,
+)
+from app.observability.degradation import (
+    COMPLETED_WITH_WARNINGS,
+    INDEX_NOT_READY,
+    NO_EVIDENCE,
+    record_degradation,
+)
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
@@ -196,12 +206,19 @@ class EvidenceService:
         audit_recorder: DocumentAccessAuditRecorder | None = None,
         handle_ttl_seconds: int = DEFAULT_HANDLE_TTL_SECONDS,
         snippet_chars: int = DEFAULT_SNIPPET_CHARS,
+        graphiti: Any | None = None,
+        redis: Any | None = None,
     ) -> None:
         self.repo = repo
         self.handle_store = handle_store or InMemoryEvidenceHandleStore()
         self.handle_ttl_seconds = handle_ttl_seconds
         self.snippet_chars = snippet_chars
         self.audit_recorder = audit_recorder or InMemoryDocumentAccessAuditRecorder()
+        # Optional relationship-graph client for the fused Graphiti leg (the
+        # `retrieve` service joins it only when the fusion flag is set); an
+        # outage degrades coverage, never the canonical chunks.
+        self.graphiti = graphiti
+        self.redis = redis
 
     async def _record_access(
         self,
@@ -244,6 +261,7 @@ class EvidenceService:
                 return response.model_copy(
                     update={
                         "status": "transient_failure",
+                        "retryable": True,
                         "message": "Document access audit is unavailable.",
                         "items": [],
                     }
@@ -252,6 +270,7 @@ class EvidenceService:
                 return response.model_copy(
                     update={
                         "status": "transient_failure",
+                        "retryable": True,
                         "message": "Document access audit is unavailable.",
                         "items": [],
                     }
@@ -259,6 +278,7 @@ class EvidenceService:
             return response.model_copy(
                 update={
                     "status": "transient_failure",
+                    "retryable": True,
                     "message": "Document access audit is unavailable.",
                     "documents": [],
                 }
@@ -277,6 +297,8 @@ class EvidenceService:
         checkpoint_id: str | None = None,
         request_id: str | None = None,
         evidence_policy: EvidencePolicy = "mechanically_verified",
+        document_versions: Sequence[tuple[str, int, str | None]] = (),
+        document_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]] = (),
     ) -> EvidenceSearchResponse:
         response = await self._search_evidence(
             principal_id=principal_id,
@@ -288,6 +310,8 @@ class EvidenceService:
             checkpoint_id=checkpoint_id,
             request_id=request_id,
             evidence_policy=evidence_policy,
+            document_versions=document_versions,
+            document_contracts=document_contracts,
         )
         return cast(
             "EvidenceSearchResponse",
@@ -305,7 +329,7 @@ class EvidenceService:
             ),
         )
 
-    async def _search_evidence(  # noqa: PLR0914 — evidence issue, retrieval, and scope metadata
+    async def _search_evidence(
         self,
         *,
         principal_id: str,
@@ -317,6 +341,8 @@ class EvidenceService:
         checkpoint_id: str | None = None,
         request_id: str | None = None,
         evidence_policy: EvidencePolicy = "mechanically_verified",
+        document_versions: Sequence[tuple[str, int, str | None]] = (),
+        document_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]] = (),
     ) -> EvidenceSearchResponse:
         checkpoint_id = checkpoint_id or f"run:{run_id}"
         scope = _normalized_scope(allowed_doc_ids)
@@ -342,54 +368,59 @@ class EvidenceService:
         if isinstance(readiness, EvidenceSearchResponse):
             return readiness
 
-        query_embedding = await embed_text(request.query, task_type=EmbeddingTaskType.QUERY)
-        filter_params = build_search_filter_params(
-            metadata_filter={
-                "document_ids": list(scope),
-                "document_kind": request.document_kind,
-                "jurisdiction": request.jurisdiction,
-                "contract_type": request.contract_type,
-                "contract_index": request.contract_index,
-                "clause_type": request.clause_type,
-                "require_graphiti_verified": request.require_graph_indexed,
-            }
+        # Harden 5.1: the evidence search runs through the one shared
+        # `retrieve(...)` service — fused retrieval, source narrowing,
+        # optional Graphiti narrowing/coverage, rerank fallback, and token
+        # budgeting are that service's stages, not a second implementation.
+        result = await retrieve(
+            RetrievalRequestContext(
+                principal_id=principal_id,
+                tenant_id=tenant_id,
+                allowed_doc_ids=scope,
+                document_versions=document_versions,
+                document_contracts=document_contracts,
+                repo=self.repo,
+                redis=self.redis,
+                graphiti=self.graphiti,
+            ),
+            request.query,
+            RetrievalFilters(
+                jurisdiction=request.jurisdiction,
+                contract_type=request.contract_type,
+                contract_index=request.contract_index,
+                clause_type=request.clause_type,
+                document_kind=request.document_kind,
+                require_graphiti_verified=request.require_graph_indexed,
+                candidate_limit=request.candidate_limit,
+            ),
+            request.limit,
+            None,
         )
-        fused_result = await retrieve_fused(
-            repo=self.repo,
-            user_id=principal_id,
-            tenant_id=tenant_id,
-            query_text=request.query,
-            query_embedding=query_embedding,
-            candidate_limit=request.candidate_limit,
-            limit=request.limit,
-            filter_params=filter_params,
-            weights=None,
-        )
-        if isinstance(fused_result, Failure):
+        if result.status != "ok":
+            # Typed statuses travel verbatim (harden 5.6): an outage, a
+            # deadline, or an exhausted budget is never `no_evidence`.
             return EvidenceSearchResponse(
-                status="transient_failure",
+                status=result.status,
                 evidence_policy=evidence_policy,
                 request_id=request_id,
-                message=fused_result.failure().message,
-            )
-
-        fused, lookup = fused_result.unwrap()
-        if not fused:
-            return EvidenceSearchResponse(
-                status="no_evidence",
-                evidence_policy=evidence_policy,
-                request_id=request_id,
-                message="No evidence was found in the authorized documents.",
-                coverage=EvidenceCoverage(documents_requested=len(scope)),
+                message=result.message,
+                retryable=result.retryable,
+                coverage=result.coverage,
+                warnings=[
+                    QualityWarningDTO(
+                        stage=warning.stage,
+                        code=warning.code,
+                        message=warning.message,
+                        severity=warning.severity,
+                    )
+                    for warning in result.warnings
+                ],
             )
 
         items: list[EvidenceSearchItem] = []
         graph_indexed_doc_ids: set[str] = set()
         result_doc_ids: set[str] = set()
-        for ranked in fused:
-            row = lookup.get(ranked.chunk_id)
-            if row is None:
-                continue
+        for row in result.rows:
             document_id = str(row.get("document_id", ""))
             # Defense in depth: the repository filter is authoritative, but do
             # not issue a capability if a narrow test double violated it.
@@ -400,10 +431,11 @@ class EvidenceService:
             result_doc_ids.add(document_id)
             if graph_indexed_flag:
                 graph_indexed_doc_ids.add(document_id)
+            chunk_id = str(row["chunk_id"])
             evidence_id = f"evh_{secrets.token_urlsafe(32)}"
             handle = EvidenceHandle(
                 evidence_id=evidence_id,
-                chunk_id=ranked.chunk_id,
+                chunk_id=chunk_id,
                 tenant_id=tenant_id,
                 principal_id=principal_id,
                 thread_id=thread_id,
@@ -420,12 +452,12 @@ class EvidenceService:
             ref = _evidence_ref(
                 handle=handle,
                 graph_indexed=graph_indexed_flag,
-                score=ranked.score,
-                rank=ranked.rank,
+                score=result.score_by_chunk_id.get(chunk_id, 0.0),
+                rank=result.rank_by_chunk_id.get(chunk_id, 0),
                 page_no=int(row.get("page_no") or 0),
                 graph_indexed_at=_graph_indexed_at(row),
             )
-            content = str(row.get("content") or "")
+            content = str(row.get("chunk_text") or "")
             items.append(
                 EvidenceSearchItem(
                     evidence=ref,
@@ -442,6 +474,7 @@ class EvidenceService:
             )
 
         if not items:
+            record_degradation(NO_EVIDENCE, surface="evidence_search")
             return EvidenceSearchResponse(
                 status="no_evidence",
                 evidence_policy=evidence_policy,
@@ -453,6 +486,17 @@ class EvidenceService:
             evidence_policy=evidence_policy,
             request_id=request_id,
             items=items,
+            # Degradation disclosures (e.g. a Graphiti outage) ride with a
+            # successful response too — coverage stays truthful.
+            warnings=[
+                QualityWarningDTO(
+                    stage=warning.stage,
+                    code=warning.code,
+                    message=warning.message,
+                    severity=warning.severity,
+                )
+                for warning in result.warnings
+            ],
             coverage=EvidenceCoverage(
                 documents_requested=len(scope),
                 # Readiness is measured from the authorized status query, not
@@ -495,6 +539,7 @@ class EvidenceService:
                     )
                 return EvidenceSearchResponse(
                     status="transient_failure",
+                    retryable=True,
                     evidence_policy=evidence_policy,
                     request_id=request_id,
                     message=result.failure().message,
@@ -524,6 +569,7 @@ class EvidenceService:
                 coverage=coverage,
             )
         if coverage.documents_not_ready:
+            record_degradation(INDEX_NOT_READY, surface="evidence_search")
             return EvidenceSearchResponse(
                 status="index_not_ready",
                 evidence_policy=evidence_policy,
@@ -628,6 +674,7 @@ class EvidenceService:
         if isinstance(chunk_result, Failure):
             return EvidenceReadResponse(
                 status="transient_failure",
+                retryable=True,
                 evidence_policy=evidence_policy,
                 request_id=request_id,
                 message=chunk_result.failure().message,
@@ -748,6 +795,7 @@ class EvidenceService:
                     )
                 return IngestionStateResponse(
                     status="transient_failure",
+                    retryable=True,
                     evidence_policy=evidence_policy,
                     request_id=request_id,
                     message=result.failure().message,
@@ -793,8 +841,15 @@ def build_evidence_service(
     redis: Redis | None = None,
     handle_ttl_seconds: int = DEFAULT_HANDLE_TTL_SECONDS,
     audit_recorder: DocumentAccessAuditRecorder | None = None,
+    graphiti: Any | None = None,
 ) -> EvidenceService:
-    """Construct the production evidence service with an explicit handle backend."""
+    """Construct the production evidence service with an explicit handle backend.
+
+    ``graphiti`` is the optional relationship-graph client: the `retrieve`
+    service joins the fused Graphiti leg with it only when the fusion flag is
+    set, and an outage degrades coverage (harden 5.2) — canonical chunks are
+    never suppressed by graph availability.
+    """
     if repo is not None and session_factory is not None:
         message = "pass either repo or session_factory, not both"
         raise ValueError(message)
@@ -813,6 +868,8 @@ def build_evidence_service(
         handle_store=store,
         handle_ttl_seconds=handle_ttl_seconds,
         audit_recorder=audit_recorder,
+        graphiti=graphiti,
+        redis=redis,
     )
 
 
@@ -820,56 +877,27 @@ def _normalized_scope(document_ids: Sequence[str]) -> tuple[str, ...]:
     return tuple(sorted({str(document_id) for document_id in document_ids if str(document_id)}))
 
 
+# Harden 5.3: provenance reading is centralized in `retrieval.row_hydration`.
+# These aliases keep the evidence module's call sites and its test seams
+# stable while the ONE implementation lives in the retrieval package.
 def _document_version(row: dict[str, object]) -> int:
-    value = row.get("document_version", 1)
-    try:
-        return int(cast("int | str", value))
-    except (TypeError, ValueError):
-        return 1
+    return row_hydration.document_version(row)
 
 
 def _pipeline_version(row: dict[str, object]) -> str | None:
-    explicit = row.get("pipeline_version")
-    if explicit is not None:
-        return str(explicit)
-    for key in ("chunk_metadata", "document_metadata"):
-        value = row.get(key)
-        if isinstance(value, dict):
-            version = value.get("pipeline_version") or value.get("extraction_version")
-            if version is not None:
-                return str(version)
-    return None
+    return row_hydration.pipeline_version(row)
 
 
 def _contract_index(row: dict[str, object]) -> int | None:
-    """Read the explicit multi-contract identity, preserving legacy NULL."""
-    value = row.get("contract_index")
-    if value is None:
-        value = _record_metadata(row).get("contract_index")
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value >= 0 else None
-    if isinstance(value, str):
-        try:
-            parsed = int(value)
-        except ValueError:
-            return None
-        return parsed if parsed >= 0 else None
-    return None
+    return row_hydration.contract_index(row)
 
 
 def _record_metadata(row: dict[str, object]) -> dict[str, object]:
-    value = row.get("chunk_metadata")
-    if not isinstance(value, dict):
-        return {}
-    return {str(key): item for key, item in value.items()}
+    return row_hydration.record_metadata(row)
 
 
 def _bounded_snippet(content: str, maximum: int) -> str:
-    if len(content) <= maximum:
-        return content
-    return content[: max(1, maximum - 1)].rstrip() + "…"
+    return row_hydration.bounded_snippet(content, maximum)
 
 
 def _evidence_ref(
@@ -901,8 +929,7 @@ def _evidence_ref(
 
 
 def _graph_indexed_at(row: dict[str, object]) -> datetime | None:
-    value = row.get("graph_indexed_at")
-    return value if isinstance(value, datetime) else None
+    return row_hydration.graph_indexed_at(row)
 
 
 def _ingestion_state(record: dict[str, object], document_id: str) -> IngestionDocumentState:
@@ -921,6 +948,10 @@ def _ingestion_state(record: dict[str, object], document_id: str) -> IngestionDo
         state = "completed_with_warnings"
     else:
         state = "index_not_ready"
+    if state == "completed_with_warnings":
+        # O1: the warning terminal state is counted where it is observed
+        # (harden 5.9); the worker boundary owns the primary counter.
+        record_degradation(COMPLETED_WITH_WARNINGS, surface="ingestion_state_read")
     return IngestionDocumentState(
         document_id=document_id,
         state=state,

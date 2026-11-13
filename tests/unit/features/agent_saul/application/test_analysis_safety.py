@@ -32,9 +32,11 @@ class _Agent:
         self.result = result
         self.error = error
         self.calls = 0
+        self.last_input: Any = None
 
     async def ainvoke(self, _input: Any) -> Any:
         self.calls += 1
+        self.last_input = _input
         if self.error is not None:
             raise self.error
         return self.result
@@ -384,6 +386,8 @@ async def test_finalization_marks_report_with_authoritative_statuses() -> None:
         citations=[_citation()],
     )
     state["human_review"] = type("Review", (), {"approved": True, "overrides": []})()
+    # Task 6.8: finalization consumes an approved plan.
+    state["plan_approved"] = True
     report = FinalReport(
         document_id="doc-1",
         summary="report",
@@ -426,3 +430,144 @@ async def test_finalization_requires_human_review_approval() -> None:
     assert finalizer.calls == 0
     assert result["status"] == WorkflowStatus.FAILED
     assert result["errors"][0].code == "HUMAN_REVIEW_NOT_APPROVED"
+
+
+# ---------------------------------------------------------------------------
+# Task 6.8: finalization input and disclosure without reconstruction.
+# ---------------------------------------------------------------------------
+
+
+async def test_finalization_blocked_when_the_plan_was_never_approved() -> None:
+    state = _state()
+    state["risk_analysis"] = RiskAnalysisOutput(findings=[], summary="risk")
+    state["compliance_result"] = ComplianceOutput(
+        findings=[],
+        jurisdiction="India",
+        summary="ok",
+        compliance_status=ComplianceStatus.NON_COMPLIANT,
+    )
+    state["grounding"] = GroundingVerificationOutput(
+        verified=True,
+        unverified_claims=[],
+        notes="ok",
+        citations=[_citation()],
+    )
+    state["human_review"] = type("Review", (), {"approved": True, "overrides": []})()
+    state["plan_approved"] = False
+    finalizer = _Agent()
+
+    result = await make_finalization_node(finalizer)(state)
+
+    assert finalizer.calls == 0
+    assert result["status"] == WorkflowStatus.FAILED
+    assert result["errors"][0].code == "PLAN_NOT_APPROVED"
+    assert "final_report" not in result
+
+
+async def test_finalization_discloses_unresolved_claims_and_ingestion_warnings() -> None:
+    from app.features.agent_saul.domain.state import (
+        ClaimLedgerEntry,
+        ClaimSupportStatus,
+        IngestionDocumentState,
+        IngestionDocumentStatus,
+    )
+
+    state = _state()
+    state["risk_analysis"] = RiskAnalysisOutput(findings=[], summary="risk")
+    state["compliance_result"] = ComplianceOutput(
+        findings=[],
+        jurisdiction="India",
+        summary="non-compliant",
+        compliance_status=ComplianceStatus.NON_COMPLIANT,
+    )
+    state["grounding"] = GroundingVerificationOutput(
+        verified=True,
+        unverified_claims=["the cap clause was never verified"],
+        notes="verified with disclosure",
+        citations=[_citation()],
+    )
+    state["human_review"] = type("Review", (), {"approved": True, "overrides": []})()
+    state["plan_approved"] = True
+    state["claim_ledger"] = [
+        ClaimLedgerEntry(
+            claim_id="L-1",
+            claim="indemnity is capped",
+            evidence_ids=["evh-1"],
+            support_status=ClaimSupportStatus.CONTRADICTED,
+        ),
+        ClaimLedgerEntry(
+            claim_id="L-2",
+            claim="payment terms verified",
+            evidence_ids=["evh-2"],
+            support_status=ClaimSupportStatus.SUPPORTED,
+        ),
+    ]
+    state["ingestion_state"] = [
+        IngestionDocumentState(
+            document_id="doc-b",
+            status=IngestionDocumentStatus.FAILED,
+            error_code="INGESTION_INCOMPLETE",
+        )
+    ]
+    report = FinalReport(
+        document_id="doc-1",
+        summary="report",
+        risk_findings=[],
+        compliance_findings=[],
+        human_overrides=[],
+        suggested_actions=[],
+        citations=[_citation()],
+    )
+
+    finalizer = _Agent(report)
+    result = await make_finalization_node(finalizer)(state)
+
+    final = result["final_report"]
+    # Supported claims are not re-listed; only unresolved/contradicted ones.
+    assert "indemnity is capped" in final.unresolved_claims
+    assert "the cap clause was never verified" in final.unresolved_claims
+    assert all("payment terms verified" not in claim for claim in final.unresolved_claims)
+    assert final.ingestion_warnings == ["document doc-b failed (INGESTION_INCOMPLETE)"]
+    # An assessable compliance result carries no not-assessable reason codes
+    # (finalization blocks a not-assessable one before any report exists);
+    # not_assessable compliance is disclosed in the review payload instead.
+    assert final.not_assessable_reasons == []
+    # The model receives the approved plan and the disclosures as inputs.
+    prompt = str(finalizer.last_input[1].content)
+    assert "APPROVED PLAN" in prompt
+    assert "UNRESOLVED OR CONTRADICTED CLAIMS" in prompt
+    assert "INGESTION STATE WARNINGS" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Task 6.4: typed not-assessable compliance reason codes.
+# ---------------------------------------------------------------------------
+
+
+def test_not_assessable_compliance_always_carries_a_typed_reason_code() -> None:
+    from app.features.agent_saul.domain.state import ComplianceNotAssessableReason
+
+    inferred = ComplianceOutput(
+        findings=[],
+        jurisdiction="India",
+        summary="cannot assess",
+        compliance_status=ComplianceStatus.NOT_ASSESSABLE,
+    )
+    assert inferred.not_assessable_reasons == [ComplianceNotAssessableReason.INSUFFICIENT_COVERAGE]
+
+    explicit = ComplianceOutput(
+        findings=[],
+        jurisdiction="India",
+        summary="scope incomplete",
+        compliance_status=ComplianceStatus.NOT_ASSESSABLE,
+        not_assessable_reasons=[ComplianceNotAssessableReason.INGESTION_INCOMPLETE],
+    )
+    assert explicit.not_assessable_reasons == [ComplianceNotAssessableReason.INGESTION_INCOMPLETE]
+
+    assessed = ComplianceOutput(
+        findings=[],
+        jurisdiction="India",
+        summary="non-compliant",
+        compliance_status=ComplianceStatus.NON_COMPLIANT,
+    )
+    assert assessed.not_assessable_reasons == []
