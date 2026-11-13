@@ -92,7 +92,7 @@ def parse_weights(raw: str | None) -> dict[str, float]:
     return {part.split("=", 1)[0].strip(): float(part.split("=", 1)[1]) for part in raw.split(",")}
 
 
-async def _run(
+async def _run(  # noqa: PLR0912 — one CLI pass keeps every gate check together
     args: argparse.Namespace,
     *,
     branch_names: Sequence[str],
@@ -106,6 +106,16 @@ async def _run(
         return 1
     golden_set = result.unwrap()
     index = OfflineCorpusIndex(args.corpus)
+    if not index.chunk_ids and not args.allow_empty_corpus:
+        # Fail closed BEFORE scoring: an empty chunk universe means the
+        # harness is not wired to the corpus at all, and every query would
+        # retrieve nothing — a wiring failure, never a zero baseline.
+        sys.stderr.write(
+            "wiring failure: the corpus root "
+            f"{args.corpus} exposes no chunks; refusing to score an empty universe "
+            "(pass --allow-empty-corpus to override deliberately)\n"
+        )
+        return 3
     cutoff = args.k
     if thresholds is not None:
         if thresholds.golden_set_version != golden_set.version:
@@ -137,6 +147,16 @@ async def _run(
         cutoff=cutoff,
         branch_weights=branch_weights,
     )
+    empty_rows = [row for row in evaluation.rows if not row.retrieved_chunk_ids]
+    if len(empty_rows) == len(evaluation.rows) and evaluation.rows and not args.allow_empty_corpus:
+        # Wiring-failure detection (task 8.3): when EVERY query retrieves zero
+        # chunks the harness is not wired to the ranking path — a silently
+        # all-zero report must never be written as a baseline.
+        sys.stderr.write(
+            "wiring failure: every query retrieved zero chunks; the retrieval path is "
+            "not wired to the chunk universe. No report written.\n"
+        )
+        return 3
     report = EvaluationReport.from_evaluation(
         evaluation,
         commit_identifier=args.commit or resolve_commit(),
@@ -203,6 +223,12 @@ def main() -> None:
         type=Path,
         default=None,
         help="threshold JSON file; when given, the run gates on it and exits non-zero below it",
+    )
+    parser.add_argument(
+        "--allow-empty-corpus",
+        action="store_true",
+        help="deliberately permit an empty chunk universe / all-empty retrieval "
+        "(default: fail closed with a wiring-failure exit code 3)",
     )
     args = parser.parse_args()
     branch_names = [name.strip() for name in args.branches.split(",")]

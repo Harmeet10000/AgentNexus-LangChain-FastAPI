@@ -67,6 +67,19 @@ and it leaves the tree only through a recorded discard decision against its row.
   stays open until the measured default-on comparison completes (recorded
   offline: `evals/reports/contextual_preamble_legal_retrieval_v2_wave4.comparison.json`;
   one live generation run outstanding).
+- 2026-11-14, `harden-agent-saul-evidence-pipeline` (tasks 7.8/7.9): the two
+  surfaces deleted before this ledger existed are recorded here retroactively
+  so their removals have a ledger trace. `ingestion_kb` was deleted by commit
+  `3bd67da` ("delete dead trees"; the retired
+  `PLAN-bulletproof-ingestion.md` Phase E records the discard: the per-chunk
+  LLM fan-out KB graph, ~1,000 lines, zero production importers); its one
+  harvestable idea (contextualization) was re-implemented in the live pipeline
+  as the preamble fill above. `hybrid_retrieve_precedents` was deleted by
+  commit `accf5a2` (never bound to any live agent; vector leg was a permanent
+  stub; parity held by `search_legal_precedents` covering the same Graphiti leg
+  plus the shared fused Postgres leg — task 5.7). Verification that zero code
+  remnants remain for both: `notes/phase7-cleanup-audit.md` §7.8/§7.9 of the
+  harden change.
 
 ## Referenced by
 

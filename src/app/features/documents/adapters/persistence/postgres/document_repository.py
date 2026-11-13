@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -16,6 +17,7 @@ from sqlalchemy import (
     bindparam,
     case,
     cast,
+    delete,
     func,
     literal_column,
     or_,
@@ -160,7 +162,27 @@ def _phrase_like_pattern(phrase: str) -> str:
     return f"%{escaped}%"
 
 
-class DocumentRepository:
+@dataclass(frozen=True, slots=True)
+class DocumentDeletionInventory:
+    """The pre-removal inventory a D1 deletion must record (harden 7.2).
+
+    No content fields: chunk counts, the version range the tombstone names, and
+    the Graphiti episode ids the episode-removal path must clear. Episode ids
+    are collected BEFORE the chunk rows are deleted — they are unrecoverable
+    afterwards.
+    """
+
+    chunk_count: int
+    min_document_version: int
+    max_document_version: int
+    graphiti_episode_ids: tuple[str, ...] = field(default_factory=tuple)
+    #: Distinct ``(document_version, contract_index)`` partitions the episode
+    #: remover translates into Graphiti group ids (contract_index may be None
+    #: for explicitly-legacy documents).
+    graphiti_partitions: tuple[tuple[int, int | None], ...] = field(default_factory=tuple)
+
+
+class DocumentRepository:  # noqa: PLR0904 — one method per lifecycle operation is the point
     """Repository for unified document lifecycle and retrieval."""
 
     def __init__(self, session: AsyncSession):
@@ -1328,6 +1350,116 @@ class DocumentRepository:
                 DocumentDatabaseError(
                     message="Database error while fetching chunks",
                     details={"error": str(exc)},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def collect_deletion_inventory(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+    ) -> DocumentResult[DocumentDeletionInventory]:
+        """Gather the pre-removal inventory the D1 tombstone must record.
+
+        Everything is bound to ``(tenant_id, document_id)`` so a mistyped or
+        cross-tenant id yields an empty inventory rather than another tenant's
+        rows. The episode ids collected here are the only record of which
+        Graphiti partitions the removal paths must clear once the rows are gone.
+        """
+        try:
+            statement = select(
+                func.count(UnifiedChunk.id).label("chunk_count"),
+                func.min(UnifiedChunk.document_version).label("min_version"),
+                func.max(UnifiedChunk.document_version).label("max_version"),
+                func.array_agg(func.distinct(UnifiedChunk.graphiti_episode_id)).label(
+                    "episode_ids"
+                ),
+            ).where(
+                UnifiedChunk.tenant_id == tenant_id,
+                UnifiedChunk.document_id == uuid_param("document_id", document_id),
+            )
+            result = await self.session.execute(statement)
+            row = result.mappings().one()
+            episodes = tuple(
+                str(episode_id)
+                for episode_id in (row["episode_ids"] or ())
+                if episode_id is not None
+            )
+            min_version = int(row["min_version"]) if row["min_version"] is not None else 0
+            max_version = int(row["max_version"]) if row["max_version"] is not None else 0
+            partition_result = await self.session.execute(
+                select(
+                    UnifiedChunk.document_version,
+                    UnifiedChunk.contract_index,
+                )
+                .where(
+                    UnifiedChunk.tenant_id == tenant_id,
+                    UnifiedChunk.document_id == uuid_param("document_id", document_id),
+                )
+                .distinct()
+            )
+            partitions = tuple(
+                (int(record["document_version"]), record["contract_index"])
+                for record in partition_result.mappings().all()
+            )
+            return Success(
+                DocumentDeletionInventory(
+                    chunk_count=int(row["chunk_count"]),
+                    min_document_version=min_version,
+                    max_document_version=max_version,
+                    graphiti_episode_ids=episodes,
+                    graphiti_partitions=partitions,
+                )
+            )
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while collecting the deletion inventory",
+                    details={"document_id": document_id, "error": str(exc)},
+                    source="document_repository",
+                )
+            )
+
+    @trace_layer("repository")
+    async def delete_document_artifacts(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+    ) -> DocumentResult[int]:
+        """Delete the chunks row set and the document row, tenant-bound.
+
+        Policy-gated hard-purge path (harden 7.2): both statements carry the
+        mandatory ``tenant_id`` predicate, so no cross-tenant deletion is
+        expressible. Returns the number of chunk rows removed. Callers run this
+        inside the session they own; the delete of the ``documents`` row rides
+        the same transaction so the tombstone can never reference a half-removed
+        document.
+        """
+        try:
+            chunk_delete = delete(UnifiedChunk).where(
+                UnifiedChunk.tenant_id == tenant_id,
+                UnifiedChunk.document_id == uuid_param("document_id", document_id),
+            )
+            chunk_result = await self.session.execute(chunk_delete)
+            document_delete = delete(UnifiedDocument).where(
+                UnifiedDocument.tenant_id == tenant_id,
+                UnifiedDocument.id == uuid_param("document_id", document_id),
+            )
+            await self.session.execute(document_delete)
+            await self.session.flush()
+            return Success(int(chunk_result.rowcount or 0))
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="chunks, documents")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while deleting document artifacts",
+                    details={"document_id": document_id, "error": str(exc)},
                     source="document_repository",
                 )
             )

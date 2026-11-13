@@ -1,0 +1,76 @@
+{
+  "report_version": "phase8_experiments_v1",
+  "generated_at_utc": "2026-11-14T00:00:00Z",
+  "golden_set_version": "legal_retrieval_v2",
+  "experiments": [
+    {
+      "id": "inline-ask-vs-search-read-verify",
+      "question": "Does the inline ask path behave identically to the agentic search/read/verify loop, and where must they diverge?",
+      "status": "measured-at-contract-level; live LLM comparison PENDING (quota-blocked)",
+      "evidence": {
+        "parity_suite": "tests/unit/features/documents/retrieval/test_ask_inline_graph_parity.py (23 permanent tests: identical response shapes, citation provenance, fallback behaviour, cache keys, grade loop, edge expansion; fails on behavioural drift on either side)",
+        "orchestrator_policy": "tests/unit/features/agent_saul/graph/test_orchestrator_operation_policy.py pins which operations the inline ask may run vs the delegated search/read/verify tools",
+        "abstention_attribution": "evals/reports/context_starvation_legal_retrieval_v2_wave4.json attributes the offline miss population (46/50 below-cut, 13 no-signal) that the verify leg's re-read must recover"
+      },
+      "finding": "Inline ask and the compiled search/read/verify graph are contract-identical at every replayable case; the remaining delta is only the model-in-the-loop verify leg, which cannot be measured offline.",
+      "live_run": "pending — Gemini embedding quota exhaustion per scripts/live_measurement/RUNBOOK.md"
+    },
+    {
+      "id": "shared-retrieve-vs-bounded-graph",
+      "question": "Does the bounded relationship-graph read beat shared retrieval on multi-hop questions?",
+      "status": "measured (offline deterministic proxy)",
+      "evidence": {
+        "report": "evals/reports/multihop_ab_legal_retrieval_v2.summary.json",
+        "control_recall_at_k": 0.5774,
+        "treatment_graph_branch_recall_at_k": 0.6032,
+        "treatment_delta_ndcg_at_k": 0.0203,
+        "cost": "harness wall-clock 81.9s vs 86.4s; provider tokens/cost zero offline"
+      },
+      "finding": "The bounded graph leg (entity-anchor offline proxy for the Graphiti read at weight 0.1) improves recall@10 by +2.58 points and nDCG@10 by +2.03 points over shared retrieval alone. The LIVE compiled-graph A/B (graph_neo4j node on/off, measured p95 and token spend) remains pending per the runbook."
+    },
+    {
+      "id": "deterministic-vs-llm-preamble-e3",
+      "question": "Does the document-context preamble (deterministic) improve retrieval enough to justify the LLM contextual variant?",
+      "status": "measured (offline, recorded overlay)",
+      "evidence": {
+        "report": "evals/reports/contextual_preamble_legal_retrieval_v2_wave4.comparison.json",
+        "overall_delta_recall_at_k": 0.1226,
+        "overall_delta_ndcg_at_k": 0.0855,
+        "contracts_delta_recall_at_k": 0.1429,
+        "judgments_delta_recall_at_k": 0.0,
+        "filings_delta_ndcg_at_k": -0.2441
+      },
+      "finding": "The deterministic recorded overlay lifts overall recall@10 by +12.26 points, concentrated in contracts (+14.29) and statutes; judgments are unchanged and the single filing row regresses on nDCG. This E3 comparison stands as recorded; no extension was needed — the per-class deltas already separate the deterministic preamble's wins from its regressions, and the LLM-generated preamble comparison remains gated on the live quota."
+    },
+    {
+      "id": "bm25-force-merge-e4",
+      "question": "Should BM25 results be force-merged into the fused ranking, and does a bm25_force_merge flag help?",
+      "status": "measured offline via harness branch sweeps; production flag does NOT exist",
+      "flag_status": "no `bm25_force_merge` setting exists anywhere in src/ (grep over src/, evals/, scripts/); the experiment what-was-run instead isolates each branch leg through the harness --branches sweep, which is the measurement the flag would need",
+      "runs": {
+        "bm25_only": {"report": "evals/reports/e4_bm25_only_legal_retrieval_v2.json", "recall_at_k": 0.5806, "reciprocal_rank": 0.3828, "ndcg_at_k": 0.4281},
+        "trigram_only": {"report": "evals/reports/e4_trigram_only_legal_retrieval_v2.json", "recall_at_k": 0.5097, "reciprocal_rank": 0.3544, "ndcg_at_k": 0.3879},
+        "fused_default_bm25_plus_trigram": {"report": "evals/reports/baseline_legal_retrieval_v2_wave4.json", "recall_at_k": 0.5774, "reciprocal_rank": 0.3889, "ndcg_at_k": 0.4305},
+        "fused_with_graph_weight_0.1": {"report": "evals/reports/ab_multihop_graph_legal_retrieval_v2.json", "recall_at_k": 0.6032, "reciprocal_rank": 0.4070, "ndcg_at_k": 0.4508}
+      },
+      "finding": "BM25 force-merge is NOT a free win offline: bm25-alone reaches marginally higher recall@10 (+0.32 points over the default fusion) but loses MRR (-0.61 points) and nDCG (-0.24 points); the trigram leg adds ranking precision, and the graph leg at weight 0.1 dominates every configuration. If a bm25_force_merge flag lands in candidate generation, the offline harness sweep above is the recorded A/B protocol to re-run; until then the flag is recorded as NEEDED-FLAG with this baseline.",
+      "live_run": "the live vector+bm25 merge question remains pending with the quota-blocked live run (the offline harness has no vector leg)"
+    },
+    {
+      "id": "entity-canonicalization-e5",
+      "question": "Does entity canonicalization improve multi-document/multi-hop retrieval?",
+      "status": "BLOCKED — canonicalization code does not survive in the tree",
+      "evidence": "grep over src/ finds no canonicalization module (only an unrelated alembic tenant-mirror reconciliation matches 'canonicaliz'); the entity harvest that would feed it is not implemented",
+      "finding": "The experiment REQUIRES the entity harvest to land first (the offline analogue would canonicalize _entity_anchors in app/ai/evaluation/deterministic.py against a recorded alias table). Recorded as REQUIRES-HARVEST; no numbers are invented."
+    },
+    {
+      "id": "prompt-injection-cross-tenant-redteam",
+      "question": "Do the injection and cross-tenant defenses hold under the red-team fixtures?",
+      "status": "measured (hermetic suites)",
+      "evidence": {"report": "evals/reports/redteam_phase8.json", "aggregate": "86 passed, 2 failed"},
+      "finding": "The mechanical defenses hold (tenant-boundary, scope-widening, forged/absent evidence, not-assessable rendering, multi-contract identity, ingestion injection). The 2 failures are a PRE-EXISTING production boundary-function regression on HEAD (any <=120-char line containing 'contract' starts a boundary; the Governing-Law clause is severed from its contract body), documented with root cause in the red-team report and in evals/reports/e8_per_contract_vs_per_document_src04.json; fixing it belongs to the document-ingestion owners (outside this change's edit scope).",
+      "live_run": "model-in-the-loop injection red-team pending with the quota-blocked live run"
+    }
+  ],
+  "quota_note": "Every live-embedding-dependent measurement is recorded as PENDING with the root cause (Gemini free-tier daily quota exhaustion, 2026-11-10, resume per scripts/live_measurement/RUNBOOK.md). No offline number in this report is presented as a live result."
+}

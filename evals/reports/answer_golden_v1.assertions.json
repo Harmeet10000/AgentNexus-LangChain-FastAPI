@@ -1,0 +1,11 @@
+{
+  "source_report": "evals/reports/entailment_answer_golden_v1_offline.json",
+  "golden_set_version": "answer_golden_v1",
+  "notes": "Derived from the recorded deterministic offline entailment run over answer_golden_v1 (40 rows, 47 claims, commit f36bf5da9fff...): measured atomic_entailment_rate=0.1277 (the deterministic token-anchoring judge is deliberately strict with paraphrased claims — the graded signal is the floor), unsupported_claim_rate=0.0426, must_include_coverage=1.0, citation_validity=1.0. Floors sit just below the measured values (round-down to two decimals) so float noise cannot flake the gate while any real regression fails. scope_violations and unauthorized_reads are zero-tolerance regardless of this file. A threshold change must re-run the entailment CLI and cite a new report.",
+  "atomic_entailment_rate": 0.12,
+  "unsupported_claim_rate": 0.05,
+  "must_include_coverage": 1.0,
+  "citation_validity": 1.0,
+  "scope_violations": 0,
+  "unauthorized_reads": 0
+}

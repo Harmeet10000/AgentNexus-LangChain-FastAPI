@@ -158,6 +158,14 @@ class OfflineCorpusIndex:
     def chunk_ids(self) -> list[str]:
         return list(self._chunk_ids)
 
+    def text_for(self, chunk_id: str) -> str | None:
+        """The searchable text of one chunk id, or None when unknown."""
+        return self._chunk_texts.get(chunk_id)
+
+    def chunk_text_map(self) -> dict[str, str]:
+        """A copy of the full chunk-id -> searchable-text mapping."""
+        return dict(self._chunk_texts)
+
     def chunk_ids_for_documents(self, document_ids: Iterable[str]) -> list[str]:
         return [cid for doc in document_ids for cid in self._doc_chunks.get(doc, [])]
 

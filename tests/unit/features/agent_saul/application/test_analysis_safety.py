@@ -66,11 +66,12 @@ def _issued_ref(
     run_id: str = "run-1",
     graph_indexed: bool = False,
     quote: str | None = None,
+    document_id: str = "doc-1",
 ) -> EvidenceRef:
     return EvidenceRef(
         evidence_id=evidence_id,
         chunk_id="chunk-1",
-        document_id="doc-1",
+        document_id=document_id,
         document_version=1,
         page_no=1,
         graph_indexed=graph_indexed,
@@ -156,6 +157,23 @@ async def test_grounding_gate_rejects_evidence_from_another_run() -> None:
     )
     result = await _verified_result(state)
     assert result["grounding"].verified is False
+
+
+async def test_grounding_gate_rejects_evidence_outside_the_authorized_scope() -> None:
+    """Other-user/unauthorized document ids fail the scope gate (task 8.7)."""
+    ref = _issued_ref(document_id="doc-other-user")
+    state = _assessed_state_with_finding(
+        Citation(
+            claim="cross-user", source=ref.evidence_id, evidence_id=ref.evidence_id, confidence=0.95
+        ),
+        ref=ref,
+    )
+    assert state["allowed_doc_ids"] == ["doc-1"]
+    result = await _verified_result(state)
+    assert result["grounding"].verified is False
+    assert result["compliance_result"].compliance_status == ComplianceStatus.NOT_ASSESSABLE
+    issues = " ".join(result["grounding"].unverified_claims)
+    assert "outside the authorized scope" in issues
 
 
 async def test_grounding_gate_rejects_quote_mismatch() -> None:

@@ -98,6 +98,25 @@ jobs:
       - name: Validate gold-set v2 cases and manifest
         run: test -f evals/golden/legal_retrieval_v2.manifest.json && uv run python -m app.ai.evaluation.validate evals/golden/legal_retrieval_v2.jsonl
 
+      - name: Validate answer gold set provenance (task 8.1)
+        run: test -f evals/golden/answer_golden_v1.manifest.json && uv run python -m app.ai.evaluation.validate evals/golden/answer_golden_v1.jsonl
+
+      - name: Enforce entailment and metric assertions on the answer gold set (task 8.8)
+        # The entailment run is the deterministic offline judge (reproducible,
+        # no provider); the assertion gate fails the build below the recorded
+        # floors in evals/reports/answer_golden_v1.assertions.json and on ANY
+        # observed scope violation or unauthorized read (zero tolerance).
+        run: |
+          uv run python -m app.ai.evaluation.entailment evals/golden/answer_golden_v1.jsonl --output /tmp/entailment_answer_golden_v1.json
+          uv run python -m app.ai.evaluation.assertions --entailment-report /tmp/entailment_answer_golden_v1.json --thresholds evals/reports/answer_golden_v1.assertions.json
+
+      - name: Fail build on unauthorized read or poisoning (red-team selection, tasks 8.6/8.8)
+        # Named red-team selection: tenant isolation, grounding gate matrix,
+        # analysis safety (forged/absent evidence, not-assessable rendering),
+        # resume authorization (role revocation), and multi-contract identity.
+        # The ingestion injection fixtures run in the dedicated gate step below.
+        run: uv run pytest tests/unit/features/documents/test_two_tenant_legal_isolation.py tests/unit/features/documents/test_precedent_tenant_isolation.py tests/unit/documents/test_read_predicate_tenant_isolation.py tests/unit/features/agent_saul/graph/test_grounding_gate_matrix.py tests/unit/features/agent_saul/application/test_analysis_safety.py tests/unit/features/agent_saul/application/test_resume_authorization.py tests/unit/features/documents/test_two_contract_identity.py -q
+
       - name: Gate retrieval quality on the golden corpus
         # Thresholds are recorded, not invented: they come from
         # evals/reports/baseline_legal_retrieval_v2_wave4.thresholds.json, derived

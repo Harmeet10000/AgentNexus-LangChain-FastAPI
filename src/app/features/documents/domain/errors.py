@@ -20,6 +20,9 @@ class DocumentCode(StrEnum):
     EMBEDDING_WIDTH_MISMATCH = "EMBEDDING_WIDTH_MISMATCH"
     GRAPH_WRITE_FAILED = "GRAPH_WRITE_FAILED"
     INGESTION_CHECKPOINT_FAILED = "INGESTION_CHECKPOINT_FAILED"
+    # The D1 policy-gate refusal code (harden 7.1/7.2): the exact typed failure
+    # every delete attempt returns while the policy is unapproved.
+    DELETION_POLICY_NOT_APPROVED = "deletion_policy_not_approved"
 
 
 class DocumentNotFoundError(FeatureError):
@@ -82,6 +85,20 @@ class DocumentIngestionCheckpointError(FeatureError):
     retryable: ClassVar[bool] = True
 
 
+class DeletionPolicyNotApprovedError(FeatureError):
+    """The D1 policy gate is closed: deletion is disabled and nothing was removed.
+
+    The D1 draft (`notes/deletion-policy-draft.md`, Decision 5) and the
+    document-delete-and-access-audit delta require a typed refusal — never a
+    silent no-op or a 500 — while the retention/recovery policy and the L1
+    legal/security sign-off are unapproved.
+    """
+
+    kind: ClassVar[ErrorKind] = ErrorKind.AUTHORIZATION
+    code: ClassVar[DocumentCode] = DocumentCode.DELETION_POLICY_NOT_APPROVED
+    retryable: ClassVar[bool] = False
+
+
 type DocumentError = (
     DocumentNotFoundError
     | DocumentStatusNotFoundError
@@ -93,6 +110,7 @@ type DocumentError = (
     | DocumentEmbeddingWidthError
     | DocumentGraphWriteError
     | DocumentIngestionCheckpointError
+    | DeletionPolicyNotApprovedError
 )
 type DocumentResult[T] = Result[T, DocumentError]
 
@@ -103,7 +121,7 @@ def document_error_to_http_status(error: DocumentError) -> int:
             return http_status_for_kind(error.kind)
         case DocumentConflictError() | DocumentChunkConflictError():
             return http_status_for_kind(error.kind)
-        case DocumentValidationError():
+        case DocumentValidationError() | DeletionPolicyNotApprovedError():
             return http_status_for_kind(error.kind)
         case (
             DocumentStorageError()

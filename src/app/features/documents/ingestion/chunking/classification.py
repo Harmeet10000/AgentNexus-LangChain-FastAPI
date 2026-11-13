@@ -136,6 +136,10 @@ _CONTRACT_HEADING_RE = re.compile(
     r"^\s*(?:\#+\s*)?(?=.*\b(?:agreement|contract)\b).*$",
     re.IGNORECASE,
 )
+# Parenthesized/bracketed qualifiers ("(Tenant A)", "(FIT-OUT OF UNIT 401)")
+# are stripped before the ALL-CAPS heading test; a mixed-case parenthesis must
+# not hide an otherwise uppercase contract part heading.
+_PARENTHETICAL_STRIP_RE = re.compile(r"\([^)]*\)|\[[^\]]*\]")
 _CONTRACT_OPENING_RE = re.compile(
     r"^\s*this\s+(?:master\s+services|professional\s+services|non[- ]disclosure|employment|lease|data\s+processing)?\s*(?:agreement|contract)\b",
     re.IGNORECASE,
@@ -162,17 +166,34 @@ def establish_contract_boundaries(*, markdown: str, page_count: int = 0) -> Cont
     offset = 0
     for line in lines:
         stripped = line.strip()
+        # Real heading markers only (# or ALL-CAPS). The former length arm
+        # (<=120 chars) treated ordinary clauses containing "contract" as
+        # boundaries — severing Governing-Law clauses from their bodies
+        # (red-team finding, notes/phase8-eval-ci-redteam.md). The uppercase
+        # test ignores parenthesized qualifiers so a genuine part heading such
+        # as "PART 1 — BASE WORKS CONTRACT (Tenant A)" is not defeated by the
+        # mixed-case parenthesis (SYN-02 boundary-identity finding, same note).
         is_heading = bool(_CONTRACT_HEADING_RE.match(stripped)) and (
-            line.lstrip().startswith("#") or line.isupper() or len(stripped) <= 120
+            line.lstrip().startswith("#")
+            or line.isupper()
+            or _PARENTHETICAL_STRIP_RE.sub(" ", line).isupper()
         )
-        is_opening = bool(_CONTRACT_OPENING_RE.match(stripped)) and (
-            line.isupper() or line.lstrip().startswith("#")
-        )
+        # The opening regex anchors a line-initial THIS...AGREEMENT/CONTRACT
+        # marker (case-insensitive by design — real contracts open with mixed-
+        # case "THIS ... is signed on ..." lines), so no case/heading qualifier
+        # is applied here; only is_heading carries the heading-marker guard.
+        is_opening = bool(_CONTRACT_OPENING_RE.match(stripped))
         if is_heading or is_opening:
             starts.append(offset)
         offset += len(line)
     starts = sorted(set(starts))
-    if not starts or starts[0] > min(200, len(markdown)):
+    # A single deep marker is indistinguishable from a stray mention, so the
+    # file stays one contract (conservative). With MULTIPLE markers the first
+    # one is a real contract start whose preceding title page belongs to it —
+    # collapsing to one boundary here destroyed contract identity for genuine
+    # multi-contract files whose front matter pushes the first marker past the
+    # window (SYN-02 boundary-identity finding, notes/phase8-eval-ci-redteam.md).
+    if not starts or (len(starts) == 1 and starts[0] > min(200, len(markdown))):
         starts = [0]
     elif starts[0] > 0:
         # A title page before the first contract belongs to that contract; do

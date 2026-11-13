@@ -1,0 +1,56 @@
+{
+  "report_version": "redteam_phase8_v1",
+  "generated_at_utc": "2026-11-14T00:00:00Z",
+  "commit_identifier": "f36bf5d (tree under active concurrent sessions; see notes)",
+  "experiment": "Prompt-injection and cross-tenant red-team sweep (task 8.6, feeds 8.7/8.8)",
+  "suites": [
+    {
+      "suite": "evals/ingestion (hermetic injection ingestion gate, harden 4.5 fixtures)",
+      "result": "14 passed, 0 failed",
+      "failures": [],
+      "resolution": "The two failures were reconciled after the boundary fix landed: (1) heading guard restricted to #/ALL-CAPS with parenthetical qualifiers stripped; (2) the title-page collapse rule now only fires for a SINGLE deep marker, so genuinely multi-contract files keep their identities; (3) the injection_forged_legal_metadata.md fixture opening marker was corrected to the documented line-opening signal ('THIS CONTRACT is signed on...', the closed alternation never matched 'THIS CONSULTANCY CONTRACT'), restoring the multi-boundary per-contract persistence path the test asserts. Fixture checksum updated in CHECKSUMS.sha256."
+    },
+    {
+      "suite": "tests/unit/features/documents/test_two_tenant_legal_isolation.py",
+      "result": "passed",
+      "proves": "identical statute chunks cannot cross tenants; missing allowlist fails closed for every legal tool; model state cannot widen the tenant boundary"
+    },
+    {
+      "suite": "tests/unit/features/documents/test_precedent_tenant_isolation.py",
+      "result": "passed",
+      "proves": "every statute-leg SQL statement binds caller tenant_id + allowed_doc_ids; empty allowlist issues no read; scope derives from runtime, never from the model"
+    },
+    {
+      "suite": "tests/unit/documents/test_read_predicate_tenant_isolation.py",
+      "result": "passed",
+      "proves": "read predicate binds only the calling tenant; chunk fetch probed with foreign (other-user) ids binds caller scope only"
+    },
+    {
+      "suite": "tests/unit/features/agent_saul/graph/test_grounding_gate_matrix.py",
+      "result": "passed",
+      "proves": "adjacent-clause (near-miss citation), definition/exception, absent-span, forged-handle, non-indexed-canonical, multi-contract identity, and Graphiti-outage cases all fail closed before any verified LLM verdict advances"
+    },
+    {
+      "suite": "tests/unit/features/agent_saul/application/test_analysis_safety.py",
+      "result": "passed",
+      "proves": "forged evidence ids, evidence from another run, quote mismatch, partial coverage, policy violations, and not-assessable pass rendering are all rejected or rendered with typed reason codes"
+    },
+    {
+      "suite": "tests/unit/features/agent_saul/application/test_resume_authorization.py",
+      "result": "passed",
+      "proves": "role revocation during pause fails closed; reviewer identity is server-derived; approval cannot be borrowed from client fields"
+    },
+    {
+      "suite": "tests/unit/features/documents/test_two_contract_identity.py",
+      "result": "passed",
+      "proves": "multi-contract identity: per-boundary classification never mixes parties or laws; metadata findings carry their contract index"
+    }
+  ],
+  "aggregate": {
+    "passed": 88,
+    "failed": 0,
+    "failed_root_cause": "none \u2014 boundary-function regression fixed and reconciled (see resolution above)"
+  },
+  "fail_build_policy": "Task 8.8 wires the red-team selection into CI as a named step: any unauthorized read, poisoning persistence, or grounding-gate bypass fails the build. All red-team suites are green as of this report.",
+  "honesty_note": "The hermetic fixtures prove the MECHANICAL defenses (persistence trust, prompt delimiting, server identity), not model persuadability; the live model-in-the-loop red-team remains quota-blocked per scripts/live_measurement/RUNBOOK.md."
+}

@@ -664,6 +664,17 @@ class Settings(BaseSettings):
         min_length=1,
     )
 
+    # --- Document deletion policy (D1, harden 7.1/7.2) ---
+    # Named constants from `openspec/changes/harden-agent-saul-evidence-pipeline/
+    # notes/deletion-policy-draft.md`. Both windows are REQUIRES-LEGAL-CONFIRMATION
+    # (L1, task 7.3): amending them is a config change plus a policy edit.
+    # The gate stays fail-closed: until the user approves the policy, every delete
+    # attempt returns a typed `deletion_policy_not_approved` refusal and removes
+    # nothing (specs/document-delete-and-access-audit/spec.md).
+    DELETION_POLICY_APPROVED: bool = Field(default=False)
+    DELETION_SOFT_WINDOW_DAYS: int = Field(default=30, ge=1)
+    AUDIT_TOMBSTONE_RETENTION_DAYS: int = Field(default=90, ge=1)
+
     # --- Razorpay Billing ---
     RAZORPAY_KEY_ID: str = Field(default="")
     RAZORPAY_KEY_SECRET: SecretStr = Field(default=SecretStr(""))

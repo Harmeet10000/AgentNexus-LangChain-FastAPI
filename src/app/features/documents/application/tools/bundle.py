@@ -4,8 +4,8 @@ AgentToolBundle: all LangChain tools assembled once at graph-build time.
 build_tool_bundle() is called by the Agent Saul provider registered in the
 application lifespan (see `app.lifecycle.graphs`). The bundle is passed into
 build_agent_registry() in factory.py so agents get their tools at compile
-time — never at node execution time. The old class name collided with the
-unrelated tool-registry in agents/tools/base.py and is retired.
+time — never at node execution time. (An earlier class of the same name
+collided with an unrelated, since-deleted tool registry and was retired.)
 
 Lifespan wiring (in src/app/lifecycle/graphs.py):
     from app.features.documents.application.tools.bundle import AgentToolBundle, build_tool_bundle
@@ -70,15 +70,25 @@ class AgentToolBundle(BaseModel):
     """
     Immutable collection of all pre-built LangChain tools.
 
-    Tool assignment to agents is bounded in ``agent_saul.graph.factory``:
-      compliance_agent  → scoped evidence search/read/readiness
-      risk_agent        → graph analysis plus scoped evidence search/read
-      deep_research     → the scoped EvidenceService adapter.  The old
-      ``search_legal_precedents`` alias is retained only for the compliance
-      specialist; research must not bypass the handle-based evidence seam.
+    Tool assignment to agents is bounded by the authoritative registry
+    (``application/tools/registry.py``, harden 5.8) and asserted at
+    ``agent_saul.graph.factory`` build time:
+      compliance_agent  → scoped evidence search/read/readiness, statute
+      retrieval, and handoff
+      risk_agent        → scoped evidence search/read/readiness, the knowledge
+      graph and obligation chain tools, and handoff
+      deep_research     → the scoped EvidenceService adapter (research must not
+      bypass the handle-based evidence seam).
 
-    Memory writers (write_clause_episodes_to_graphiti / write_final_report_to_memory)
-    are implemented but not yet wired into any node.
+    ``search_legal_precedents`` is a TRANSITIONAL seat: it binds to the
+    compliance specialist only when no EvidenceService is provisioned, and the
+    scoped evidence seam replaces it once that is provisioned.
+
+    Graphiti write tools (write_clause_episodes_to_graphiti /
+    write_final_report_to_memory) are implemented but deliberately unwired —
+    no node's toolset may carry them (the registry rejects any binding).
+    Persistence runs only through the approval-gated ``persist_memory`` node
+    outside any tool surface.
     """
 
     model_config = ConfigDict(

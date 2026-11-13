@@ -1,0 +1,767 @@
+{
+  "experiment": "E8 (task 8.5): per-document vs per-contract metadata extraction on SRC-04",
+  "generated_at_utc": "2026-11-13T21:31:42.222658+00:00",
+  "artifact": "SRC-04",
+  "pages": 372,
+  "markdown_chars": 843821,
+  "ground_truth": {
+    "source": "evals/golden/ingestion_fidelity_v1.manifest.json per_artifact[SRC-04].contract_boundaries",
+    "recorded_contracts": 5
+  },
+  "whole_document_path": {
+    "classification_units": 1,
+    "chars_processed": 843821,
+    "metadata_tuples": 1,
+    "classification": {
+      "document_kind": "legal_contract",
+      "jurisdiction": "n",
+      "contract_type": "employment",
+      "parties": [
+        "Authority",
+        "Concessionaire"
+      ],
+      "warning_codes": []
+    },
+    "correctness_note": "one document-level (jurisdiction, contract_type, parties) tuple must describe five independently signed contracts; party and contract-type fields cannot be attributed to any single contract"
+  },
+  "contract_local_path": {
+    "boundary_function": "establish_contract_boundaries (real production code)",
+    "boundaries_detected": 52,
+    "boundary_ambiguous": false,
+    "boundary_warnings": [],
+    "classification_units": 52,
+    "chars_processed": 843821,
+    "metadata_tuples_distinct": 19,
+    "party_sets_pairwise_disjoint": false,
+    "recorded_contracts_detected": 1,
+    "boundary_page_coverage": [
+      {
+        "contract_index": 1,
+        "title": "Concession Agreement with Schedules A-S (HAM)",
+        "recorded_page_range": [
+          5,
+          320
+        ],
+        "detected_start_page_within_range": true
+      },
+      {
+        "contract_index": 2,
+        "title": "Integrity Pact (tender NHAI/HQ/MP/Budhni-Badi/Pkg-4/2023 dated 15.12.2023)",
+        "recorded_page_range": [
+          321,
+          330
+        ],
+        "detected_start_page_within_range": false
+      },
+      {
+        "contract_index": 3,
+        "title": "Annexure: Corrigendum & Reply to Pre-Bid Queries",
+        "recorded_page_range": [
+          331,
+          363
+        ],
+        "detected_start_page_within_range": false
+      },
+      {
+        "contract_index": 4,
+        "title": "Financial Bid (Appendix IB)",
+        "recorded_page_range": [
+          364,
+          367
+        ],
+        "detected_start_page_within_range": false
+      },
+      {
+        "contract_index": 5,
+        "title": "Letter of Award and Acceptance thereof",
+        "recorded_page_range": [
+          368,
+          372
+        ],
+        "detected_start_page_within_range": false
+      }
+    ],
+    "per_boundary": [
+      {
+        "contract_index": 0,
+        "start_page": 1,
+        "end_page": 3,
+        "chars": 1832,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 1,
+        "start_page": 3,
+        "end_page": 3,
+        "chars": 555,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 2,
+        "start_page": 4,
+        "end_page": 17,
+        "chars": 21399,
+        "document_kind": "legal_contract",
+        "jurisdiction": "n",
+        "contract_type": "employment",
+        "parties": [
+          "Authority",
+          "Concessionaire"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 3,
+        "start_page": 17,
+        "end_page": 17,
+        "chars": 89,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 4,
+        "start_page": 17,
+        "end_page": 17,
+        "chars": 315,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 5,
+        "start_page": 17,
+        "end_page": 21,
+        "chars": 4930,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "the Clauses of this Agreement",
+          "the Schedules"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 6,
+        "start_page": 21,
+        "end_page": 32,
+        "chars": 35611,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "lease",
+        "parties": [
+          "the Concessionaire",
+          "the entity"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 7,
+        "start_page": 32,
+        "end_page": 33,
+        "chars": 2409,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 8,
+        "start_page": 33,
+        "end_page": 34,
+        "chars": 3875,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 9,
+        "start_page": 34,
+        "end_page": 34,
+        "chars": 450,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 10,
+        "start_page": 34,
+        "end_page": 62,
+        "chars": 87868,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 11,
+        "start_page": 62,
+        "end_page": 63,
+        "chars": 4513,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 12,
+        "start_page": 63,
+        "end_page": 65,
+        "chars": 7200,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 13,
+        "start_page": 65,
+        "end_page": 86,
+        "chars": 59447,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "the Authority",
+          "the"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 14,
+        "start_page": 86,
+        "end_page": 87,
+        "chars": 1155,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 15,
+        "start_page": 87,
+        "end_page": 95,
+        "chars": 23122,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 16,
+        "start_page": 95,
+        "end_page": 95,
+        "chars": 677,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 17,
+        "start_page": 95,
+        "end_page": 96,
+        "chars": 670,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 18,
+        "start_page": 96,
+        "end_page": 101,
+        "chars": 18058,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 19,
+        "start_page": 101,
+        "end_page": 119,
+        "chars": 50921,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "210 (two hundred",
+          "ten) and 180"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 20,
+        "start_page": 119,
+        "end_page": 122,
+        "chars": 6615,
+        "document_kind": "legal_contract",
+        "jurisdiction": "n",
+        "contract_type": null,
+        "parties": [
+          "the Concessionaire",
+          "the Authority"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 21,
+        "start_page": 122,
+        "end_page": 123,
+        "chars": 4973,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 22,
+        "start_page": 123,
+        "end_page": 124,
+        "chars": 1518,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 23,
+        "start_page": 124,
+        "end_page": 124,
+        "chars": 1550,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "the Parties on the subject hereof,",
+          "no amendment"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 24,
+        "start_page": 124,
+        "end_page": 124,
+        "chars": 439,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 25,
+        "start_page": 124,
+        "end_page": 124,
+        "chars": 275,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 26,
+        "start_page": 124,
+        "end_page": 124,
+        "chars": 47,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 27,
+        "start_page": 124,
+        "end_page": 125,
+        "chars": 2356,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 28,
+        "start_page": 125,
+        "end_page": 136,
+        "chars": 32082,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [
+          "MORTH",
+          "the State Government for providing"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 29,
+        "start_page": 136,
+        "end_page": 189,
+        "chars": 120114,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [
+          "the Bid Date",
+          "COD"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 30,
+        "start_page": 189,
+        "end_page": 266,
+        "chars": 157516,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "Main Carriageway",
+          "Service/Slip Roads"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 31,
+        "start_page": 266,
+        "end_page": 286,
+        "chars": 57397,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "the Parties regarding the meaning, scope",
+          "nature of Good Industry Practice"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 32,
+        "start_page": 286,
+        "end_page": 287,
+        "chars": 1518,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 33,
+        "start_page": 287,
+        "end_page": 292,
+        "chars": 14801,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [
+          "this Agreement",
+          "such mandates"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 34,
+        "start_page": 292,
+        "end_page": 294,
+        "chars": 6821,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 35,
+        "start_page": 294,
+        "end_page": 294,
+        "chars": 71,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 36,
+        "start_page": 294,
+        "end_page": 295,
+        "chars": 1827,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 37,
+        "start_page": 295,
+        "end_page": 296,
+        "chars": 4619,
+        "document_kind": "legal_contract",
+        "jurisdiction": "n",
+        "contract_type": null,
+        "parties": [
+          "provisions of this Agreement",
+          "such supplementary escrow"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 38,
+        "start_page": 296,
+        "end_page": 298,
+        "chars": 5477,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "the Concession Agreement",
+          "this"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 39,
+        "start_page": 298,
+        "end_page": 298,
+        "chars": 1777,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 40,
+        "start_page": 298,
+        "end_page": 298,
+        "chars": 207,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 41,
+        "start_page": 298,
+        "end_page": 303,
+        "chars": 8598,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 42,
+        "start_page": 303,
+        "end_page": 303,
+        "chars": 1140,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 43,
+        "start_page": 303,
+        "end_page": 307,
+        "chars": 12030,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 44,
+        "start_page": 307,
+        "end_page": 308,
+        "chars": 1617,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 45,
+        "start_page": 308,
+        "end_page": 308,
+        "chars": 58,
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 46,
+        "start_page": 308,
+        "end_page": 309,
+        "chars": 3532,
+        "document_kind": "legal_contract",
+        "jurisdiction": "n",
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 47,
+        "start_page": 309,
+        "end_page": 310,
+        "chars": 3310,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [
+          "the Concession Agreement",
+          "Name:"
+        ],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 48,
+        "start_page": 310,
+        "end_page": 311,
+        "chars": 2159,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 49,
+        "start_page": 311,
+        "end_page": 311,
+        "chars": 1766,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 50,
+        "start_page": 311,
+        "end_page": 311,
+        "chars": 209,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "contract_index": 51,
+        "start_page": 311,
+        "end_page": 372,
+        "chars": 62306,
+        "document_kind": "legal_contract",
+        "jurisdiction": null,
+        "contract_type": "nda",
+        "parties": [
+          "the Authority",
+          "the Concessionaire"
+        ],
+        "warning_codes": []
+      }
+    ]
+  },
+  "fixture_control": {
+    "source": "mirrors tests/unit/features/documents/test_two_contract_identity.py fixture",
+    "boundaries_detected": 3,
+    "whole_document_tuples": 1,
+    "per_boundary_tuples_distinct": 3,
+    "whole_classification": {
+      "document_kind": "legal_contract",
+      "jurisdiction": "SIGNED for NORTHWIND MANUFACTURING PTY LTD",
+      "contract_type": "msa",
+      "parties": [
+        "NORTHWIND MANUFACTURING PTY LTD (the Client)",
+        "ATLANTIC FREIGHT SOLUTIONS LTD (the Supplier"
+      ],
+      "warning_codes": []
+    },
+    "per_boundary": [
+      {
+        "document_kind": "generic",
+        "jurisdiction": null,
+        "contract_type": null,
+        "parties": [],
+        "warning_codes": []
+      },
+      {
+        "document_kind": "legal_contract",
+        "jurisdiction": "SIGNED for NORTHWIND MANUFACTURING PTY LTD",
+        "contract_type": "msa",
+        "parties": [
+          "NORTHWIND MANUFACTURING PTY LTD (the Client)",
+          "ATLANTIC FREIGHT SOLUTIONS LTD (the Supplier"
+        ],
+        "warning_codes": []
+      },
+      {
+        "document_kind": "legal_contract",
+        "jurisdiction": "SIGNED for CROWN COURT CHAMBERS LTD",
+        "contract_type": null,
+        "parties": [
+          "CROWN COURT CHAMBERS LTD (the Client)",
+          "PEMBERTON ADVISORY PARTNERS LLP (the Consultant"
+        ],
+        "warning_codes": []
+      }
+    ],
+    "mechanism_separates_metadata": true
+  },
+  "correctness_verdict": {
+    "boundary_coverage": "1/5 recorded contracts have a detected boundary start inside their recorded page range",
+    "metadata_separation": "19 distinct metadata tuples across 52 slices vs 1 mixed tuple whole-document; party sets pairwise disjoint: False",
+    "improves_correctness": false,
+    "verdict": "CONDITIONAL: the boundary-local mechanism separates contract metadata where explicit markers exist (fixture control), but on the real SRC-04 packet the conservative marker function detects 52 boundary(ies) against the recorded 5 contracts, so on SRC-04 today per-contract extraction degenerates to the whole-document path. Improving SRC-04 correctness requires the recorded page-range boundaries (or stronger markers) to seed establish_contract_boundaries \u2014 recorded as the follow-up need, not papered over."
+  },
+  "cost_verdict": {
+    "whole_document_units": 1,
+    "contract_local_units": 52,
+    "cost_ratio": 52.0,
+    "chars_processed_ratio": 1.0,
+    "note": "contract-local extraction multiplies classification invocations by the boundary count but each classifies only its slice; total characters processed stay within ~1x of whole-document"
+  },
+  "measurement_note": "Both paths run the real production classification code over the recorded SRC-04 pages.json (no model provider). Detected boundaries are compared to the recorded provenance page ranges; boundary detection is deliberately conservative and may detect fewer slices than the recorded 5-contract ground truth \u2014 the gap is recorded, not papered over."
+}

@@ -145,6 +145,9 @@ class OfflineArtifactFidelity(BaseModel):
     clause_kind_counts: dict[str, int] = Field(default_factory=dict)
     # Typed fidelity warnings measured under the versioned default thresholds.
     warning_codes: list[str] = Field(default_factory=list)
+    # Why each warning fired: code -> measured reason (task 8.4 gap fill — a
+    # bare code is not a diagnosis; the report carries the reason text).
+    warning_reasons: dict[str, str] = Field(default_factory=dict)
     unavailable_metrics: list[str] = Field(default_factory=list)
 
 
@@ -406,6 +409,7 @@ def measure_artifact_fidelity(  # noqa: PLR0914 — one measurement pass keeps e
         ),
         clause_kind_counts=dict(sorted(clause_kinds.items())),
         warning_codes=sorted(warning.code for warning in warnings),
+        warning_reasons={warning.code: warning.message for warning in warnings},
         unavailable_metrics=list(metrics.unavailable_metrics),
     )
 
