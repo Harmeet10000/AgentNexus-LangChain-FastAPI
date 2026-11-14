@@ -253,7 +253,7 @@ async def test_real_redis_session_survives_service_restart(
 async def test_real_redis_refresh_rotation_concurrent_requests(
     live_redis: Redis,
 ) -> None:
-    """The Lua CAS permits one rotation and one bounded idempotent retry."""
+    """The Lua CAS permits one rotation; the racing superseded token is reuse."""
     repo = RefreshTokenRepository(live_redis)
     user_id = _user_id()
     family_id = f"live-family-{uuid4().hex}"
@@ -287,14 +287,14 @@ async def test_real_redis_refresh_rotation_concurrent_requests(
                     child_generation=1,
                     expected_authz_revision=session.authz_revision,
                     now=session.created_at,
-                    grace_seconds=10,
                 )
                 for _ in range(2)
             )
         )
         outcomes = [result.unwrap() for result in results]
-        assert sorted(outcome.status for outcome in outcomes) == ["grace", "rotated"]
-        assert {outcome.generation for outcome in outcomes} == {1}
+        assert sorted(outcome.status for outcome in outcomes) == ["reused", "rotated"]
+        assert {outcome.generation for outcome in outcomes if outcome.status == "rotated"} == {1}
+        assert await live_redis.exists(f"auth:session:{session.session_id}") == 0
     finally:
         await live_redis.delete(f"auth:refresh_family:{family_id}")
         await live_redis.delete(f"auth:session:{session.session_id}")

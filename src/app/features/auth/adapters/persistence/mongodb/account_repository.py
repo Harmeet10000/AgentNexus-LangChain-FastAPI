@@ -114,7 +114,6 @@ redis.call('HSET', KEYS[1],
     'previous_id_hash', '',
     'previous_secret_hash', '',
     'previous_generation', '',
-    'previous_grace_until', '',
     'legacy', ARGV[11],
     'session_key', ARGV[12],
     'user_sessions_key', ARGV[13],
@@ -143,13 +142,13 @@ _ROTATE_REFRESH_TOKEN_SCRIPT = """
 local status = redis.call('HGET', KEYS[1], 'status')
 if not status then return {'missing'} end
 if status ~= 'active' then return {'revoked'} end
-if tonumber(redis.call('HGET', KEYS[1], 'authz_revision')) ~= tonumber(ARGV[8]) then
+if tonumber(redis.call('HGET', KEYS[1], 'authz_revision')) ~= tonumber(ARGV[7]) then
     return {'stale'}
 end
 local current_id = redis.call('HGET', KEYS[1], 'current_id_hash')
 local current_secret = redis.call('HGET', KEYS[1], 'current_secret_hash')
 local current_generation = tonumber(redis.call('HGET', KEYS[1], 'generation'))
-if ARGV[9] ~= '' and tonumber(ARGV[9]) < current_generation - 1 then
+if ARGV[8] ~= '' and tonumber(ARGV[8]) < current_generation - 1 then
     redis.call('HSET', KEYS[1], 'status', 'revoked', 'revoke_reason', 'refresh_reuse', 'revoked_at', ARGV[6])
     local session_key = redis.call('HGET', KEYS[1], 'session_key')
     local user_sessions_key = redis.call('HGET', KEYS[1], 'user_sessions_key')
@@ -172,7 +171,6 @@ if ARGV[1] == current_id then
         'previous_id_hash', current_id,
         'previous_secret_hash', current_secret,
         'previous_generation', current_generation,
-        'previous_grace_until', tostring(tonumber(ARGV[6]) + tonumber(ARGV[7])),
         'current_id_hash', ARGV[3],
         'current_secret_hash', ARGV[4],
         'current_parent_hash', ARGV[1],
@@ -180,12 +178,9 @@ if ARGV[1] == current_id then
         'current_issued_at', ARGV[6])
     return {'rotated', ARGV[5]}
 end
+-- Any superseded presentation (previous generation, stale child, wrong
+-- secret for a known id) is reuse: revoke the entire family and session.
 local previous_id = redis.call('HGET', KEYS[1], 'previous_id_hash')
-local previous_secret = redis.call('HGET', KEYS[1], 'previous_secret_hash')
-local grace_until = tonumber(redis.call('HGET', KEYS[1], 'previous_grace_until') or '0')
-if tonumber(ARGV[7]) > 0 and ARGV[1] == previous_id and ARGV[2] == previous_secret and tonumber(ARGV[6]) <= grace_until then
-    return {'grace', tostring(current_generation)}
-end
 if ARGV[1] == previous_id or ARGV[1] == current_id then
     redis.call('HSET', KEYS[1], 'status', 'revoked', 'revoke_reason', 'refresh_reuse', 'revoked_at', ARGV[6])
     local session_key = redis.call('HGET', KEYS[1], 'session_key')
@@ -828,10 +823,9 @@ class RefreshTokenRepository:
         child_generation: int,
         expected_authz_revision: int,
         now: datetime,
-        grace_seconds: int,
         presented_generation: int | None = None,
     ) -> AuthResult[RefreshRotationOutcome]:
-        """Atomically rotate a family and classify benign retry versus reuse."""
+        """Atomically rotate a family; any superseded presentation is reuse."""
         family_key = self._refresh_family_key(family_id)
         try:
             result = await self._redis.eval(
@@ -844,13 +838,12 @@ class RefreshTokenRepository:
                 self._digest(child_token_secret),
                 child_generation,
                 int(now.timestamp()),
-                grace_seconds,
                 expected_authz_revision,
                 "" if presented_generation is None else presented_generation,
             )
             values = [item.decode() if isinstance(item, bytes) else str(item) for item in result]
             status = values[0]
-            if status in {"rotated", "grace"}:
+            if status == "rotated":
                 metadata = await self._redis.hgetall(family_key)
                 return Success(
                     RefreshRotationOutcome(
@@ -995,7 +988,12 @@ class RefreshTokenRepository:
         )
         if not raw_ids:
             return Success([])
-        sid_list = list(raw_ids)
+        # Members may come back as bytes when the shared Redis client is not
+        # configured with decode_responses; key names must be built from text
+        # or every lookup misses and the index destroys itself.
+        sid_list = [
+            member.decode() if isinstance(member, bytes) else str(member) for member in raw_ids
+        ]
         async with self._redis.pipeline() as pipe:
             for sid in sid_list:
                 pipe.get(self._session_key(sid))

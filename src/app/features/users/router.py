@@ -9,6 +9,7 @@ from app.features.auth.api.http.dependencies import (
 )
 from app.features.auth.domain.user import Permission, UserRole
 from app.kernel.result import render_result
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 from .dependencies import UserAdminServiceDep
@@ -24,6 +25,10 @@ router = APIRouter(prefix="/users", tags=["users"])
 # Shared RBAC guard — all routes in this router require USERS_READ at minimum.
 # Individual routes layer on stricter permissions where needed.
 _require_users_read = Depends(require_permission(Permission.USERS_READ))
+
+# Per-IP GCRA guard for account-mutation admin writes; 30/60 keeps
+# legitimate admin batches flowing while bounding runaway loops.
+limit_user_mutation = get_rate_limiter(burst=30, rate=30, period=60, scope="user-mutation")
 
 
 @router.get(
@@ -65,6 +70,7 @@ async def get_user(
 
 @router.patch(
     "/{user_id}/role",
+    dependencies=[Depends(limit_user_mutation)],
 )
 async def update_user_role(
     user_id: Annotated[str, Path()],
@@ -86,6 +92,7 @@ async def update_user_role(
 
 @router.patch(
     "/{user_id}/activate",
+    dependencies=[Depends(limit_user_mutation)],
 )
 async def activate_user(
     user_id: Annotated[str, Path()],
@@ -106,6 +113,7 @@ async def activate_user(
 
 @router.patch(
     "/{user_id}/deactivate",
+    dependencies=[Depends(limit_user_mutation)],
 )
 async def deactivate_user(
     user_id: Annotated[str, Path()],
@@ -127,6 +135,7 @@ async def deactivate_user(
 @router.delete(
     "/{user_id}",
     response_model=APIResponse[None],
+    dependencies=[Depends(limit_user_mutation)],
 )
 async def delete_user(
     user_id: Annotated[str, Path()],
@@ -148,6 +157,7 @@ async def delete_user(
 
 @router.post(
     "/{user_id}/impersonate",
+    dependencies=[Depends(limit_user_mutation)],
 )
 async def impersonate_user(
     user_id: Annotated[str, Path()],

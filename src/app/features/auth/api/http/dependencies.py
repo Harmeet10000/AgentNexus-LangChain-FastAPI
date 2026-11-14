@@ -30,6 +30,7 @@ from app.features.auth.domain.errors import (
     AuthInfrastructureError,
     AuthNotFoundError,
     AuthProvisioningPendingError,
+    AuthRefreshReuseError,
     AuthResult,
     AuthValidationError,
 )
@@ -500,7 +501,7 @@ async def get_current_user(
                 raise ConflictException(
                     detail=error.message, error_code=error.code, data=error.details
                 )
-            case AuthAuthenticationError():
+            case AuthAuthenticationError() | AuthRefreshReuseError():
                 raise UnauthorizedException(detail=error.message, error_code=error.code)
             case AuthAuthorizationError():
                 raise ForbiddenException(detail=error.message, error_code=error.code)

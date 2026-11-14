@@ -15,6 +15,7 @@ class AuthCode(StrEnum):
     USER_NOT_FOUND = "USER_NOT_FOUND"
     USER_CONFLICT = "USER_CONFLICT"
     INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
+    REFRESH_TOKEN_REUSE = "REFRESH_TOKEN_REUSE"  # noqa: S105 — typed error code, not a secret
     FORBIDDEN = "FORBIDDEN"
     DATABASE_ERROR = "DATABASE_ERROR"
     # Correct credentials for an account whose authoritative SQL tenant/membership
@@ -43,6 +44,19 @@ class AuthConflictError(FeatureError):
 class AuthAuthenticationError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.AUTHENTICATION
     code: ClassVar[AuthCode] = AuthCode.INVALID_CREDENTIALS
+    retryable: ClassVar[bool] = False
+
+
+class AuthRefreshReuseError(FeatureError):
+    """A superseded refresh token was presented — rotation reuse detected.
+
+    The whole token family (and its session) is already revoked by the
+    rotation protocol before this failure is returned; the client must
+    re-authenticate. Renders as 401 with ``REFRESH_TOKEN_REUSE``.
+    """
+
+    kind: ClassVar[ErrorKind] = ErrorKind.AUTHENTICATION
+    code: ClassVar[AuthCode] = AuthCode.REFRESH_TOKEN_REUSE
     retryable: ClassVar[bool] = False
 
 
@@ -90,6 +104,7 @@ type AuthError = (
     | AuthNotFoundError
     | AuthConflictError
     | AuthAuthenticationError
+    | AuthRefreshReuseError
     | AuthAuthorizationError
     | AuthInfrastructureError
     | AuthProvisioningPendingError
@@ -101,7 +116,12 @@ def auth_error_to_http_status(error: AuthError) -> int:
     match error:
         case AuthValidationError() | AuthNotFoundError() | AuthConflictError():
             return http_status_for_kind(error.kind)
-        case AuthAuthenticationError() | AuthAuthorizationError() | AuthProvisioningPendingError():
+        case (
+            AuthAuthenticationError()
+            | AuthRefreshReuseError()
+            | AuthAuthorizationError()
+            | AuthProvisioningPendingError()
+        ):
             return http_status_for_kind(error.kind)
         case AuthInfrastructureError():
             return http_status_for_kind(error.kind, retryable=error.retryable)

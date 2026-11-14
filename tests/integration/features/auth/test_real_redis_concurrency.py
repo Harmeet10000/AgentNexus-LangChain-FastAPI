@@ -843,10 +843,10 @@ async def test_pending_marker_survives_redis_outage_and_clears_after_recovery(
 
 
 @pytest.mark.asyncio
-async def test_real_redis_refresh_rotation_replay_and_grace(
+async def test_real_redis_refresh_rotation_replay_is_reuse(
     repository: tuple[RefreshTokenRepository, _RedisHarness],
 ) -> None:
-    """Actual Redis proves CAS rotation, bounded grace, and post-grace replay."""
+    """Actual Redis proves CAS rotation and that any superseded replay is reuse."""
     store, harness = repository
     user_id = _user_id()
     family_id = f"family-{uuid4().hex}"
@@ -881,14 +881,13 @@ async def test_real_redis_refresh_rotation_replay_and_grace(
                 child_generation=1,
                 expected_authz_revision=session.authz_revision,
                 now=session.created_at,
-                grace_seconds=10,
             )
             for _ in range(2)
         )
     )
     outcomes = [result.unwrap() for result in results]
-    assert sorted(outcome.status for outcome in outcomes) == ["grace", "rotated"]
-    assert {outcome.generation for outcome in outcomes} == {1}
+    assert sorted(outcome.status for outcome in outcomes) == ["reused", "rotated"]
+    assert {outcome.generation for outcome in outcomes if outcome.status == "rotated"} == {1}
 
     replay = await store.rotate_refresh_token(
         family_id=family_id,
@@ -899,7 +898,6 @@ async def test_real_redis_refresh_rotation_replay_and_grace(
         child_generation=1,
         expected_authz_revision=session.authz_revision,
         now=session.created_at + timedelta(seconds=11),
-        grace_seconds=10,
     )
     assert isinstance(replay, Success)
     assert replay.unwrap().status == "reused"

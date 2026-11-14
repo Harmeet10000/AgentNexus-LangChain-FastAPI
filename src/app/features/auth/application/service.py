@@ -58,6 +58,7 @@ from app.features.auth.domain.errors import (
     AuthInfrastructureError,
     AuthNotFoundError,
     AuthProvisioningPendingError,
+    AuthRefreshReuseError,
     AuthValidationError,
 )
 from app.features.auth.domain.tenancy import LegalRole, ProvisioningState
@@ -80,11 +81,9 @@ from app.security.tokens import (
 from .oauth import fetch_oauth_userinfo, get_oauth_config
 
 _OAUTH_LINK_RECENT_AUTH_SECONDS = 15 * 60
-_REFRESH_FAMILY_GRACE_SECONDS = 10
 _REFRESH_METER = metrics.get_meter("app.auth.refresh")
 _REFRESH_ROTATIONS = _REFRESH_METER.create_counter("auth.refresh.rotations")
 _REFRESH_REPLAYS = _REFRESH_METER.create_counter("auth.refresh.replays")
-_REFRESH_GRACE_RETRIES = _REFRESH_METER.create_counter("auth.refresh.grace_retries")
 _REFRESH_FAILURES = _REFRESH_METER.create_counter("auth.refresh.failures")
 _REFRESH_FAMILY_REVOKES = _REFRESH_METER.create_counter("auth.refresh.family_revocations")
 
@@ -352,7 +351,7 @@ class AuthService:
         return Success(None)
 
     @trace_layer("service")
-    async def refresh(  # noqa: PLR0912, PLR0914, PLR0915
+    async def refresh(  # noqa: PLR0912, PLR0914
         self, refresh_token: str
     ) -> AuthResult[TokenResponse]:
         claims = decode_token(refresh_token)
@@ -455,7 +454,6 @@ class AuthService:
             child_generation=generation + 1,
             expected_authz_revision=account.role_revision,
             now=datetime.now(UTC),
-            grace_seconds=get_settings().REFRESH_TOKEN_ROTATION_GRACE_SECONDS,
             presented_generation=generation,
         )
         if isinstance(rotation_result, Failure):
@@ -463,6 +461,8 @@ class AuthService:
             return Failure(rotation_result.failure())
         rotation = rotation_result.unwrap()
         if rotation.status == "reused":
+            # The rotation protocol has already revoked the family and its
+            # session; nothing superseded is ever honored.
             _REFRESH_REPLAYS.add(1, {"reason": "family_reuse"})
             _REFRESH_FAMILY_REVOKES.add(1, {"reason": "refresh_reuse"})
             await self._emit_security_event(
@@ -471,7 +471,7 @@ class AuthService:
                 {"family_id": family_id, "session_id": session_id},
             )
             return Failure(
-                AuthAuthenticationError(
+                AuthRefreshReuseError(
                     message="Refresh token reuse detected; session revoked",
                     source="auth_service",
                 )
@@ -510,10 +510,7 @@ class AuthService:
             parent_jti=claims.jti,
             expire_seconds=remaining_seconds,
         )
-        if rotation.status == "grace":
-            _REFRESH_GRACE_RETRIES.add(1, {"reason": "concurrent_retry"})
-        else:
-            _REFRESH_ROTATIONS.add(1, {"outcome": "rotated"})
+        _REFRESH_ROTATIONS.add(1, {"outcome": "rotated"})
         access_token, expires_in = create_access_token(
             user_id=account.id,
             session_id=session_id,

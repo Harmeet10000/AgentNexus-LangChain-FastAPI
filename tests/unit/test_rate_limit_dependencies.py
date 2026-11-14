@@ -10,11 +10,18 @@ must not become an auth gate on unauthenticated endpoints).
 from types import SimpleNamespace
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 
 import app.shared.rate_limit.adapters.redis.dependencies as rate_limit_deps
+from app.features.auth.api.http.router import (
+    limit_forgot_password,
+    limit_login,
+    limit_register,
+    limit_resend_verification,
+)
 from app.security.tokens import TokenClaims
 from app.shared.rate_limit import get_rate_limiter
-from app.utils.exceptions import UnauthorizedException
+from app.utils.exceptions import TooManyRequestsException, UnauthorizedException
 
 
 class _StubRequest:
@@ -24,11 +31,12 @@ class _StubRequest:
         cookies=None,
         client_host="203.0.113.7",
         state=None,
+        redis=None,
     ) -> None:
         self.headers = headers or {}
         self.cookies = cookies or {}
         self.client = SimpleNamespace(host=client_host) if client_host is not None else None
-        self.app = SimpleNamespace(state=SimpleNamespace(redis=object()))
+        self.app = SimpleNamespace(state=SimpleNamespace(redis=redis or object()))
         # Deliberately spoofable: proves the limiter never consults it.
         self.state = state if state is not None else SimpleNamespace()
 
@@ -159,3 +167,48 @@ async def test_request_state_identity_is_never_consulted(capture_identifiers, mo
     await limiter(_StubRequest(state=SimpleNamespace(user_id="spoofed")))
 
     assert capture_identifiers == ["user:user-123", "203.0.113.7"]
+
+
+async def test_register_and_login_are_scoped_per_endpoint_class(capture_identifiers) -> None:
+    """Register and login each get their own per-IP bucket (no shared unscoped key)."""
+    await limit_register(_StubRequest())
+    await limit_login(_StubRequest())
+
+    assert capture_identifiers == ["register:203.0.113.7", "login:203.0.113.7"]
+
+
+async def test_forgot_password_and_resend_verification_are_scoped_per_endpoint_class(
+    capture_identifiers,
+) -> None:
+    """The 300s-window auth email classes must not share one bucket either."""
+    await limit_forgot_password(_StubRequest())
+    await limit_resend_verification(_StubRequest())
+
+    assert capture_identifiers == [
+        "forgot-password:203.0.113.7",
+        "resend-verification:203.0.113.7",
+    ]
+
+
+async def test_login_budget_is_independent_of_register_consumption() -> None:
+    """Exhausting register's 3/60s quota must not throttle the first login."""
+    redis = FakeRedis(decode_responses=True)
+    request = _StubRequest(redis=redis)
+
+    for _ in range(3):
+        await limit_register(request)
+    await limit_login(request)  # login's own 5/60s budget is untouched
+
+
+async def test_exhausted_register_quota_still_429s_with_retry_after() -> None:
+    redis = FakeRedis(decode_responses=True)
+    request = _StubRequest(redis=redis)
+
+    for _ in range(3):
+        await limit_register(request)
+    with pytest.raises(TooManyRequestsException) as raised:
+        await limit_register(request)
+    assert raised.value.headers is not None
+    assert int(raised.value.headers["Retry-After"]) > 0
+    # The scoped login bucket is still independent after register 429s.
+    await limit_login(request)

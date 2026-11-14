@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Path, Response
 from returns.result import Failure, Success
 
 from app.kernel.result import render_result
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 from .dependencies import (
@@ -14,13 +15,17 @@ from .dependencies import (
 )
 from .dto import UpdateSelfReviewRequest, UpdateTenantMembershipRequest
 
+# Tenant-admin writes are privileged and rare; a per-IP guard bounds
+# runaway admin automation without touching normal tenant usage.
+limit_tenant_mutation = get_rate_limiter(burst=10, rate=10, period=60, scope="tenant-mutation")
+
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 _require_tenant_admin = Depends(require_tenant_membership_admin())
 
 
 @router.patch(
     "/{tenant_id}/members/{user_id}/legal-roles",
-    dependencies=[_require_tenant_admin],
+    dependencies=[Depends(limit_tenant_mutation), _require_tenant_admin],
 )
 async def update_tenant_member_roles(
     tenant_id: Annotated[str, Path(min_length=1, max_length=255)],
@@ -51,7 +56,7 @@ async def update_tenant_member_roles(
 
 @router.patch(
     "/{tenant_id}/settings/self-review",
-    dependencies=[_require_tenant_admin],
+    dependencies=[Depends(limit_tenant_mutation), _require_tenant_admin],
 )
 async def update_tenant_self_review(
     tenant_id: Annotated[str, Path(min_length=1, max_length=255)],
