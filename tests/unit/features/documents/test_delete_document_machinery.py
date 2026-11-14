@@ -256,8 +256,15 @@ async def test_closed_gate_refuses_typed_and_removes_nothing() -> None:
     assert idempotency.calls == []
 
 
-def test_gate_refusal_is_typed_before_any_wiring() -> None:
-    """The default settings leave the gate closed, windows named constants."""
+def test_gate_refusal_is_typed_before_any_wiring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unapproved policy leaves the gate closed, windows named constants.
+
+    The owner approved the policy constants (DELETION_POLICY_APPROVED=true in the
+    dev env since 2026-11-14), so the default-settings branch pins the CLOSED
+    state explicitly via the env override — the gate's fail-closed default is
+    the contract under test, not whatever the local env happens to say.
+    """
+    monkeypatch.setenv("DELETION_POLICY_APPROVED", "false")
     gate = DeletionPolicyGate.from_settings(Settings())
     assert gate.approved is False
     refusal = gate.refusal()

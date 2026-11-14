@@ -7,7 +7,9 @@ request whose keyword branch legitimately matched nothing — which is the reaso
 correctness fix and not a resilience preference.
 
 Both halves are asserted here, and neither is optional: a failing branch must produce a `Failure`
-that names it, and three healthy-but-empty branches must still produce a `Success`.
+that names it, and the healthy-but-empty branches must still produce a `Success`. The trigram leg
+was unfused from the served fusion (remove-trigram-fusion-branch, E4 evidence) — the suite runs
+two branches.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ _EMPTY: Success[list[dict[str, Any]]] = Success([])
 
 
 class _StubRepository:
-    """Three branch methods with per-branch outcomes and no database.
+    """Branch methods with per-branch outcomes and no database.
 
     Keyed by branch name rather than by position so that a test which fails `vector_search` is
     stating that fact about the *method*, and the assertion about which label comes back is then
@@ -55,12 +57,10 @@ class _StubRepository:
         *,
         bm25: DocumentResult[list[dict[str, Any]]],
         vector: DocumentResult[list[dict[str, Any]]],
-        trigram: DocumentResult[list[dict[str, Any]]],
     ) -> None:
         self._outcomes: dict[str, DocumentResult[list[dict[str, Any]]]] = {
             "bm25": bm25,
             "vector": vector,
-            "trigram": trigram,
         }
         self.called: list[str] = []
 
@@ -71,10 +71,6 @@ class _StubRepository:
     async def vector_search(self, **_kwargs: object) -> DocumentResult[list[dict[str, Any]]]:
         self.called.append("vector")
         return self._outcomes["vector"]
-
-    async def trigram_search(self, **_kwargs: object) -> DocumentResult[list[dict[str, Any]]]:
-        self.called.append("trigram")
-        return self._outcomes["trigram"]
 
 
 def _service(repo: _StubRepository) -> DocumentQueryService:
@@ -95,22 +91,21 @@ async def _fuse(repo: _StubRepository) -> DocumentResult[list[Any]]:
     )
 
 
-async def test_three_healthy_but_empty_branches_fuse_to_an_empty_success() -> None:
+async def test_healthy_but_empty_branches_fuse_to_an_empty_success() -> None:
     """An empty result from a healthy branch is not a failure."""
-    repo = _StubRepository(bm25=_EMPTY, vector=_EMPTY, trigram=_EMPTY)
+    repo = _StubRepository(bm25=_EMPTY, vector=_EMPTY)
 
     result = await _fuse(repo)
 
     assert isinstance(result, Success)
     assert result.unwrap() == []
-    assert sorted(repo.called) == ["bm25", "trigram", "vector"]
+    assert sorted(repo.called) == ["bm25", "vector"]
 
 
 async def test_a_failed_branch_fails_the_whole_retrieval() -> None:
     repo = _StubRepository(
         bm25=Failure(DocumentDatabaseError(message="bm25 index is not queryable")),
         vector=_EMPTY,
-        trigram=_EMPTY,
     )
 
     result = await _fuse(repo)
@@ -118,7 +113,7 @@ async def test_a_failed_branch_fails_the_whole_retrieval() -> None:
     assert isinstance(result, Failure)
 
 
-@pytest.mark.parametrize("broken", ["bm25", "vector", "trigram"])
+@pytest.mark.parametrize("broken", ["bm25", "vector"])
 async def test_the_failure_names_the_branch_that_broke(broken: str) -> None:
     """The label must track the method that failed, not the position in a tuple.
 
@@ -152,7 +147,6 @@ async def test_the_branch_error_keeps_its_own_kind_and_code() -> None:
     repo = _StubRepository(
         bm25=_EMPTY,
         vector=Failure(DocumentValidationError(message="embedding width mismatch")),
-        trigram=_EMPTY,
     )
 
     result = await _fuse(repo)
@@ -183,8 +177,7 @@ async def test_the_request_itself_fails_rather_than_answering_200(
     )
     repo = _StubRepository(
         bm25=_EMPTY,
-        vector=_EMPTY,
-        trigram=Failure(DocumentDatabaseError(message="trigram operator class is missing")),
+        vector=Failure(DocumentDatabaseError(message="vector operator class is missing")),
     )
 
     result = await _service(repo).search(
@@ -193,7 +186,7 @@ async def test_the_request_itself_fails_rather_than_answering_200(
     )
 
     assert isinstance(result, Failure)
-    assert result.failure().details == {"branch": "trigram"}
+    assert result.failure().details == {"branch": "vector"}
 
 
 def test_the_branch_labels_match_the_repository_method_names() -> None:
@@ -202,6 +195,6 @@ def test_the_branch_labels_match_the_repository_method_names() -> None:
     Each label must be the prefix of a real repository search method, so a typo or a renamed
     method surfaces here rather than in a log line nobody reads.
     """
-    assert len(_SEARCH_BRANCHES) == 3
+    assert len(_SEARCH_BRANCHES) == 2
     for branch in _SEARCH_BRANCHES:
         assert hasattr(DocumentRepository, f"{branch}_search"), branch

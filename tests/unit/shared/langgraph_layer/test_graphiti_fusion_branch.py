@@ -1,8 +1,8 @@
 """Branch-registry registration and enabled-path behavior for the graph branch.
 
 Pins the `graph-fusion-branch` spec at the registry contract: the branch is a
-registration (gather/zip/fusion untouched), default deployments run the three
-mandatory modes only, disabled is not a provisioning failure, an enabled branch
+registration (gather/zip/fusion untouched), default deployments run the
+mandatory legs only, disabled is not a provisioning failure, an enabled branch
 failure fails the request naming the branch, and the branch's contribution is
 recorded in execution diagnostics.
 """
@@ -29,7 +29,7 @@ _UUID = "00000000-0000-0000-0000-00000000000a"
 
 
 class _RecordingRepo:
-    """Three-leg stub; records which branch methods ran."""
+    """Two-leg stub (bm25, vector); records which branch methods ran."""
 
     def __init__(self) -> None:
         self.called: list[str] = []
@@ -41,10 +41,6 @@ class _RecordingRepo:
     async def vector_search(self, **_kwargs: Any) -> Any:
         self.called.append("vector")
         return Success([{"chunk_id": "b", "score": 0.9}])
-
-    async def trigram_search(self, **_kwargs: Any) -> Any:
-        self.called.append("trigram")
-        return Success([{"chunk_id": "c", "score": 0.7}])
 
     async def fetch_chunks_by_ids(self, chunk_ids: Any, **_kwargs: Any) -> Any:
         return Success({cid: {"chunk_id": cid} for cid in chunk_ids})
@@ -64,16 +60,15 @@ class _FakeGraphiti:
 
 
 def test_graph_branch_is_a_registration_on_the_shared_tuple() -> None:
-    assert [branch.name for branch in RETRIEVAL_BRANCHES] == ["bm25", "vector", "trigram"]
+    assert [branch.name for branch in RETRIEVAL_BRANCHES] == ["bm25", "vector"]
     enabled = fused_branches(object())
     assert [branch.name for branch in enabled] == [
         "bm25",
         "vector",
-        "trigram",
         GRAPHITI_BRANCH_NAME,
     ]
     # The mandatory legs are the same records — no parallel registry exists.
-    assert enabled[:3] == RETRIEVAL_BRANCHES
+    assert enabled[:2] == RETRIEVAL_BRANCHES
 
 
 def test_flag_defaults_off_and_disabled_is_not_a_provisioning_failure() -> None:
@@ -84,7 +79,7 @@ def test_flag_defaults_off_and_disabled_is_not_a_provisioning_failure() -> None:
     assert fused_branches(None) is RETRIEVAL_BRANCHES
 
 
-async def test_default_off_runs_three_mandatory_branches_only() -> None:
+async def test_default_off_runs_the_mandatory_branches_only() -> None:
     repo = _RecordingRepo()
     result = await retrieve_fused(
         repo=repo,
@@ -96,7 +91,7 @@ async def test_default_off_runs_three_mandatory_branches_only() -> None:
         filter_params={},
     )
     assert isinstance(result, Success)
-    assert repo.called == ["bm25", "vector", "trigram"]
+    assert repo.called == ["bm25", "vector"]
 
 
 async def test_enabled_branch_contributes_and_diagnostics_record_it() -> None:
@@ -116,12 +111,11 @@ async def test_enabled_branch_contributes_and_diagnostics_record_it() -> None:
         branch_diagnostics=diagnostics,
     )
     assert isinstance(result, Success)
-    assert repo.called == ["bm25", "vector", "trigram"]
+    assert repo.called == ["bm25", "vector"]
     by_branch = {item["branch"]: item for item in diagnostics["branches_executed"]}
     assert [branch["branch"] for branch in diagnostics["branches_executed"]] == [
         "bm25",
         "vector",
-        "trigram",
         GRAPHITI_BRANCH_NAME,
     ]
     assert by_branch[GRAPHITI_BRANCH_NAME]["executed"] is True
@@ -171,12 +165,12 @@ async def test_enabled_but_empty_branch_does_not_dilute_ranking() -> None:
         repo=_RecordingRepo(),
         graphiti=_FakeGraphiti(chunk_ids=[]),
         branch_diagnostics=empty_diagnostics,
-        weights=[1.0, 1.0, 1.2, 0.1],
+        weights=[1.0, 1.0, 0.1],
         **base_kwargs,
     )
     graphless_result = await retrieve_fused(
         repo=_RecordingRepo(),
-        weights=[1.0, 1.0, 1.2],
+        weights=[1.0, 1.0],
         **base_kwargs,
     )
 
@@ -184,8 +178,8 @@ async def test_enabled_but_empty_branch_does_not_dilute_ranking() -> None:
     assert isinstance(graphless_result, Success)
     empty_ids = [item.chunk_id for item in empty_result.unwrap()[0]]
     graphless_ids = [item.chunk_id for item in graphless_result.unwrap()[0]]
-    # An empty fourth leg contributes no rank entries, so the fused ranking is
-    # exactly the three-branch ranking for this query.
+    # An empty enabled leg contributes no rank entries, so the fused ranking is
+    # exactly the two-branch ranking for this query.
     assert empty_ids == graphless_ids
     by_branch = {item["branch"]: item for item in empty_diagnostics["branches_executed"]}
     assert by_branch[GRAPHITI_BRANCH_NAME] == {
@@ -215,7 +209,7 @@ def test_graphiti_weight_cites_the_recorded_baseline() -> None:
     assert "RRF_WEIGHT_GRAPHITI" in measured["decision"]
 
 
-async def test_four_leg_fusion_consumes_four_weights_without_a_second_implementation() -> None:
+async def test_graph_leg_fusion_consumes_its_weight_without_a_second_implementation() -> None:
     repo = _RecordingRepo()
     result = await retrieve_fused(
         repo=repo,
@@ -225,14 +219,14 @@ async def test_four_leg_fusion_consumes_four_weights_without_a_second_implementa
         candidate_limit=10,
         limit=5,
         filter_params={"document_ids": ["doc-1"]},
-        weights=[1.0, 1.0, 1.2, 0.1],
+        weights=[1.0, 1.0, 0.1],
         graphiti=_FakeGraphiti(chunk_ids=[_UUID]),
         document_versions=[("doc-1", 1, None)],
         document_contracts=[("doc-1", 1, (None,), True)],
     )
     assert isinstance(result, Success)
     fused, _ = result.unwrap()
-    # c: trigram 1.2 at rank 1; a and b: one unweighted rank-1 leg each (tie broken
-    # by id); the UUID: only the 0.1 graph weight. The graph leg contributed over
-    # the same identifier space and its weight demonstrably applied.
-    assert [item.chunk_id for item in fused] == ["c", "a", "b", _UUID]
+    # b: bm25 rank-2 + vector rank-1 (both unweighted) = 0.0325; a: bm25
+    # rank-1 = 0.0164; the UUID: only the 0.1 graph weight = 0.0016. The graph
+    # leg contributed over the same identifier space and its weight demonstrably applied.
+    assert [item.chunk_id for item in fused] == ["a", "b", _UUID]
