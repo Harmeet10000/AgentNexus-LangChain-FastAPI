@@ -249,3 +249,4 @@ graphify-out/
 .research/parallel/*
 .testing-credentials.json
 .live-ingestion-mapping.json
+.zcode/
