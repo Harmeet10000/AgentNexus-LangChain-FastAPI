@@ -368,6 +368,8 @@ Root cause confirmed empirically — every probe mismatches. Let me quickly re-v
 The graphiti failure: root cause and fix
 Root cause (empirically confirmed, not guessed): the crash is ValueError: zip() argument 2 is shorter than argument 1 inside graphiti_core/utils/maintenance/node_operations.py:438. Graphiti's node-deduplication builds one embedding query per extracted entity node, calls embedder.create_batch(queries), then zips the two lists with strict=True. Our embedder is GeminiEmbedder (src/app/connections/graphiti.py:93) pointed at GEMINI_EMBEDDING_MODEL=gemini-embedding-2-preview. I probed that exact embedder directly: with 3 inputs it returns 1 embedding; with 2 inputs, 1 embedding — the new SDK + preview model returns a single embedding per batch call regardless of how many contents you pass. So the strict zip always fails, ingestion always fails (status=failed), and session creation always 409s. The library special-cases only gemini-embedding-001 by forcing batch_size=1 (gemini.py:79-82) — when item 277 switched the embedding model, it silently broke that invariant. Boot17 passed because it ran on the old model. This is a third-party/library-vs-model interaction bug, not item 273 and not the WS fix.
 (a) Pass batch_size=1 in GeminiEmbedderConfig in connections/graphiti.py (recommended), also find gemini-embedding-2 model with rate limits and how does this fot into here(web search)  DONE
+242. fix agent tools. need to check what are all the tools my agent has. does it have all the tools it needs or does it require more? what are the best practices and principles for making agent tools.   DONE — audited; covered by PLAN-agent-tools.md + 7 specced changes (see audit 2026-11-01)
+252. retrival graph if present and figure out is this is the best way to do retrival Full picture gathered. Here are the facts first, then one decision I need from you before touching the layout (the two halves of your instruction point at different homes).   DONE — decision D6 made: mount the compiled graph; `mount-retrieval-graph` change 22/22 tasks checked
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
@@ -434,54 +436,9 @@ To solve these problems, the creator shifted to a **production-grade database ar
 
 171. use CacheBackedEmbeddings fore reusing embeddings
 172. use prebuilt and custom middlewares in langchain 
-179. make proper plan for adding caching from this video and use redisvl, langcache, does cognee takes redis instance too?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
+179. make proper plan for adding caching from this video and use redisvl, langcache?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
 250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
 
-242. fix agent tools. need to check what are all the tools my agent has. does it have all the tools it needs or does it require more? what are the best practices and principles for making agent tools.   DONE — audited; covered by PLAN-agent-tools.md + 7 specced changes (see audit 2026-11-01)
-
-
-252. retrival graph if present and figure out is this is the best way to do retrival Full picture gathered. Here are the facts first, then one decision I need from you before touching the layout (the two halves of your instruction point at different homes).   DONE — decision D6 made: mount the compiled graph; `mount-retrieval-graph` change 22/22 tasks checked
-
-1. Is there a retrieval graph? — Yes, and it's deliberately unreachable
-
-src/app/features/documents/retrieval_graph/ (graph/nodes/reranker/state) is a compiled plan → retrieve → grade → generate machine, built via DocumentQueryService.ask_via_retrieval_graph. Its own docstring says it is "deliberately not exposed by any router" — zero HTTP endpoints reach it. The mounted endpoints (/search/ask, /legal/ask) call service.ask, which duplicates the same node sequence inline — the docstring flags that duplication as recorded debt and calls the graph "the intended survivor." So for todo #252: it exists but is dormant; removing it is safe from an API standpoint but deletes the "intended survivor" your notes endorsed.
-
-2. How does Agent Saul CRUD information?
-
-It reads through tools and can't create/update/delete through any tool:
-
-Operation	Mechanism
-Read (tools)	4 evidence tools (below) — query-only, idempotency-guarded
-Create/Update	Implicit, service-level: AgentMemoryService (cognee remember/improve) called after turns; write_clause_episodes_to_graphiti runs at ingest time, not agent time
-Delete	Nothing. Graph pruning/consolidation exists only via memory-service internals
-
-Graphiti write tools exist but are not wired: write_clause_episode / write_relationship_edge (@tool-decorated in shared/rag/graphiti/write_clause_episodes.py) — bundle.py's docstring admits "implemented but not yet wired into any node." So the agent has no self-service memory writes today.
-
-3. All tools Agent Saul has
-
-Tool	Agent	Type	Schema style
-transfer_to_orchestrator	risk, compliance	handoff	explicit args_schema
-transfer_to_risk	compliance	handoff	explicit args_schema
-query_knowledge_graph	risk	read (graphiti)	inferred from signature
-get_obligation_chain	risk	read (graphiti)	inferred from signature
-search_legal_precedents	compliance (+deep_research alias)	read (pg+graphiti)	inferred from signature
-retrieve_statute_section	compliance	read (pg)	inferred from signature
-
-Plus a global registry (register_default_tools) Saul doesn't get: web_search, shell_tool, read_file, write_file, list_directory, file_search — and all transfer_to_* roles.
-
-4. Rule-54 compliance verdict: yes, all conform — two cosmetic drifts
-
-• Names: every tool is snake_case (handoff transfer_to_<role>, evidence tools, shell/file, memory writers). None would trip provider validation.
-• Descriptions: present everywhere (@tool docstrings or description= kwargs).
-• args_schema: handoff + shell tools pass explicit Pydantic schemas; the 4 evidence tools infer from typed signatures — same runtime schema, just a second idiom. Not a violation, but non-uniform.
-• One real smell: WebSearchInput(BaseTool) — an input schema class inheriting from BaseTool should be a plain BaseModel; harmless today but schema-as-tool confusion worth a one-line fix if you care.
-• precedent_tools.py also defines internal tools (hybrid_retrieve_precedents, detect_graph_research) that aren't in the bundle.
-
-5. The graphiti layout — one decision needed
-
-Current seams: implementation lives in shared/rag/graphiti/ (client 600L, schemas, subgraph, writers); connections/graphiti.py is a thin re-export (used by lifespan + worker/documents.py); shared/rag/ also holds production-load-bearing helpers: token_counter (documents + retrieval graph), structural_navigator (query service), errors (langextract) — plus strategies.py, which appears unused.
-
-Your first line says inline the functions into connections/graphiti.py; the second says shift into src/app/retrieval/graphiti — different homes. Which layout do you want?
 
 284. add a skill/credentials for agent to test the app and also check how exactly this is being done either programatically or through script Personal tenants are derived from the Mongo account id (`personal:<user_id>`).
 PostgreSQL owns the tenant, membership, legal roles, role revision, and
