@@ -425,7 +425,9 @@ class Settings(BaseSettings):
 
     # --- Reranker Configuration ---
     RERANKER_PROVIDER: Literal["hosted"] = Field(default="hosted")
-    RERANKER_MODEL: str = Field(default="rerank-v3.0")
+    # rerank-v3.5: the current generation on the account (plain rerank-v3.0 is
+    # not offered to new accounts — verified against /v1/models, 2026-11-14).
+    RERANKER_MODEL: str = Field(default="rerank-v3.5")
     RERANKER_API_KEY: SecretStr = Field(default=SecretStr(""))
     RERANKER_ENDPOINT: str = Field(default="https://api.cohere.com/v2/rerank")
     RERANKER_TIMEOUT_SECONDS: float = Field(default=30.0)
