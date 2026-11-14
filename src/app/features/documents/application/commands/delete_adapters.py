@@ -172,16 +172,21 @@ class RedisIdempotencyRecordPurger:
     """Purges `IdempotencyGuard` records reachable from the document's users.
 
     Postgres: `tool_executions` rows are digest-keyed with a `user_id` column,
-    so the durable records are deleted by user scope. Redis: the idempotency
-    namespace is TTL-bounded and regenerable and is purged whole. This is the
-    same honest best-effort boundary the D1 draft records ("a delete also
-    tolerates cache expiry as a backstop since no cached value survives its
-    key").
+    so the durable records are deleted by user scope — AND by the tenant
+    identity, because the legal read tools persist their results under
+    `authz.tenant_id` (e.g. `personal:alice`), not `document.user_id`; a purge
+    keyed only on the owner left deleted document text reloadable through
+    `IdempotencyGuard.get` (security finding: cached results retain deleted
+    text). Redis: the idempotency namespace is TTL-bounded and regenerable and
+    is purged whole. This is the same honest best-effort boundary the D1 draft
+    records ("a delete also tolerates cache expiry as a backstop since no
+    cached value survives its key").
     """
 
     _DELETE_SQL = """
     DELETE FROM tool_executions
     WHERE user_id = ANY(CAST(:user_ids AS text[]))
+       OR user_id = :tenant_id
     """
 
     def __init__(
@@ -198,22 +203,26 @@ class RedisIdempotencyRecordPurger:
     async def purge_idempotency_records(
         self,
         *,
-        tenant_id: str,  # noqa: ARG002 — Postgres rows scope by the document's users
+        tenant_id: str,
         document_id: str,
         document_user_ids: Sequence[str],
     ) -> DocumentResult[int]:
         removed = 0
+        sql_parameters: dict[str, object] = {
+            "user_ids": list(document_user_ids),
+            "tenant_id": tenant_id,
+        }
         if document_user_ids and self._db_engine is not None:
             async with self._db_engine.begin() as connection:
                 result = await connection.execute(
                     text(self._DELETE_SQL),
-                    {"user_ids": list(document_user_ids)},
+                    sql_parameters,
                 )
                 removed += int(getattr(result, "rowcount", 0) or 0)
         if document_user_ids and self._db_session is not None:
             result = await self._db_session.execute(
                 text(self._DELETE_SQL),
-                {"user_ids": list(document_user_ids)},
+                sql_parameters,
             )
             removed += int(getattr(result, "rowcount", 0) or 0)
         if self._redis is not None:

@@ -17,6 +17,7 @@ from app.kernel.result import (
 )
 from app.utils import http_response
 
+from .build_info import resolve_git_sha
 from .dependencies import get_health_service
 from .dto import HealthDataDTO, SelfInfoDTO
 from .health_check import ALL_PROBES
@@ -70,7 +71,10 @@ async def get_deep_health(request: Request, response: Response) -> APIResponse[H
     body = HealthResponse(
         status=overall,
         version=settings.APP_VERSION,
-        git_sha=settings.GIT_SHA,
+        # Baked build metadata first, then the import-time git read, then
+        # "unknown" — the smoke run could not reconstruct the served commit
+        # because native deployments never receive a baked GIT_SHA.
+        git_sha=resolve_git_sha(),
         build_date=settings.BUILD_DATE,
         dependencies=dependencies,
     )

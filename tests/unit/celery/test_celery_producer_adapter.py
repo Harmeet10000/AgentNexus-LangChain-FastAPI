@@ -48,12 +48,36 @@ async def test_adapter_publishes_json_payload_and_catalog_routes() -> None:
 
     task_id = await adapter.publish(
         job,
-        options=EnqueueOptions(expires=30, countdown=2),
+        options=EnqueueOptions(expires=30),
     )
 
     assert task_id == "broker-task-1"
-    assert broker.calls == [(DOCUMENTS_INGEST, _PAYLOAD, {"expires": 30, "countdown": 2})]
+    assert broker.calls == [(DOCUMENTS_INGEST, _PAYLOAD, {"expires": 30})]
     assert "queue" not in broker.calls[0][2]
+
+
+@pytest.mark.asyncio
+async def test_document_ingestion_publish_never_carries_eta_or_countdown() -> None:
+    """F5: delayed delivery is unsupported on the direct exchange — publish immediately.
+
+    A countdown/ETA on a direct exchange queues a blocked ETA message that reserves a worker
+    slot until the ETA arrives (server-smoke-2026-11-15 F5: the stuck ingest task re-delivered
+    as a blocked ETA message at every worker boot). The seam now makes that state
+    unrepresentable: no countdown option exists, and no publish of the document-ingestion job
+    may carry the wire kwargs (`countdown`/`eta`) that produce it.
+    """
+    broker = _Broker()
+    adapter = celery_producer.DirectPublicationAdapter(broker)  # type: ignore[arg-type]
+    job = prepare_job(DOCUMENTS_INGEST, _PAYLOAD)
+
+    await adapter.publish(job, options=EnqueueOptions())
+    await adapter.publish(job, options=EnqueueOptions(expires=30))
+
+    assert len(broker.calls) == 2
+    for _name, _kwargs, options in broker.calls:
+        assert "countdown" not in options
+        assert "eta" not in options
+        assert "expires" not in options or options["expires"] == 30
 
 
 @pytest.mark.asyncio

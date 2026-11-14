@@ -36,6 +36,11 @@ def build_worker_argv(role: WorkerRole | str, extra: Sequence[str] = ()) -> tupl
         "--concurrency",
         "--max-tasks-per-child",
         "--max-memory-per-child",
+        # The node name is role-owned too: without it every role booted as the
+        # same `celery@<host>` node and kombu's pidbox rejected each boot after
+        # the first ("A node named celery@Aging-Devil is already used") — F5.
+        "-n",
+        "--hostname",
     }
     tokens = tuple(extra)
     for token in tokens:
@@ -56,6 +61,8 @@ def build_worker_argv(role: WorkerRole | str, extra: Sequence[str] = ()) -> tupl
         str(profile.max_tasks_per_child),
         "--max-memory-per-child",
         str(profile.max_memory_per_child),
+        "-n",
+        f"{profile.role.value}@%h",
         "-Q",
         profile.queue,
         *tokens,

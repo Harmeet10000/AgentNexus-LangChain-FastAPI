@@ -662,3 +662,162 @@ def test_deletion_group_ids_skip_legacy_partitions() -> None:
             tenant_id=TENANT, document_id=DOCUMENT_ID, document_version=2, contract_index=3
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Security: the idempotency purge must cover the tenant identity the READ
+# tools persist under (`user_id=authz.tenant_id`), not just the document owner.
+# ---------------------------------------------------------------------------
+
+
+class _FakeDeleteConnection:
+    """Applies the purger's DELETE against an in-memory row list."""
+
+    def __init__(self, rows: list[dict[str, str]]) -> None:
+        self._rows = rows
+        self.rowcount = 0
+        self.statements: list[tuple[str, dict[str, object]]] = []
+
+    async def execute(self, statement: Any, parameters: dict[str, object] | None = None) -> Any:
+        rendered = str(statement)
+        self.statements.append((rendered, dict(parameters or {})))
+        params = parameters or {}
+        user_ids = {str(value) for value in (params.get("user_ids") or [])}
+        tenant_id = str(params.get("tenant_id") or "")
+        before = len(self._rows)
+        self._rows[:] = [
+            row
+            for row in self._rows
+            if row["user_id"] not in user_ids and row["user_id"] != tenant_id
+        ]
+        self.rowcount = before - len(self._rows)
+        return self
+
+
+class _FakeDeleteEngine:
+    """Minimal `AsyncEngine.begin()` shape serving the fake connection."""
+
+    def __init__(self, rows: list[dict[str, str]]) -> None:
+        self._connection = _FakeDeleteConnection(rows)
+
+    def begin(self) -> Any:
+        outer = self
+
+        class _Ctx:
+            async def __aenter__(self) -> _FakeDeleteConnection:
+                return outer._connection
+
+            async def __aexit__(self, *_exc: object) -> None:
+                return None
+
+        return _Ctx()
+
+
+@pytest.mark.asyncio
+async def test_idempotency_purge_removes_results_saved_under_the_tenant_identity() -> None:
+    """Deleted document text must not survive a purge through a tenant-keyed row.
+
+    The legal read tools persist their tool results with `user_id=authz.tenant_id`
+    (`personal:alice`), not `document.user_id` (`user-alice`). A purge keyed only on the
+    owner left those rows alive, and `IdempotencyGuard.get` reloads from PostgreSQL —
+    deleted text came back after the delete. The purge now covers both identities, and the
+    Redis namespace clear removes the hot-path key the guard reads first.
+    """
+    from fakeredis.aioredis import FakeRedis
+
+    from app.features.documents.application.commands.delete_adapters import (
+        RedisIdempotencyRecordPurger,
+    )
+    from app.resilience.idempotency import IdempotencyGuard, ToolResult
+
+    rows = [
+        {"user_id": ACTOR, "key": "owner-row"},
+        {"user_id": TENANT, "key": "tenant-identity-row"},
+    ]
+    engine = _FakeDeleteEngine(rows)
+    redis = FakeRedis()
+    guard = IdempotencyGuard(redis=redis, db_engine=engine)  # type: ignore[arg-type]
+
+    key = IdempotencyGuard.make_key(
+        step_id="step-1",
+        structural={"doc_id": DOCUMENT_ID},
+        content=None,
+        user_id=TENANT,
+        tool_name="search_legal_precedents",
+        tenant_id=TENANT,
+        allowed_doc_ids=(DOCUMENT_ID,),
+    )
+    await guard.set(
+        key,
+        ToolResult.ok({"excerpt": "clause text of the deleted document"}),
+        tool_name="search_legal_precedents",
+        user_id=TENANT,
+        thread_id="thread-1",
+        step_id="step-1",
+    )
+    assert await guard.get(key) is not None, "setup failed: guard must serve before the delete"
+
+    purger = RedisIdempotencyRecordPurger(db_engine=engine, redis=redis)
+    result = await purger.purge_idempotency_records(
+        tenant_id=TENANT,
+        document_id=DOCUMENT_ID,
+        document_user_ids=(ACTOR,),
+    )
+
+    assert isinstance(result, Success)
+    # Both the owner-scoped row and the tenant-identity row are gone, plus the Redis key.
+    assert rows == []
+    assert await guard.get(key) is None, "deleted text survived the purge through the cache"
+
+    delete_statements = [
+        rendered
+        for rendered, _params in engine._connection.statements
+        if "DELETE FROM tool_executions" in rendered
+    ]
+    assert delete_statements, "the purge never issued its DELETE"
+    assert ":tenant_id" in delete_statements[0], (
+        "purge statement no longer constrains the tenant identity"
+    )
+
+
+@pytest.mark.asyncio
+async def test_idempotency_purge_redis_clear_hits_guard_reads() -> None:
+    """The Redis half alone must already break the hot-path read of a deleted result."""
+    from fakeredis.aioredis import FakeRedis
+
+    from app.features.documents.application.commands.delete_adapters import (
+        RedisIdempotencyRecordPurger,
+    )
+    from app.resilience.idempotency import IdempotencyGuard, ToolResult
+
+    rows: list[dict[str, str]] = []
+    engine = _FakeDeleteEngine(rows)
+    redis = FakeRedis()
+    guard = IdempotencyGuard(redis=redis, db_engine=engine)  # type: ignore[arg-type]
+
+    key = IdempotencyGuard.make_key(
+        step_id="step-2",
+        structural={"doc_id": DOCUMENT_ID},
+        content=None,
+        user_id=TENANT,
+        tool_name="query_knowledge_graph",
+        tenant_id=TENANT,
+    )
+    await guard.set(
+        key,
+        ToolResult.ok({"nodes": ["deleted clause"]}),
+        tool_name="query_knowledge_graph",
+        user_id=TENANT,
+        thread_id="thread-1",
+        step_id="step-2",
+    )
+
+    purger = RedisIdempotencyRecordPurger(db_engine=engine, redis=redis)
+    result = await purger.purge_idempotency_records(
+        tenant_id=TENANT,
+        document_id=DOCUMENT_ID,
+        document_user_ids=(ACTOR,),
+    )
+
+    assert isinstance(result, Success)
+    assert await redis.get(f"idempotency:v2:{key}") is None

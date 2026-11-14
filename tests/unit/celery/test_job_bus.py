@@ -200,7 +200,7 @@ async def test_protocol_adapters_are_substitutable() -> None:
             options: EnqueueOptions,
         ) -> str:
             assert job.task_name == CRAWLER_CRAWL
-            assert options.countdown == 2
+            assert options.expires == 30
             return "spy-task"
 
     class StagingSpy:
@@ -219,11 +219,36 @@ async def test_protocol_adapters_are_substitutable() -> None:
     bus = JobBus(DirectSpy(), StagingSpy())
     job = JOB_CATALOG[CRAWLER_CRAWL].prepare(_CRAWL_PAYLOAD)
 
-    direct = await bus.enqueue(job, EnqueueOptions(countdown=2))
+    direct = await bus.enqueue(job, EnqueueOptions(expires=30))
     durable = await bus.in_transaction("transaction").enqueue(job, aggregate=_AGGREGATE)
 
     assert direct.task_id == "spy-task"
     assert durable.event_id == "spy-event"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_options_no_longer_admit_a_countdown() -> None:
+    """F5: a countdown is not publishable — delayed delivery is unsupported on the exchange.
+
+    The field was removed from `EnqueueOptions`, so passing one is a validation error before
+    any broker side effect rather than a blocked ETA message on the worker.
+    """
+
+    class AcceptingSpy:
+        async def publish(
+            self,
+            job: TypedJob[CeleryTaskPayload],
+            *,
+            options: EnqueueOptions,
+        ) -> str:
+            return "never-published"
+
+    job = JOB_CATALOG[CRAWLER_CRAWL].prepare(_CRAWL_PAYLOAD)
+
+    with pytest.raises(ValidationError):
+        await JobBus(AcceptingSpy(), AcceptingSpy()).enqueue(
+            job, EnqueueOptions(countdown=2)  # ty: ignore[unknown-argument]
+        )
 
 
 @pytest.mark.asyncio

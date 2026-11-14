@@ -43,12 +43,20 @@ class EnqueueOptions(BaseModel):
 
     Queue and routing are deliberately absent.  The immutable catalog owns
     queue selection; a caller cannot bypass topology by supplying a queue.
+
+    ``countdown`` was removed deliberately (F5): the broker exchange is a
+    direct exchange, where Celery's native delayed delivery is unsupported —
+    a countdown/ETA task is queued as a blocked ETA message that reserves a
+    worker slot until the ETA arrives ("ETA tasks will block the worker").
+    Nothing in production ever set it (git history: it was API-design surface
+    from the JobBus introduction, never a caller), and long-running jobs carry
+    their own retry/backoff machinery. Jobs needing delayed execution must use
+    a supported mechanism, not the publish seam.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     expires: float | None = Field(default=None, ge=0)
-    countdown: float | None = Field(default=None, ge=0)
 
 
 class AggregateRef(BaseModel):

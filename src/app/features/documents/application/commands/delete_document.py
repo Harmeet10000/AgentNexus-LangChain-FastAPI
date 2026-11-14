@@ -262,8 +262,9 @@ class IdempotencyRecordPurger(Protocol):
     """Purges `IdempotencyGuard` records reachable from the document's users.
 
     The Postgres `tool_executions` rows are digest-keyed with a `user_id`
-    column, so the adapter deletes by user scope plus the Redis idempotency
-    namespace; both stores are TTL-bounded and regenerable.
+    column, so the adapter deletes by user scope plus the tenant identity the
+    read tools persist under, plus the Redis idempotency namespace; both
+    stores are TTL-bounded and regenerable.
     """
 
     async def purge_idempotency_records(

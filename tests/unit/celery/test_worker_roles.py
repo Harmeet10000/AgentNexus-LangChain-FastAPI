@@ -18,15 +18,26 @@ from app.worker.celery.completeness import (
 from app.worker.celery.profiles import profile_for_role
 
 
-@pytest.mark.parametrize(
-    ("role", "queue", "concurrency"),
-    [("default", "default", 8), ("ingestion", "ingestion", 2), ("crawler", "crawler", 2)],
-)
-def test_role_profile_owns_process_shape(role: str, queue: str, concurrency: int) -> None:
+@pytest.mark.parametrize("role", ["default", "ingestion", "crawler"])
+def test_role_profile_owns_process_shape(role: str) -> None:
+    """The profile mirrors the CONFIGURED concurrency for its role.
+
+    The expected value comes from settings, not a literal: the deployment env
+    may deliberately override concurrency (e.g. the 7.5 GiB dev machine runs
+    2/1/1 to stay inside its memory budget — see .env.development). Pinning
+    the literal here would make every intentional env override read as a
+    regression; the code defaults are pinned separately below.
+    """
     profile = profile_for_role(role)
-    assert profile.queue == queue
+    settings = get_settings()
+    queue = profile.queue
+    expected_concurrency = {
+        "default": settings.CELERY_DEFAULT_CONCURRENCY,
+        "ingestion": settings.CELERY_INGESTION_CONCURRENCY,
+        "crawler": settings.CELERY_CRAWLER_CONCURRENCY,
+    }[role]
     assert profile.pool == "prefork"
-    assert profile.concurrency == concurrency
+    assert profile.concurrency == expected_concurrency
     assert profile.task_names
     assert profile.task_modules
 
@@ -34,8 +45,29 @@ def test_role_profile_owns_process_shape(role: str, queue: str, concurrency: int
     assert command.count("-Q") == 1
     assert command[command.index("-Q") + 1] == queue
     assert command[command.index("--pool") + 1] == "prefork"
-    assert command[command.index("--concurrency") + 1] == str(concurrency)
+    assert command[command.index("--concurrency") + 1] == str(expected_concurrency)
     assert profile.queue != get_settings().CELERY_DEAD_LETTER_QUEUE
+
+
+@pytest.mark.parametrize(
+    ("setting_name", "default_concurrency"),
+    [
+        ("CELERY_DEFAULT_CONCURRENCY", 8),
+        ("CELERY_INGESTION_CONCURRENCY", 2),
+        ("CELERY_CRAWLER_CONCURRENCY", 2),
+    ],
+)
+def test_role_concurrency_code_defaults_are_pinned(setting_name: str, default_concurrency: int) -> None:
+    """The shipped code defaults are a decision, not an accident: deployment
+    env files may override them (profile_for_role follows the configured
+    values — see test_role_profile_owns_process_shape), but a change to the
+    defaults themselves must be a visible, deliberate diff. Asserted against
+    pristine settings (env file disabled); the profile singleton cannot show
+    pristine values inside a configured process."""
+    from app.config import Settings
+
+    pristine = Settings(_env_file=None)
+    assert getattr(pristine, setting_name) == default_concurrency
 
 
 def test_ingestion_profile_registers_the_search_ingest_job() -> None:
@@ -49,9 +81,38 @@ def test_ingestion_profile_registers_the_search_ingest_job() -> None:
 
 
 def test_role_command_rejects_duplicate_queue_or_process_flags() -> None:
-    for option in ("-Q", "--queues", "--pool", "--concurrency", "--max-tasks-per-child"):
+    for option in (
+        "-Q",
+        "--queues",
+        "--pool",
+        "--concurrency",
+        "--max-tasks-per-child",
+        "-n",
+        "--hostname",
+    ):
         with pytest.raises(ValueError, match="owns"):
             build_worker_argv("default", (option, "other"))
+
+
+@pytest.mark.parametrize("role", ["default", "ingestion", "crawler"])
+def test_role_command_gives_a_distinct_node_name_per_role(role: str) -> None:
+    """F5: every role previously booted as the same `celery@<host>` node.
+
+    Celery's default node name does not include the role, so kombu's pidbox saw each
+    successive role boot collide with the previous one ("A node named celery@Aging-Devil is
+    already used"). The command now owns a role-scoped hostname; `%h` keeps the host suffix so
+    multiple hosts still get distinct names.
+    """
+    command = build_worker_argv(role)
+
+    assert command.count("-n") == 1
+    assert command[command.index("-n") + 1] == f"{role}@%h"
+
+
+def test_role_node_names_are_mutually_distinct() -> None:
+    names = [build_worker_argv(role)[build_worker_argv(role).index("-n") + 1] for role in
+             ("default", "ingestion", "crawler")]
+    assert len(set(names)) == 3
 
 
 def test_canonical_app_has_one_identity() -> None:

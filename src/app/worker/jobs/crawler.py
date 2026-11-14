@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import NoReturn
 
+    from crawl4ai import AsyncWebCrawler
+
 from playwright.async_api import Error as PlaywrightError
 from redis.exceptions import RedisError
 from returns.result import Failure
@@ -105,7 +107,11 @@ def _mark_failed_sync(crawl_id: str, message: str) -> None:
 
 
 async def _run_crawl_job(
-    crawl_id: str, request_payload: dict[str, object], *, final_attempt: bool
+    crawl_id: str,
+    request_payload: dict[str, object],
+    *,
+    final_attempt: bool,
+    browser: AsyncWebCrawler,
 ) -> None:
     settings = get_settings()
     redis = create_redis_client(settings.REDIS_URL)
@@ -116,7 +122,12 @@ async def _run_crawl_job(
             return
         await store.mark_running(crawl_id)
         request = CrawlRequest.model_validate(request_payload)
-        browser = get_crawler_worker_resources().browser
+        # The browser was provisioned at the task boundary and handed in: a
+        # synchronous owner operation from inside this coroutine (which runs ON
+        # the owner loop) raises CapabilityUsageError, which is exactly the
+        # deterministic "capability owner synchronous operations must run at a
+        # task boundary" failure the 2026-11-15 smoke recorded (F8 — every
+        # crawl died in ~226 ms before attempting a page).
         processor = await get_processor()
         crawler = WebCrawler(redis_client=redis, browser=browser)
         service = CrawlerService(crawler=crawler, processor=processor, redis_client=redis)
@@ -172,9 +183,15 @@ def crawl_job(
     """Execute one durable crawl in a worker-owned browser lifecycle."""
     settings = get_settings()
     final_attempt = self.request.retries >= settings.CELERY_RETRY_MAX_RETRIES
+    # Provision (or reuse) the browser at the task boundary — the loop is not
+    # running here — and hand the resource into the coroutine. Sync owner
+    # operations are illegal while the owner loop runs.
+    browser = get_crawler_worker_resources().browser
     try:
         run_on_crawler_worker_loop(
-            lambda: _run_crawl_job(crawl_id, request_payload, final_attempt=final_attempt)
+            lambda: _run_crawl_job(
+                crawl_id, request_payload, final_attempt=final_attempt, browser=browser
+            )
         )
     except PlaywrightError:
         if not probe_crawler_browser():
