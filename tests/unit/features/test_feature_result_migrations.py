@@ -88,16 +88,28 @@ async def test_users_translate_auth_session_failure_locally() -> None:
     assert isinstance(result.failure(), UsersInfrastructureError)
 
 
+def _ingestion_service_with_storage(graph: SimpleNamespace) -> IngestionService:
+    """Service with a stub object store: the bytes route to storage, so the
+    state's object_uri lands and the key-set boundary forgives raw_bytes —
+    letting these tests reach the graph-translation paths they exist for."""
+    object_store = SimpleNamespace(put_object=AsyncMock(return_value=Success("s3://bucket/key")))
+    return IngestionService(graph, object_store=object_store)
+
+
 async def test_ingestion_graph_exception_returns_typed_failure() -> None:
     graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=RuntimeError("graph down")))
-    result = await IngestionService(graph).ingest_document(b"x", "user", "a.pdf", "a.pdf")
+    result = await _ingestion_service_with_storage(graph).ingest_document(
+        b"x", "user", "a.pdf", "a.pdf"
+    )
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), IngestionGraphError)
 
 
 async def test_ingestion_state_failure_is_translated_locally() -> None:
     graph = SimpleNamespace(ainvoke=AsyncMock(return_value={"failure": {"message": "node failed"}}))
-    result = await IngestionService(graph).ingest_document(b"x", "user", "a.pdf", "a.pdf")
+    result = await _ingestion_service_with_storage(graph).ingest_document(
+        b"x", "user", "a.pdf", "a.pdf"
+    )
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), IngestionPipelineError)
 
