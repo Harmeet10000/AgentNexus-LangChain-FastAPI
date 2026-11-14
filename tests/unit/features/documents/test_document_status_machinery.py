@@ -89,6 +89,10 @@ def test_the_status_mapping_covers_the_known_lifecycle() -> None:
         "completed",
         "completed_with_warnings",
         "failed",
+        # STRIDE D-3: the embedding provider's daily quota was exhausted. A
+        # parked document, deliberately NOT terminal — the next quota window's
+        # idempotent resume selects non-terminal rows.
+        "quota_exhausted",
     } == DOCUMENT_STATUS_VALUES
     assert {
         DocumentStatus.COMPLETED.value,

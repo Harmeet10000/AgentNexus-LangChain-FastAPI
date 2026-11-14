@@ -72,6 +72,11 @@ if TYPE_CHECKING:
 
     from .budgets import StageBudgetTracker, StageBudgetViolation
 
+# The rerank stage's top-k: how many fused candidates the cross-encoder sees
+# reordered, and how many survive it. The flag-off pass-through truncates to
+# the same limit so downstream shape is identical with and without the stage.
+RERANK_LIMIT = 5
+
 _QUERY_ANALYZER_SYSTEM_PROMPT = render_prompt_sections(
     ("IDENTITY", "You are a legal retrieval query planning engine."),
     (
@@ -786,6 +791,14 @@ def make_reranker_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, 
         resolved = context.reranker or get_configured_reranker()
         plan: QueryPlan = state["query_plan"]
         chunks: list[RetrievedChunk] = state.get("retrieved_chunks", [])[:20]
+        if resolved is None:
+            # Flag-off (or nothing configured): fused order passes through
+            # truncated to the rerank limit — the same shape a provider
+            # degradation yields — without spending the stage or the call.
+            return {
+                "reranked_chunks": chunks[:RERANK_LIMIT],
+                **_stage_usage(STAGE_RERANK, 0),
+            }
         document_class = _state_document_class(state)
         refusals = _charge_stage(context, STAGE_RERANK, document_class)
         if refusals:
@@ -796,7 +809,7 @@ def make_reranker_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, 
             }
         async with _stage_span(STAGE_RERANK, context.budgets, document_class) as violations:
             reranked: list[RetrievedChunk] = await resolved.rerank(
-                plan.rewritten_query, chunks, limit=5
+                plan.rewritten_query, chunks, limit=RERANK_LIMIT
             )
         return {
             "reranked_chunks": reranked,

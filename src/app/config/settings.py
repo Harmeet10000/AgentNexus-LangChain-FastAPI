@@ -431,6 +431,15 @@ class Settings(BaseSettings):
     RERANKER_API_KEY: SecretStr = Field(default=SecretStr(""))
     RERANKER_ENDPOINT: str = Field(default="https://api.cohere.com/v2/rerank")
     RERANKER_TIMEOUT_SECONDS: float = Field(default=30.0)
+    # The served-path rerank gate. Default ON per the recorded measurement —
+    # evals/reports/live_rerank_comparison_legal_retrieval_v2.json (MRR +26.7%
+    # relative on the coverable queries, +1.1 s/query, 20/155 Cohere 429s
+    # degraded honestly to fused order; the delta is a conservative lower
+    # bound on the partial corpus). Full-corpus confirmation is PENDING corpus
+    # completion. Flipping OFF reverts the served path to fused order without
+    # a deploy; disabled is a normal serving state, never a provisioning
+    # failure.
+    DOCUMENTS_RERANK_ENABLED: bool = Field(default=True)
 
     # --- Crawl/Search Rate Limiting ---
     CRAWL_RATE_LIMIT_PER_MINUTE: int = Field(default=10)

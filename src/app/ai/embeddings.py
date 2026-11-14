@@ -50,7 +50,9 @@ family, and the cache key digests the resulting payload rather than the caller's
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import secrets
 from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -64,6 +66,9 @@ from app.utils.exceptions import InfrastructureException, ValidationException
 from app.utils.json_serializer import from_json_float_list, to_float_list_str
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+    from typing import Final
+
     from redis.asyncio import Redis
 
 
@@ -109,6 +114,121 @@ _V2_MODEL_MARKER = "gemini-embedding-2"
 #: honest document form rather than a placeholder.
 _QUERY_INSTRUCTION = "task: search result | query: {content}"
 _DOCUMENT_INSTRUCTION = "title: none | text: {content}"
+
+
+class EmbeddingQuotaExhaustedError(Exception):
+    """The embedding provider's daily quota is spent (STRIDE residual D-3).
+
+    Raised instead of letting a provider 429 ride as a generic exception, burn
+    the Celery retry budget, and dead-letter untyped — measured 2026-11-14: the
+    free-tier 1000/day cap failed 12/15 corpus ingestions with no typed signal
+    anywhere in the persisted state.
+
+    ``retryable`` is ``False`` **within this process**: no seconds- or
+    minutes-scale backoff clears a daily cap, so re-drive is the next quota
+    window's idempotent resume (the document lands in the non-terminal
+    ``quota_exhausted`` status, which the resume driver picks up), not a
+    sleeping worker holding a broker slot.
+    """
+
+    error_code: Final[str] = "embedding_quota_exhausted"
+    retryable: Final[bool] = False
+
+    def __init__(self, detail: str, *, model: str, provider_status: int | None = None) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.model = model
+        self.provider_status = provider_status
+
+
+#: Seconds-scale waits for a transient provider 429. A per-minute rate limit
+#: clears inside this window; a daily cap does not — and that asymmetry is the
+#: classification: a 429 that names the daily cap, or one that survives both
+#: probes, is exhaustion rather than a rate limit. Monkeypatched by tests.
+_QUOTA_PROBE_DELAYS_SECONDS: Final[tuple[float, ...]] = (2.0, 4.0)
+
+#: Jitter spread added to each probe wait, de-correlating concurrent ingesters
+#: that hit the same cap together. Drawn from the OS CSPRNG (microsecond
+#: granularity) rather than the Mersenne Twister — same convention as the
+#: billing dunning ladder.
+_QUOTA_PROBE_JITTER_SECONDS: Final[float] = 0.5
+
+#: Strings in the provider's own message that name the *daily* cap specifically
+#: (as opposed to a per-minute/per-request rate limit). Lowercased matching.
+#: Deliberately narrow: the generic "Resource has been exhausted" message does
+#: NOT qualify — it fires for per-minute limits too, and only the probe window
+#: can tell those apart. When the marker is absent, classification falls to the
+#: probes (a per-minute limit clears inside them; a daily cap does not).
+_DAILY_QUOTA_MARKERS: Final[tuple[str, ...]] = (
+    "perday",
+    "per_day",
+    "per day",
+    "quotafailure",
+)
+
+
+def _provider_status_of(exc: BaseException) -> int | None:
+    """Recover an HTTP-ish status from a provider exception without importing its SDK.
+
+    The same three-shape recognition as ``app.ai.graph.retry._status_code_of`` — a
+    status attribute, a numeric ``code``, a status on an attached response — kept
+    local so the embedding path does not couple to the retrieval-graph retry
+    module's privates. Only ``int`` values count: several libraries use ``code``
+    for a string identifier, and a string would silently never match.
+    """
+    for candidate in (
+        getattr(exc, "status_code", None),
+        getattr(exc, "code", None),
+        getattr(getattr(exc, "response", None), "status_code", None),
+    ):
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            return candidate
+    return None
+
+
+def _names_daily_quota(exc: BaseException) -> bool:
+    """True when the provider's own message names the daily cap specifically."""
+    text = " ".join(str(arg) for arg in exc.args).lower()
+    return any(marker in text for marker in _DAILY_QUOTA_MARKERS)
+
+
+async def _quota_guarded[T](call: Callable[[], Awaitable[T]], *, model: str) -> T:
+    """Run one provider embed call with the quota-aware behaviour of D-3.
+
+    A transient 429 is probed at seconds-scale with jitter — a per-minute rate
+    limit clears inside the window. A 429 that names the daily cap, or one that
+    survives both probes, is quota exhaustion: raised as
+    ``EmbeddingQuotaExhaustedError`` (never hours-slept in a worker), chained to the
+    original provider error. Every non-429 error propagates exactly as before —
+    this guard only adds classification, never changes other failure shapes.
+    """
+    for attempt, delay in enumerate((0.0, *_QUOTA_PROBE_DELAYS_SECONDS)):
+        if delay:
+            jitter_micros = secrets.randbelow(int(_QUOTA_PROBE_JITTER_SECONDS * 1_000_000) + 1)
+            await asyncio.sleep(delay + jitter_micros / 1_000_000)
+        try:
+            return await call()
+        except Exception as exc:
+            if _provider_status_of(exc) != 429:
+                raise
+            if _names_daily_quota(exc) or attempt == len(_QUOTA_PROBE_DELAYS_SECONDS):
+                detail = (
+                    f"Embedding provider daily quota exhausted for model {model} "
+                    f"({type(exc).__name__}: {exc})"
+                )
+                logger.warning(
+                    "embedding_quota_exhausted",
+                    model=model,
+                    provider_status=_provider_status_of(exc),
+                    probes_spent=attempt,
+                )
+                raise EmbeddingQuotaExhaustedError(
+                    detail,
+                    model=model,
+                    provider_status=_provider_status_of(exc),
+                ) from exc
+    unreachable = "unreachable: probe loop must return or raise"
+    raise AssertionError(unreachable)
 
 
 @lru_cache(maxsize=1)
@@ -277,10 +397,15 @@ async def embed_text(
             return normalize_embedding(from_json_float_list(_decode_cached(cached)))
 
     if _uses_instruction_prompts(model):
-        vector: list[float] = normalize_embedding(await client.aembed_query(provider_text))
+        vector: list[float] = normalize_embedding(
+            await _quota_guarded(lambda: client.aembed_query(provider_text), model=model)
+        )
     else:
         vector = normalize_embedding(
-            await client.aembed_query(provider_text, task_type=resolved.value)
+            await _quota_guarded(
+                lambda: client.aembed_query(provider_text, task_type=resolved.value),
+                model=model,
+            )
         )
     if redis is not None:
         await redis.setex(key, CACHE_TTL_SECONDS, to_float_list_str(vector))
@@ -336,15 +461,21 @@ async def embed_texts(
     if missing:
         provider_batch: list[str] = [provider_texts[index] for index in missing]
         if _uses_instruction_prompts(model):
-            fresh: list[list[float]] = await client.aembed_documents(
-                provider_batch,
-                batch_size=DOCUMENT_BATCH_SIZE,
+            fresh: list[list[float]] = await _quota_guarded(
+                lambda: client.aembed_documents(
+                    provider_batch,
+                    batch_size=DOCUMENT_BATCH_SIZE,
+                ),
+                model=model,
             )
         else:
-            fresh = await client.aembed_documents(
-                provider_batch,
-                task_type=resolved.value,
-                batch_size=DOCUMENT_BATCH_SIZE,
+            fresh = await _quota_guarded(
+                lambda: client.aembed_documents(
+                    provider_batch,
+                    task_type=resolved.value,
+                    batch_size=DOCUMENT_BATCH_SIZE,
+                ),
+                model=model,
             )
         if len(fresh) != len(missing):
             # Without this the `zip` below would pair vectors with the wrong texts from the

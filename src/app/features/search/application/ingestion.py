@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from returns.result import Failure
 
-from app.ai.embeddings import EmbeddingTaskType, embed_texts
+from app.ai.embeddings import EmbeddingQuotaExhaustedError, EmbeddingTaskType, embed_texts
 from app.config import get_settings
 from app.features.search.adapters.persistence.models import SEARCH_EMBEDDING_DIM
 from app.features.search.adapters.persistence.postgres.search_repository import (
@@ -48,6 +48,19 @@ class SearchIngestTerminalError(Exception):
     so it dead-letters immediately instead of spinning through backoff while
     the document stays pending.
     """
+
+
+class SearchIngestQuotaExhaustedError(SearchIngestTerminalError):
+    """The embedding provider's daily quota is spent (STRIDE residual D-3).
+
+    Subclasses the terminal class so the task's ``dont_autoretry_for`` still
+    exempts it: no seconds-scale backoff clears a daily cap, and burning the
+    retry budget against one only delays an honest report. The re-drive is the
+    next quota window, exactly like the documents twin's ``quota_exhausted``
+    park.
+    """
+
+    error_code = "embedding_quota_exhausted"
 
 
 def _to_raising_exception(error: SearchError) -> Exception:
@@ -115,10 +128,15 @@ async def process_search_ingestion_document(
 
     chunk_count = 0
     for batch in _batched(chunks, settings.SEARCH_INGEST_EMBEDDING_BATCH_SIZE):
-        embeddings = await embed_texts(
-            [chunk.content for chunk in batch],
-            task_type=EmbeddingTaskType.DOCUMENT,
-        )
+        try:
+            embeddings = await embed_texts(
+                [chunk.content for chunk in batch],
+                task_type=EmbeddingTaskType.DOCUMENT,
+            )
+        except EmbeddingQuotaExhaustedError as exc:
+            # Keep the quota cause typed at this boundary too: the dead-letter
+            # record must name the daily cap, not a generic provider error.
+            raise SearchIngestQuotaExhaustedError(exc.detail) from exc
         batch_rows = [
             {
                 "id": str(uuid4()),

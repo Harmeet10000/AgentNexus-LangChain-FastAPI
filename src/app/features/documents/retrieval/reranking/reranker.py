@@ -143,6 +143,25 @@ def get_shared_reranker() -> HostedReranker:
     )
 
 
-def get_configured_reranker() -> Reranker:
-    """Resolve the single hosted reranking implementation."""
+@lru_cache(maxsize=1)
+def _log_flag_off_once() -> None:
+    """Emit the flag-off diagnosis exactly once per process."""
+    logger.info(
+        "rerank_disabled_by_flag",
+        flag="DOCUMENTS_RERANK_ENABLED",
+        effect="serving fused order without the cross-encoder stage",
+    )
+
+
+def get_configured_reranker() -> Reranker | None:
+    """Resolve the single hosted reranking implementation.
+
+    Returns ``None`` when the served-path flag is off: the graph node then
+    passes fused order through (the same shape a provider degradation yields)
+    and no rerank call is attempted. Disabled is a normal serving state — the
+    one-time structured log is diagnosis, not a degradation counter.
+    """
+    if not get_settings().DOCUMENTS_RERANK_ENABLED:
+        _log_flag_off_once()
+        return None
     return get_shared_reranker()

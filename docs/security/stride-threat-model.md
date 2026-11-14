@@ -68,8 +68,15 @@ B6 deployment boundary (this machine → cloud free-tier services)
     converter follow-up in the parser (named in its docstring) + worker memory
     bounds are already configured (`--max-memory-per-child`).
   - D-3: the Gemini free-tier daily embedding quota exhausted mid-burst,
-    failing 12/15 ingestions with no typed quota signal surfaced. Fix owed:
-    quota-aware backoff surfacing a typed `quota_exhausted` state.
+    failing 12/15 ingestions with no typed quota signal surfaced.
+    **FIXED 2026-11-15** — quota-aware guard at the one embedding choke point
+    (`app.ai.embeddings._quota_guarded`: seconds-scale probes for transient
+    429s; a 429 that names the daily cap, or one that survives the probes,
+    raises the typed `EmbeddingQuotaExhaustedError`). The documents twin parks the
+    document in the NON-terminal `quota_exhausted` status with typed metadata
+    (resumable by the next quota window's idempotent driver — never a
+    dead-letter, never a sleeping worker); the search twin dead-letters
+    immediately with the typed code (`SearchIngestQuotaExhaustedError`).
 - Residual: D-4 — no rate limit on evidence-handle reads beyond auth (pilot-
   scale accepted).
 
@@ -93,7 +100,7 @@ B6 deployment boundary (this machine → cloud free-tier services)
 | R-1 | Role-change event emission | R | auth feature (9.1 audit) |
 | D-1 | LISTEN timeout → full API shutdown | D | root-caused 2026-11-14: systemd-oomd SIGTERM of the cgroup under memory pressure (not a listener bug — the relay's reconnect loop is sound). Mitigated by D-2's memory fix; the relay degrades via its backoff loop |
 | D-2 | OOM under Docling model load | D | **FIXED 2026-11-14** — process-wide singleton converter, convert serialised by lock (tests: test_parser_converter_singleton.py); trade-off documented in parse_document |
-| D-3 | Embedding quota exhaustion untyped | D | measured 2026-11-14: the free-tier 1000/day cap failed 12/15 ingestions; the rerank-stratum report records the bound. Owed: quota-aware backoff with a typed quota_exhausted state |
+| D-3 | Embedding quota exhaustion untyped | D | **FIXED 2026-11-15** — typed `EmbeddingQuotaExhaustedError` at the embedding choke point (probe-then-classify: seconds-scale probes separate a per-minute rate limit from the daily cap); documents park in non-terminal `quota_exhausted` with typed metadata, search dead-letters typed (`SearchIngestQuotaExhaustedError`). Measured incident: 2026-11-14, free-tier 1000/day cap, 12/15 ingestions |
 | D-4 | No secondary rate limit on handle reads | D | pilot-scale accepted |
 | E-1 | Role-change audit loop closure | E | auth feature (with R-1) |
 

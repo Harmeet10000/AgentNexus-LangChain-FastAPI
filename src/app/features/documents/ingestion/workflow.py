@@ -9,6 +9,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from returns.result import Failure
 
+from app.ai.embeddings import EmbeddingQuotaExhaustedError
 from app.events import with_terminal_outbox
 from app.features.documents.api.http.dto import IngestionJob, IngestionRuntime
 from app.kernel.result import log_expected_failure
@@ -144,6 +145,32 @@ def _make_ingest_document_node(
                     transaction_checkpoint=repo.session.commit,
                 ),
             )
+        except EmbeddingQuotaExhaustedError as exc:
+            # STRIDE D-3: a daily-quota 429 is not an unexpected failure — it
+            # must not read as ``INGESTION_UNEXPECTED_FAILURE``, burn the Celery
+            # retry budget, or dead-letter. The document parks in the
+            # NON-terminal ``quota_exhausted`` status (typed metadata, resumable
+            # by the next quota window's idempotent driver) and the task
+            # returns cleanly instead of raising.
+            exc.add_note(f"document_id={job.document_id}, operation=ingest_document_node")
+            logger.bind(document_id=job.document_id, model=exc.model).warning(
+                "Document ingestion parked: embedding quota exhausted"
+            )
+            await _record_quota_exhaustion(
+                repo,
+                document_id=job.document_id,
+                tenant_id=job.tenant_id,
+                document_version=job.document_version,
+                attempt=job.attempt,
+                task_id=job.task_id,
+                detail=exc.detail,
+            )
+            return {
+                "status": "quota_exhausted",
+                "error_code": EmbeddingQuotaExhaustedError.error_code,
+                "error_message": exc.detail,
+                "error_retryable": False,
+            }
         except Exception as exc:  # noqa: BLE001 — worker boundary must persist failure
             exc.add_note(f"document_id={job.document_id}, operation=ingest_document_node")
             logger.bind(
@@ -186,6 +213,56 @@ def _make_ingest_document_node(
         return result.unwrap()
 
     return ingest_document_node
+
+
+async def _record_quota_exhaustion(
+    repo: DocumentRepository,
+    *,
+    document_id: str,
+    tenant_id: str = "",
+    document_version: int = 1,
+    attempt: int = 0,
+    task_id: str | None = None,
+    detail: str,
+) -> None:
+    """Persist the non-terminal ``quota_exhausted`` park with typed metadata.
+
+    Deliberately unlike ``_record_ingestion_failure``: no terminal ``failed``
+    status, no terminal outbox event — the document is parked, not dead. The
+    metadata rides the same typed ``ingestion_error`` shape so the cause is
+    one read away, and ``extraction_incomplete`` stays ``False`` (extraction
+    succeeded; the failure is at the indexing seam).
+    """
+    metadata: dict[str, object] = {
+        "ingestion_error": {
+            "code": EmbeddingQuotaExhaustedError.error_code,
+            "message": detail,
+            "retryable": False,
+            "ingestion_state": {
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "document_version": document_version,
+                "attempt": attempt,
+                "task_id": task_id or "",
+            },
+        }
+    }
+    try:
+        status_result = await repo.update_document_status(
+            document_id=document_id,
+            status="quota_exhausted",
+            metadata_=metadata,
+        )
+    except Exception as exc:  # noqa: BLE001 — park persistence must not mask the task outcome
+        exc.add_note(f"document_id={document_id}, operation=record_quota_exhaustion")
+        logger.bind(document_id=document_id, error=str(exc)).exception(
+            "Quota-exhausted status persistence raised"
+        )
+    else:
+        if isinstance(status_result, Failure):
+            log_expected_failure(
+                error=status_result.failure(), operation="record_quota_exhaustion"
+            )
 
 
 async def _record_ingestion_failure(

@@ -46,6 +46,14 @@ class DocumentStatus(StrEnum):
     COMPLETED = "completed"
     COMPLETED_WITH_WARNINGS = "completed_with_warnings"
     FAILED = "failed"
+    # STRIDE D-3: the embedding provider's daily quota was exhausted mid-run.
+    # Deliberately NON-terminal — no seconds-scale backoff clears a daily cap,
+    # so the retry is the next quota window's idempotent resume, which selects
+    # non-terminal rows. Read-side surfaces fall through to the retryable
+    # ``index_not_ready`` state (``evidence/service._ingestion_state``). A
+    # ``quota_exhausted`` row carries typed metadata (``ingestion_error`` with
+    # code ``embedding_quota_exhausted``), never a bare status.
+    QUOTA_EXHAUSTED = "quota_exhausted"
 
 
 DOCUMENT_STATUS_VALUES: Final[frozenset[str]] = frozenset(status.value for status in DocumentStatus)
