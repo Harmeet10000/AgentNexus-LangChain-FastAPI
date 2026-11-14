@@ -111,3 +111,13 @@ the driver run: stop uvicorn and the default worker first (the in-process path
 needs neither); run the driver alone. Production note: the worker profiles
 already carry --max-memory-per-child (child recycling); the API-side idle
 LISTEN shutdown after the Postgres drop was the same pressure event.
+
+## Subagent tooling directive (standing)
+
+Every subagent working in this repo MUST follow `.opencode/skills/orient/SKILL.md`
+routing: `codegraph_explore` (MCP) for symbol/concept questions, `codegraph`
+CLI (`query/node/impact/affected`) for symbol edges and blast radius, `rg`
+only as a discoverer, `ast-grep` for shapes. Include the directive verbatim in
+every subagent prompt: "Search via codegraph per .opencode/skills/orient/SKILL.md
+— codegraph_explore for concepts, codegraph node/impact for symbol edges, rg
+only as a last-resort string discoverer."

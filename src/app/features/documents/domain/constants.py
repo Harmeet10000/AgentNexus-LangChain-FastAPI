@@ -28,7 +28,6 @@ RRF_K = 60
 # as settled. The fusion default stays unweighted; callers opt in explicitly.
 RRF_WEIGHT_BM25 = 1.5
 RRF_WEIGHT_VECTOR = 1.0
-RRF_WEIGHT_TRIGRAM = 1.2
 # Relationship-graph fusion branch (optional fourth leg, default-off via
 # DOCUMENTS_GRAPHITI_FUSION_ENABLED). Measured, not folk: 0.1 is the argmax of
 # the recorded weight sweep on the grown golden corpus — recall@10, MRR, and

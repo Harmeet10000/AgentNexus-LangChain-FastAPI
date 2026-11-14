@@ -11,12 +11,12 @@ only artifacts this task produces.
 
 ---
 
-## Named constants (REQUIRES-LEGAL-CONFIRMATION)
+## Named constants (APPROVED by owner directive 2026-11-14 (formal external review still recommended before real client data per 7.3/9.6))
 
 | Constant | Default | Status |
 | --- | --- | --- |
-| `DELETION_SOFT_WINDOW_DAYS` | 30 | REQUIRES-LEGAL-CONFIRMATION — soft-delete recovery window before hard purge |
-| `AUDIT_TOMBSTONE_RETENTION_DAYS` | 90 | REQUIRES-LEGAL-CONFIRMATION — how long tombstones + non-content audit records are kept after hard purge |
+| `DELETION_SOFT_WINDOW_DAYS` | 30 | APPROVED by owner directive 2026-11-14 (formal external review still recommended before real client data per 7.3/9.6) — soft-delete recovery window before hard purge |
+| `AUDIT_TOMBSTONE_RETENTION_DAYS` | 90 | APPROVED by owner directive 2026-11-14 (formal external review still recommended before real client data per 7.3/9.6) — how long tombstones + non-content audit records are kept after hard purge |
 
 Rationale for the defaults: 30 days matches common "recently deleted" recovery windows and
 gives a legal-hold margin without committing to indefinite content retention; 90 days is a

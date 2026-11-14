@@ -157,19 +157,6 @@ async def _run_vector_branch(
     )
 
 
-async def _run_trigram_branch(
-    repo: DocumentRepository, args: _BranchInput
-) -> DocumentResult[list[dict[str, Any]]]:
-    """Fuzzy-trigram branch coroutine."""
-    return await repo.trigram_search(
-        user_id=args.user_id,
-        tenant_id=args.tenant_id,
-        query=args.query_text,
-        candidate_limit=args.candidate_limit,
-        filter_params=args.filter_params,
-    )
-
-
 async def _run_graphiti_branch(
     repo: DocumentRepository, args: _BranchInput
 ) -> DocumentResult[list[dict[str, Any]]]:
@@ -220,7 +207,6 @@ class RetrievalBranchPolicy(NamedTuple):
 RETRIEVAL_BRANCHES: tuple[RetrievalBranchPolicy, ...] = (
     RetrievalBranchPolicy(name="bm25", run=_run_bm25_branch),
     RetrievalBranchPolicy(name="vector", run=_run_vector_branch),
-    RetrievalBranchPolicy(name="trigram", run=_run_trigram_branch),
 )
 
 # The optional fourth branch: registered here per the registry contract (name
@@ -342,7 +328,7 @@ async def retrieve_fused(
     if isinstance(results, Failure):
         return Failure(results.failure())
     row_sets = results.unwrap()
-    # Phrase matches may rank below many vector/trigram-only candidates. Preserve
+    # Phrase matches may rank below many vector-only candidates. Preserve
     # every candidate already bounded by the branch limits until the phrase
     # constraint has been applied; a second pre-filter cutoff can lose valid hits.
     fusion_limit = sum(len(row_set) for row_set in row_sets) if exact_phrase else limit
@@ -366,7 +352,7 @@ async def retrieve_fused(
     lookup: dict[str, dict[str, Any]] = chunk_lookup_result.unwrap()
     if exact_phrase:
         # Hydration applies the same escaped PostgreSQL ILIKE predicate used by
-        # the BM25 leg, so vector/trigram candidates cannot diverge on Unicode
+        # the BM25 leg, so vector candidates cannot diverge on Unicode
         # or wildcard semantics.
         fused = [item for item in fused if item.chunk_id in lookup][:limit]
         lookup = {item.chunk_id: lookup[item.chunk_id] for item in fused if item.chunk_id in lookup}

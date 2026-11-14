@@ -35,7 +35,6 @@ from app.features.documents.application.queries.documents import (
     _BranchInput,
     retrieve_fused,
 )
-from app.features.documents.domain.constants import RRF_WEIGHT_TRIGRAM
 from app.features.health.health_check import ALL_PROBES
 from app.lifecycle.lifespan import (
     STARTUP_POLICIES,
@@ -191,7 +190,7 @@ async def _demo_retrieval_policy() -> Result[None, str]:
         filter_params=build_search_filter_params(
             metadata_filter={"jurisdiction": "US-CA", "document_ids": ["doc-1"]}
         ),
-        weights=[0.6, 0.4, RRF_WEIGHT_TRIGRAM],
+        weights=[0.6, 0.4],
     )
     if isinstance(fused_result, Failure):
         return Failure(f"shared fused path failed: {fused_result.failure().message}")

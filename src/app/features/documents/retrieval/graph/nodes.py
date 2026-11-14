@@ -650,7 +650,6 @@ async def _retrieve_fused_state(  # noqa: PLR0914 — scope, fusion, and outage 
     from app.features.documents.domain.constants import (  # noqa: PLC0415
         HYBRID_CANDIDATE_LIMIT,
         RRF_WEIGHT_GRAPHITI,
-        RRF_WEIGHT_TRIGRAM,
     )
 
     # `user_id` is not a translation of an old argument — the reader this replaces had no
@@ -705,7 +704,7 @@ async def _retrieve_fused_state(  # noqa: PLR0914 — scope, fusion, and outage 
             candidate_limit=HYBRID_CANDIDATE_LIMIT,
             limit=20,
             filter_params=filter_params,
-            weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM]
+            weights=[plan.keyword_weight, plan.vector_weight]
             + ([RRF_WEIGHT_GRAPHITI] if graphiti_branch is not None else []),
             bm25_threshold=plan.bm25_threshold,
             exact_phrase=plan.exact_phrase,
@@ -735,7 +734,7 @@ async def _retrieve_fused_state(  # noqa: PLR0914 — scope, fusion, and outage 
                 candidate_limit=HYBRID_CANDIDATE_LIMIT,
                 limit=20,
                 filter_params=filter_params,
-                weights=[plan.keyword_weight, plan.vector_weight, RRF_WEIGHT_TRIGRAM],
+                weights=[plan.keyword_weight, plan.vector_weight],
                 bm25_threshold=plan.bm25_threshold,
                 exact_phrase=plan.exact_phrase,
                 graphiti=None,
@@ -1572,14 +1571,14 @@ def _normalize_plan(plan: QueryPlan) -> QueryPlan:
         vector_weight = 0.4
         keyword_weight = 0.6
     else:
+        # Total-normalization ONLY — identical to the inline plan contract. The
+        # former query_type forcing (0.75/0.25 exact, 0.65/0.35 conceptual) made
+        # the two fused doors compute different rankings for the same plan
+        # (parity: test_hybrid_fused_parity); the trigram constant had masked it.
+        # Deliberate plan-weight steering belongs in the plan itself, not in the
+        # fusion door. (remove-trigram-fusion-branch, drift item 9.)
         vector_weight /= total
         keyword_weight /= total
-    if plan.query_type == "exact":
-        vector_weight = 0.25
-        keyword_weight = 0.75
-    if plan.query_type == "conceptual":
-        vector_weight = 0.65
-        keyword_weight = 0.35
     return plan.model_copy(
         update={"vector_weight": vector_weight, "keyword_weight": keyword_weight}
     )

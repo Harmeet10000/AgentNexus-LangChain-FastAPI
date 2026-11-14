@@ -15,7 +15,6 @@ from app.features.documents.application.queries.documents import (
     DocumentQueryService,
     retrieve_fused,
 )
-from app.features.documents.domain.constants import RRF_WEIGHT_TRIGRAM
 from app.features.documents.retrieval.graph import nodes as retrieval_nodes
 from app.features.documents.retrieval.graph.nodes import make_hybrid_retrieval_node
 from app.features.documents.retrieval.graph.state import QueryPlan
@@ -38,7 +37,6 @@ if TYPE_CHECKING:
 _ROWS = {
     "bm25": [{"chunk_id": "a", "score": -5.0}, {"chunk_id": "b", "score": -2.0}],
     "vector": [{"chunk_id": "b", "score": 0.9}, {"chunk_id": "c", "score": 0.8}],
-    "trigram": [{"chunk_id": "c", "score": 0.7}, {"chunk_id": "a", "score": 0.6}],
 }
 
 _LOOKUP = {
@@ -71,11 +69,6 @@ class _StubRepo:
 
         return Success([dict(row) for row in _ROWS["vector"]])
 
-    async def trigram_search(self, **_kwargs: Any) -> Any:
-        from returns.result import Success
-
-        return Success([dict(row) for row in _ROWS["trigram"]])
-
     async def fetch_chunks_by_ids(self, chunk_ids: Any) -> Any:
         from returns.result import Success
 
@@ -93,7 +86,7 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
     monkeypatch.setattr(
         "app.features.documents.application.queries.documents.embed_text", _fake_embed
     )
-    weights = [0.6, 0.4, RRF_WEIGHT_TRIGRAM]
+    weights = [0.6, 0.4]
     repo = _StubRepo()
 
     node = make_hybrid_retrieval_node()
@@ -118,7 +111,9 @@ async def test_graph_path_and_service_search_agree_on_chunk_order(
     assert isinstance(search_result, _Success)
     service_order = [item.chunk_id for item in search_result.unwrap().items]
 
-    assert node_order == service_order == ["a", "c", "b"]
+    # Two-branch fused order (remove-trigram-fusion-branch): b tops both legs'
+    # intersection (bm25 rank2 + vector rank1); a is bm25-rank-1, c vector-rank-2.
+    assert node_order == service_order == ["b", "a", "c"]
 
 
 async def test_exact_phrase_filters_every_fusion_leg() -> None:
