@@ -22,6 +22,14 @@ OCR pass and a table-structure model — seconds per test, network on first run,
 collection whose contents depend on a model version. What is under test here is this module's own
 wiring: that the synchronous call is offloaded, and that the tables the converter reports reach
 the returned model.
+
+**Changed by the singleton converter.** There was a third test here asserting two concurrent
+parses *overlap* rather than serialise; the cached converter removed that property on purpose
+(docling does not document ``convert`` as thread-safe, so the calls serialise behind a lock) and
+it was replaced by the both-complete assertion below. The serialisation itself is pinned by the
+recorded-window test in ``test_parser_converter_singleton.py``. The responsiveness tests above
+are untouched: the offload is exactly what makes the lock preferable to per-call conversion,
+since the loop never blocks either way.
 """
 
 from __future__ import annotations
@@ -115,7 +123,12 @@ def _patched_converter(monkeypatch: pytest.MonkeyPatch, converter: _FakeConverte
     Patched at `parser_module.create_document_converter` — the name bound *in this module* — not
     at its definition site. `parser.py` imported the function, so rebinding the source module's
     attribute would leave this module's reference pointing at the original.
+
+    The parser now caches the factory's product behind a process-wide singleton, so the cache is
+    reset first: without that, whichever converter an earlier test file built would be served to
+    every later test and this stub would never be consulted.
     """
+    parser_module._reset_shared_converter_for_tests()
     monkeypatch.setattr(parser_module, "create_document_converter", lambda **_kw: converter)
 
 
@@ -140,25 +153,27 @@ async def test_the_event_loop_keeps_running_during_a_parse() -> None:
 
 
 @pytest.mark.usefixtures("_patched_converter")
-async def test_two_parses_overlap_rather_than_serialising() -> None:
-    """The stronger form of the same claim, and the one a caller actually feels.
+async def test_two_concurrent_parses_both_complete_with_their_own_results() -> None:
+    """The concurrency claim, updated for the landed singleton-converter decision.
 
-    Loop responsiveness is necessary but not sufficient: an implementation that offloaded to a
-    single serialising worker would pass the test above and still queue uploads behind each other.
-    Two concurrent parses must take about as long as one, not twice as long.
+    This used to assert the opposite — that two parses *overlap* rather than serialise. The
+    singleton converter changed that deliberately: docling does not document
+    ``DocumentConverter.convert`` as thread-safe, so ``convert`` calls now serialise behind a
+    ``threading.Lock`` (one resident model set instead of ~3.7 GB per parse; the trade-off is
+    recorded in ``parse_document``'s docstring and pinned by the window test in
+    ``test_parser_converter_singleton.py``). What must still hold — and what a lock that is too
+    wide, a deadlocked acquisition, or a converter shared unsafely would break — is that two
+    parses gathered concurrently both complete and each return a correct, independent result.
     """
-    started = time.perf_counter()
-    await asyncio.gather(
+    first, second = await asyncio.gather(
         parse_document(raw_bytes=_RAW, filename=_FILENAME, content_type="application/pdf"),
         parse_document(raw_bytes=_RAW, filename=_FILENAME, content_type="application/pdf"),
     )
-    elapsed = time.perf_counter() - started
 
-    # Generous: the bar is "not serialised", so anything below two full parses proves overlap.
-    assert elapsed < _BLOCKING_PARSE_SECONDS * 1.8, (
-        f"two parses took {elapsed:.3f}s against a {_BLOCKING_PARSE_SECONDS:.3f}s parse; "
-        "they serialised instead of overlapping"
-    )
+    for parsed in (first, second):
+        assert parsed.markdown == _MARKDOWN
+        assert parsed.title == "Master Services Agreement"
+        assert parsed.page_count == 3
 
 
 @pytest.mark.usefixtures("_patched_converter")

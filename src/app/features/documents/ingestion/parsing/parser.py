@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import threading
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +30,43 @@ class DocumentExtractionBudgetError(RuntimeError):
     """Raised when parsing exceeds a bounded production resource budget."""
 
 
+#: Guards construction of the shared converter (build-once), not its use.
+_SHARED_CONVERTER_INIT_LOCK = threading.Lock()
+#: Serialises ``DocumentConverter.convert`` calls across worker threads. Docling does not
+#: document the converter as thread-safe, and the offload made concurrent parses possible —
+#: see ``parse_document``'s docstring for the accepted trade-off.
+_SHARED_CONVERT_LOCK = threading.Lock()
+_SHARED_CONVERTER: DocumentConverter | None = None
+
+
+def _shared_converter() -> DocumentConverter:
+    """Return the process-wide converter, building it on first use.
+
+    One model set resident for the lifetime of the process instead of one per parse.
+    Double-checked under ``_SHARED_CONVERTER_INIT_LOCK`` because concurrent parses
+    reach here from separate worker threads.
+    """
+    global _SHARED_CONVERTER  # noqa: PLW0603 — intentional module-level state: one model set per process
+    if _SHARED_CONVERTER is None:
+        with _SHARED_CONVERTER_INIT_LOCK:
+            if _SHARED_CONVERTER is None:
+                _SHARED_CONVERTER = create_document_converter(gpu_available=False)
+    return _SHARED_CONVERTER
+
+
+def _reset_shared_converter_for_tests() -> None:
+    """Drop the cached converter so a stubbed factory takes effect.
+
+    The cache is process-wide by design, which is exactly wrong under pytest: a
+    converter built from one test's monkeypatched factory would outlive the patch and
+    leak into every later test that parses. Any test that substitutes the factory
+    resets before asserting.
+    """
+    global _SHARED_CONVERTER  # noqa: PLW0603 — intentional module-level state: one model set per process
+    with _SHARED_CONVERTER_INIT_LOCK:
+        _SHARED_CONVERTER = None
+
+
 async def parse_document(
     *,
     raw_bytes: bytes,
@@ -51,12 +89,20 @@ async def parse_document(
     document-ingestion path explicit and avoids the superseded shared ingestion
     graph's former duplicate parser helper.
 
-    The converter is built **inside** the offloaded function, so it is still one per call. That is
-    deliberate rather than overlooked: making it a cached singleton is the obvious next
-    optimisation and would be wrong to do in the same step as the offload, because the offload is
-    what first makes concurrent parses possible, and ``DocumentConverter`` holds mutable pipeline
-    state that docling does not document as thread-safe. Caching it belongs with a claim about
-    that, which this task does not have.
+    The converter is a process-wide singleton, built once on first parse and reused
+    for every parse after it. Docling loads its model set at instantiation — measured
+    at roughly 3.7 GB RSS per parse on the live corpus — so building one per call was
+    what fed the kernel OOM killer whenever other processes coexisted (STRIDE residual
+    D-2). One resident model set is the whole point of the cache. Because docling does
+    not document ``DocumentConverter.convert`` as thread-safe and parses run in worker
+    threads via ``asyncer.asyncify``, ``convert`` calls are serialised with a
+    module-level ``threading.Lock``. The trade-off is accepted and deliberate:
+    concurrent parses queue behind each other at the conversion call itself, and a
+    serialised OCR pass is strictly better than an OOM-killed worker. Everything
+    around ``convert`` — the budget checks, markdown export, table serialisation —
+    still runs concurrently and per-call. The factory (``create_document_converter``)
+    itself is left untouched and shared with the other docling callers; only the
+    parser caches its product.
     """
     if _is_plain_text(filename, content_type):
         return _parse_plain_text(
@@ -72,10 +118,13 @@ async def parse_document(
         return ParsedDocument(title=filename or "uploaded-document", markdown="", page_count=0)
 
     def _sync_parse() -> ParsedDocument:
-        converter: DocumentConverter = create_document_converter(gpu_available=False)
-        result: ConversionResult = converter.convert(
-            source=DocumentStream(name=filename, stream=BytesIO(initial_bytes=raw_bytes))
-        )
+        converter: DocumentConverter = _shared_converter()
+        # Serialised per the thread-safety decision in parse_document's docstring: one
+        # resident model set, concurrent parses queue at the conversion call.
+        with _SHARED_CONVERT_LOCK:
+            result: ConversionResult = converter.convert(
+                source=DocumentStream(name=filename, stream=BytesIO(initial_bytes=raw_bytes))
+            )
         document: DoclingDocument = result.document
         markdown: str = document.export_to_markdown()
         page_count = len(getattr(document, "pages", []) or [])

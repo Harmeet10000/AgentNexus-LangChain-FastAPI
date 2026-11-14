@@ -978,3 +978,5 @@ Use verification layers. Leverage stop hooks or an adversarial review agent so C
 **19. Hidden commands (18:52 - 20:12):**
 Use `/doctor` for health checks, `/insights` for usage reports, `/btw` for side questions, and `/branch` to spawn a new conversation without losing existing context.
 ```
+
+**255. Resume corpus ingestion (7 quota-failed SRC PDFs) — Gemini free-tier 1000/day embedding cap is the blocker; the other 5 sources + SYN fixtures are ingested and scored (partial-corpus baseline recorded in evals/reports/live_baseline_legal_retrieval_v2.json). Resume = scripts/live_measurement/RUNBOOK.md: `make celery` + `make celery-ingestion` + uvicorn, then `uv run python scripts/live_measurement/ingest_corpus.py` (idempotent), then `uv run python scripts/live_measurement/live_score.py` with LIVE_BRANCH=vector for the full G2/G5/G4 flag decisions. Do it on a quota-reset day.**

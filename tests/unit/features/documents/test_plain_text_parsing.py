@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.features.documents.ingestion.chunking.classification import ParsedDocument
+from app.features.documents.ingestion.parsing import parser as parser_module
 from app.features.documents.ingestion.parsing.parser import (
     DocumentExtractionBudgetError,
     parse_document,
@@ -57,6 +58,9 @@ async def test_pdf_content_type_still_routes_to_docling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A text payload claiming to be a PDF is NOT the fast path's concern."""
+    # The converter is cached behind a process-wide singleton; reset so this test's
+    # throwing stub is the thing that would build it, not a leftover from another file.
+    parser_module._reset_shared_converter_for_tests()
     monkeypatch.setattr(
         # the converter is imported into the parser's namespace — patch there
         "app.features.documents.ingestion.parsing.parser.create_document_converter",

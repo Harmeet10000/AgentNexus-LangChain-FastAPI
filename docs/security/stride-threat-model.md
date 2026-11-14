@@ -91,9 +91,9 @@ B6 deployment boundary (this machine → cloud free-tier services)
 | S-1 | WS token lifetime vs long pauses | S | Phase 9 pilot review |
 | T-1 | Shared Neo4j write surface | T | harden 7.x / staging |
 | R-1 | Role-change event emission | R | auth feature (9.1 audit) |
-| D-1 | LISTEN timeout → full API shutdown | D | owed harden task |
-| D-2 | OOM under Docling model load | D | parser singleton-converter follow-up |
-| D-3 | Embedding quota exhaustion untyped | D | owed harden task |
+| D-1 | LISTEN timeout → full API shutdown | D | root-caused 2026-11-14: systemd-oomd SIGTERM of the cgroup under memory pressure (not a listener bug — the relay's reconnect loop is sound). Mitigated by D-2's memory fix; the relay degrades via its backoff loop |
+| D-2 | OOM under Docling model load | D | **FIXED 2026-11-14** — process-wide singleton converter, convert serialised by lock (tests: test_parser_converter_singleton.py); trade-off documented in parse_document |
+| D-3 | Embedding quota exhaustion untyped | D | measured 2026-11-14: the free-tier 1000/day cap failed 12/15 ingestions; the rerank-stratum report records the bound. Owed: quota-aware backoff with a typed quota_exhausted state |
 | D-4 | No secondary rate limit on handle reads | D | pilot-scale accepted |
 | E-1 | Role-change audit loop closure | E | auth feature (with R-1) |
 
