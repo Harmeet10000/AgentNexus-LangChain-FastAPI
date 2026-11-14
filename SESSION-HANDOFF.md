@@ -234,3 +234,52 @@ gets a measurement or a test.
 ---
 
 *End of handoff.*
+
+---
+
+# SESSION ADDENDUM — 2026-11-15 (evening)
+
+**State at this addendum: main @ ddeece7 pushed; origin/main current.**
+
+## What this session delivered (after the 2026-11-14 handoff)
+
+1. **Reviews**: Greptile CLI review of the full batch — 76 findings (25 P1, 51 P2, 3 security),
+   summary at /tmp/greptile_findings_summary.md (session-local; re-derive from the report if lost).
+   CodeRabbit CLI incomplete (auth expiry; 9 stored pre-batch findings only).
+2. **First API smoke** (45 ops): docs/server-smoke-2026-11-15.md §round 1 — defects F1-F12.
+3. **Fix batch landed as 6 commits** `cf5e0f7..ddeece7`: retrieval budget contract + graphiti
+   filter bypass + $ref hydration walker; auth refresh-reuse revocation + scoped GCRA +
+   sessions-listing bytes fix (F4/F6/F9); rag-500 + 500-traceback-leak + legacy upload (F1/F2);
+   worker role node names + ETA-free publish + crawler boundary (F5 partial/F8) + deletion cache
+   purge + preamble injection guard + git_sha (F3); rate-limit fleet coverage (15 endpoints);
+   testing_user credential sourcing + password ROTATED (old value dead).
+4. **Post-fix verification round** (same smoke file, §round 2): F1/F2/F6/F9/webhooks/git_sha
+   FIXED; **F5 STILL BROKEN** (worker dies silently ~2m04s even with node-name+ETA fixes — root
+   cause unknown, journal sink absent makes it blind); new G-defects: G1 refresh-reuse renders
+   500 not typed 401; G2 crawl4ai geolocation dict bug; G3 /plans/{non-uuid} 500 with raw SQL in
+   error.data (schema disclosure); G4 postgres unhealthy 40+ min (cloud-side, typed degradation held).
+5. **Infrastructure**: Razorpay webhook secret updated via API (PUT /v1/webhooks 200 — dashboard
+   step eliminated); Resend key + BOTH templates published via API and wired (from=onboarding@resend.dev,
+   test-mode: delivers only to the Resend account owner's inbox); testing principal password rotated
+   (read .testing-credentials.json for the CURRENT value); ngrok tunnel live for webhook deliveries.
+
+## Owed work (in flight at addendum time)
+
+- **Hot-defect crew**: G1 (typed reuse 401), G3 (SQL disclosure), F5 root cause (foreground
+  diagnosis), F12c journal sink, F3-residual (root GET / git_sha), F10 (version null at receive),
+  F11 (invoices envelope).
+- **Second-wave crew**: remaining ~55 Greptile P2s (retrieval/service.py ×6, upload_document ×2,
+  deadlines, budgets, agent_saul nodes ×2, eval modules ×7) — disposition report pending.
+- **Expanded endpoint sweep** (61 of 138 ops probed so far; agent_saul + OAuth excluded per owner;
+  billing lifecycle blocked on admin identity) — sequenced AFTER the two crews land (do not probe
+  a tree that is being edited; the branch-poisoning incident).
+- **Quota-window work unchanged from §4 above**: corpus completion (7 SRC PDFs) → vector scoring →
+  G2/G5/G4 flag decisions → roadmap 2.2/4.3 ticks. Driver must run ALONE (OOM history).
+- CodeRabbit fresh review needs interactive `coderabbit auth login` (owner action).
+
+## New house rules from this session
+
+- Every persistence step inside a failure handler needs its own failure contract (the quota-park
+  bug class). Probe-then-classify beats string-matching provider errors. A settings-level env
+  override is an operational decision — tests assert configured values; code defaults are pinned
+  separately at the settings layer.
