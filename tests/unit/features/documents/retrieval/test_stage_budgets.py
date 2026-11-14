@@ -23,6 +23,7 @@ from app.features.documents.retrieval.graph import (
 from app.features.documents.retrieval.graph.budgets import (
     DEFAULT_STAGE_BUDGETS,
     STAGE_GENERATE,
+    STAGE_GRADE,
     StageBudget,
     StageBudgetTracker,
     build_stage_budget_tracker,
@@ -314,3 +315,201 @@ def test_default_budgets_are_generous_and_enabled_by_default() -> None:
     # Generous: a healthy two-iteration ask never comes near these.
     assert tracker.budget_for(STAGE_GENERATE).max_calls >= 8
     assert tracker.budget_for(STAGE_GENERATE).latency_ms >= 180_000
+
+
+class _EmptyRepo:
+    """The three fused legs return no rows at all."""
+
+    async def bm25_search(self, **_kwargs: object) -> Any:
+        from returns.result import Success
+
+        return Success([])
+
+    async def vector_search(self, **_kwargs: object) -> Any:
+        from returns.result import Success
+
+        return Success([])
+
+    async def trigram_search(self, **_kwargs: object) -> Any:
+        from returns.result import Success
+
+        return Success([])
+
+    async def fetch_chunks_by_ids(self, chunk_ids: list[str], **_kwargs: object) -> Any:
+        from returns.result import Success
+
+        return Success({})
+
+
+class _RecordingRedis:
+    """Minimal async redis double recording the envelopes it stores."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    async def setex(self, key: str, _ttl: int, value: str) -> None:
+        self.values[key] = value
+
+
+class _TransientGenerateLLM:
+    """Plan/grading succeed; generation fails transiently `failures` times.
+
+    Counts the provider-visible generation attempts so the per-attempt charge
+    is observable as an exact provider-call count.
+    """
+
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.generate_calls = 0
+        self.generated = False
+
+    def with_structured_output(self, schema: type) -> Any:
+        return _TransientHandler(schema, self)
+
+
+class _TransientHandler:
+    def __init__(self, schema: type, llm: _TransientGenerateLLM) -> None:
+        self._schema = schema
+        self._llm = llm
+
+    async def ainvoke(self, messages: list[Any]) -> Any:
+        if self._schema is QueryPlan:
+            return QueryPlan(rewritten_query=_QUERY)
+        if self._schema is SourceCriteria:
+            return SourceCriteria()
+        if self._schema is ContextGrade:
+            return ContextGrade(sufficient=True, missing_aspects=[])
+        if self._schema is GeneratedAnswer:
+            self._llm.generate_calls += 1
+            if self._llm.generate_calls <= self._llm.failures:
+                message = "provider timeout"
+                raise TimeoutError(message)
+            self._llm.generated = True
+            return GeneratedAnswer(answer="grounded answer", citations=[], confidence="high")
+        raise AssertionError(f"unexpected structured schema {self._schema}")  # noqa: EM102
+
+
+def _fast_retry_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse the retry boundary's backoff so budget tests stay fast."""
+    import app.ai.graph.retry as retry_module
+
+    monkeypatch.setattr(retry_module, "_INITIAL_WAIT_SECONDS", 0.0)
+    monkeypatch.setattr(retry_module, "_JITTER_SECONDS", 0.0)
+
+
+def _budget_warnings(result: dict[str, Any]) -> list[Any]:
+    return [
+        warning
+        for warning in result["quality_warnings"]
+        if warning.code == "STAGE_BUDGET_EXHAUSTED"
+    ]
+
+
+async def test_grade_budget_exhaustion_takes_the_no_evidence_fallback() -> None:
+    """Spec: a refused grading charge never marks unchecked evidence sufficient.
+
+    The exhausted grade is the typed insufficiency (the same escape an
+    exhausted grade loop takes): generation never runs, and the ask returns
+    the fallback answer naming the grade stage's budget.
+    """
+    llm = _ScriptedLLM()
+    tracker = _tracker(**{STAGE_GRADE: StageBudget(latency_ms=60_000, max_calls=0)})
+    graph = build_retrieval_graph()
+    result = await graph.ainvoke(
+        _input(),
+        context=RetrievalGraphContext(
+            llm=llm,  # ty: ignore[invalid-argument-type]
+            repo=_RecordingRepo(),  # ty: ignore[invalid-argument-type]
+            reranker=_PassThroughReranker(),
+            budgets=tracker,
+        ),
+    )
+
+    assert llm.generated is False  # generation never ran over ungraded evidence
+    assert result["generated_answer"].answer == _FALLBACK
+    assert result["generated_answer"].confidence == "uncertain"
+    budget_warnings = _budget_warnings(result)
+    assert [(w.stage, w.severity) for w in budget_warnings] == [(STAGE_GRADE, "warning")]
+
+
+async def test_empty_retrieval_with_exhausted_grade_never_caches_a_generated_answer() -> None:
+    """Spec: empty retrieval + exhausted grading reaches the fallback, not the
+    generator — only the fallback envelope (if anything) enters the cache."""
+    llm = _ScriptedLLM()
+    redis = _RecordingRedis()
+    tracker = _tracker(**{STAGE_GRADE: StageBudget(latency_ms=60_000, max_calls=0)})
+    graph = build_retrieval_graph()
+    result = await graph.ainvoke(
+        _input(),
+        context=RetrievalGraphContext(
+            llm=llm,  # ty: ignore[invalid-argument-type]
+            repo=_EmptyRepo(),  # ty: ignore[invalid-argument-type]
+            reranker=_PassThroughReranker(),
+            budgets=tracker,
+            redis=redis,  # ty: ignore[invalid-argument-type]
+        ),
+    )
+
+    assert llm.generated is False
+    assert result["generated_answer"].answer == _FALLBACK
+    from app.features.documents.retrieval.graph.state import CachedAskEnvelope
+
+    cached = [CachedAskEnvelope.model_validate_json(value) for value in redis.values.values()]
+    assert all(envelope.answer == _FALLBACK and envelope.citations == [] for envelope in cached), (
+        "an unchecked answer reached the cache"
+    )
+
+
+async def test_generate_retry_refusal_blocks_the_second_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec: generate.max_calls=1 — a transient failure gets no second provider
+    call through; the retry is refused like any other over-budget call."""
+    _fast_retry_waits(monkeypatch)
+    llm = _TransientGenerateLLM(failures=1)
+    tracker = _tracker(**{STAGE_GENERATE: StageBudget(latency_ms=180_000, max_calls=1)})
+    graph = build_retrieval_graph()
+    result = await graph.ainvoke(
+        _input(),
+        context=RetrievalGraphContext(
+            llm=llm,  # ty: ignore[invalid-argument-type]
+            repo=_RecordingRepo(),  # ty: ignore[invalid-argument-type]
+            reranker=_PassThroughReranker(),
+            budgets=tracker,
+        ),
+    )
+
+    assert llm.generate_calls == 1  # the retry attempt never reached the provider
+    assert llm.generated is False
+    assert result["generated_answer"].answer == _FALLBACK
+    budget_warnings = _budget_warnings(result)
+    assert [(w.stage, w.severity) for w in budget_warnings] == [(STAGE_GENERATE, "warning")]
+
+
+async def test_generate_retry_performs_exactly_the_budgeted_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec: budget for 2 calls and 3 retry attempts performs exactly 2 — the
+    third attempt's charge is refused and the ask degrades to the fallback."""
+    _fast_retry_waits(monkeypatch)
+    llm = _TransientGenerateLLM(failures=2)
+    tracker = _tracker(**{STAGE_GENERATE: StageBudget(latency_ms=180_000, max_calls=2)})
+    graph = build_retrieval_graph()
+    result = await graph.ainvoke(
+        _input(),
+        context=RetrievalGraphContext(
+            llm=llm,  # ty: ignore[invalid-argument-type]
+            repo=_RecordingRepo(),  # ty: ignore[invalid-argument-type]
+            reranker=_PassThroughReranker(),
+            budgets=tracker,
+        ),
+    )
+
+    assert llm.generate_calls == 2
+    assert llm.generated is False  # the third (refused) attempt never ran
+    assert result["generated_answer"].answer == _FALLBACK
+    budget_warnings = _budget_warnings(result)
+    assert [(w.stage, w.severity) for w in budget_warnings] == [(STAGE_GENERATE, "warning")]

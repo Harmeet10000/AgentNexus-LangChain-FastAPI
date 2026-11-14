@@ -233,6 +233,48 @@ def _charge_stage(
     return [violation] if violation is not None else []
 
 
+class _StageBudgetRefusalError(Exception):
+    """One retry attempt's stage-budget charge was refused.
+
+    Raised only to stop ``retry_immediate`` from spending a provider call the
+    stage's ``max_calls`` no longer allows: the retry boundary propagates
+    non-transient exceptions untouched on their first attempt, so the refusal
+    reaches the caller's typed degrade without the extra provider call.
+    """
+
+    def __init__(self, violation: StageBudgetViolation) -> None:
+        self.violation = violation
+        super().__init__(violation.stage)
+
+
+def _charged_attempts(
+    context: RetrievalGraphContext,
+    stage: str,
+    document_class: str,
+    operation: Callable[[], Awaitable[Any]],
+) -> Callable[[], Awaitable[Any]]:
+    """Wrap one provider call so every retry attempt re-charges the stage budget.
+
+    The node's pre-call charge covers the first attempt exactly as before (no
+    behaviour change when no retries happen); each subsequent attempt charges
+    again, so a transient failure cannot buy provider calls the stage's
+    ``max_calls`` never allowed. A refused retry raises
+    ``_StageBudgetRefusalError`` for the caller's typed degrade.
+    """
+    attempt = 0
+
+    async def charged() -> Any:
+        nonlocal attempt
+        attempt += 1
+        if attempt > 1 and context.budgets is not None:
+            violation = context.budgets.try_charge(stage, document_class=document_class)
+            if violation is not None:
+                raise _StageBudgetRefusalError(violation)
+        return await operation()
+
+    return charged
+
+
 def _state_document_class(state: RetrievalState) -> str:
     """Best-effort document-class attribution from the hydrated rows."""
     for row in state.get("retrieved_rows", []):
@@ -304,12 +346,29 @@ async def _plan_and_cache(
         SystemMessage(content=_QUERY_ANALYZER_SYSTEM_PROMPT),
         HumanMessage(content=plan_input),
     ]
+    document_class = _state_document_class(state)
+    retry_refusal: StageBudgetViolation | None = None
     try:
         raw_plan = await retry_immediate(
-            lambda: query_llm.ainvoke(cast("list[Any]", messages)),
+            _charged_attempts(
+                context,
+                STAGE_PLAN,
+                document_class,
+                lambda: query_llm.ainvoke(cast("list[Any]", messages)),
+            ),
             label="gemini_query_analyzer",
         )
         plan = _normalize_plan(QueryPlan.model_validate(raw_plan))
+    except _StageBudgetRefusalError as exc:
+        # A retry past the spent planning allowance is refused like any other
+        # charge: the default plan stands (the same degrade the pre-call
+        # refusal chooses) and the envelope names the exhausted budget.
+        exc.add_note(f"query={query[:80]}, operation=query_analyzer")
+        logger.bind(
+            query=query[:80], operation="query_analyzer", stage=exc.violation.stage
+        ).warning("query_analyzer_retry_budget_refused")
+        plan = QueryPlan(rewritten_query=query, sub_queries=[query])
+        retry_refusal = exc.violation
     # Both routes into this branch (the C6 contract): a deterministic
     # framework failure arrives unwrapped; a transient one arrives retried
     # and, once the budget is spent, as the boundary's transient type with
@@ -343,7 +402,13 @@ async def _plan_and_cache(
                     "answer_cache_key": answer_cache_key,
                 }
 
-    return {"query_plan": plan, "cache_hit": False, "answer_cache_key": answer_cache_key}
+    refusal_state = _violation_state([retry_refusal]) if retry_refusal is not None else {}
+    return {
+        "query_plan": plan,
+        "cache_hit": False,
+        "answer_cache_key": answer_cache_key,
+        **refusal_state,
+    }
 
 
 _SOURCE_IDENTIFIER_SYSTEM_PROMPT = render_prompt_sections(
@@ -405,7 +470,11 @@ def make_source_identifier_node() -> Callable[[RetrievalState, Any], Awaitable[d
             STAGE_SOURCE_IDENTIFIER, context.budgets, document_class
         ) as violations:
             result = await _identify_sources(
-                state, _structured(context.llm, SourceCriteria), context.repo
+                state,
+                _structured(context.llm, SourceCriteria),
+                context.repo,
+                context=context,
+                document_class=document_class,
             )
         return {**result, **_violation_state(violations)}
 
@@ -413,7 +482,12 @@ def make_source_identifier_node() -> Callable[[RetrievalState, Any], Awaitable[d
 
 
 async def _identify_sources(
-    state: RetrievalState, identifier_llm: Any, repo: DocumentRepository
+    state: RetrievalState,
+    identifier_llm: Any,
+    repo: DocumentRepository,
+    *,
+    context: RetrievalGraphContext,
+    document_class: str,
 ) -> dict[str, object]:
     plan: QueryPlan = state["query_plan"]
     server_scope = list(state.get("allowed_doc_ids") or [])
@@ -446,10 +520,24 @@ async def _identify_sources(
     ]
     try:
         raw_criteria = await retry_immediate(
-            lambda: identifier_llm.ainvoke(cast("list[Any]", messages)),
+            _charged_attempts(
+                context,
+                STAGE_SOURCE_IDENTIFIER,
+                document_class,
+                lambda: identifier_llm.ainvoke(cast("list[Any]", messages)),
+            ),
             label="gemini_source_identifier",
         )
         criteria = SourceCriteria.model_validate(raw_criteria)
+    except _StageBudgetRefusalError as exc:
+        # A retry past the spent allowance is refused like any other charge:
+        # narrowing proceeds unconstrained (the same degrade a failed
+        # identification takes) with the violation recorded by the tracker.
+        exc.add_note("operation=source_identifier")
+        logger.bind(operation="source_identifier", stage=exc.violation.stage).warning(
+            "source_identifier_retry_budget_refused"
+        )
+        return {"query_plan": plan, **_stage_usage("source_identifier", 1)}
     except Exception as exc:  # noqa: BLE001 — cannot narrow means unconstrained, not failed
         exc.add_note(f"query={query[:80]}, operation=source_identifier")
         logger.bind(query=query[:80], operation="source_identifier", error=str(exc)).warning(
@@ -481,10 +569,11 @@ async def _identify_sources(
 
 
 def make_graph_retrieval_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str, object]]]:
-    async def graph_retrieval_node(  # noqa: PLR0914 — scope fan-out keeps identity together
+    async def graph_retrieval_node(  # noqa: PLR0912, PLR0914 — scope fan-out keeps identity together
         state: RetrievalState, runtime: Any = None
     ) -> dict[str, object]:
-        graphiti = _invocation_context(runtime).graphiti
+        context = _invocation_context(runtime)
+        graphiti = context.graphiti
         if graphiti is None:
             return {"graph_chunk_ids": []}
         # Graphiti's historical user group is not an authorization boundary:
@@ -542,13 +631,27 @@ def make_graph_retrieval_node() -> Callable[[RetrievalState, Any], Awaitable[dic
         plan = state["query_plan"]
         try:
             raw_results = await retry_immediate(
-                lambda: graphiti.search(
-                    query=plan.rewritten_query,
-                    group_ids=group_ids,
-                    num_results=20,
+                _charged_attempts(
+                    context,
+                    STAGE_RETRIEVE_FUSION,
+                    _state_document_class(state),
+                    lambda: graphiti.search(
+                        query=plan.rewritten_query,
+                        group_ids=group_ids,
+                        num_results=20,
+                    ),
                 ),
                 label="graphiti_retrieval_search",
             )
+        except _StageBudgetRefusalError as exc:
+            # A graph-retry past the spent retrieval allowance is refused like
+            # any other charge: the graph leg contributes nothing instead of
+            # spending a provider call the budget never allowed.
+            exc.add_note("operation=graph_retrieval")
+            logger.bind(operation="graph_retrieval", stage=exc.violation.stage).warning(
+                "graph_retrieval_retry_budget_refused"
+            )
+            return {"graph_chunk_ids": [], **_violation_state([exc.violation])}
         # Same C6 contract as above: a retry-exhausted transient failure
         # arrives as the boundary's type, not as `GraphitiError`.
         except (GraphitiError, TransientExternalError) as exc:
@@ -628,18 +731,39 @@ async def _retrieve_fused_state(  # noqa: PLR0914 — scope, fusion, and outage 
     # retrievable state.
     repo = cast("DocumentRepository", context.repo)
     graphiti = context.graphiti
+    document_class = _state_document_class(state)
     # `QUERY`, not `DOCUMENT`. This is the side of the asymmetry that was never declared:
     # the prior helper passed no task type at all, so a query vector was drawn from the
     # document projection and compared against stored vectors drawn from the same one.
     # Mutually consistent, and both wrong — which is why nothing ever errored.
-    embedding = await retry_immediate(
-        lambda: embed_text(
-            plan.rewritten_query,
-            task_type=EmbeddingTaskType.QUERY,
-            redis=redis,
-        ),
-        label="gemini_query_embedding",
-    )
+    try:
+        embedding = await retry_immediate(
+            _charged_attempts(
+                context,
+                STAGE_RETRIEVE_FUSION,
+                document_class,
+                lambda: embed_text(
+                    plan.rewritten_query,
+                    task_type=EmbeddingTaskType.QUERY,
+                    redis=redis,
+                ),
+            ),
+            label="gemini_query_embedding",
+        )
+    except _StageBudgetRefusalError as exc:
+        # A retry past the spent retrieval allowance is refused like any other
+        # charge: the stage degrades to empty retrieval with the typed
+        # warning, never an unbounded spend.
+        exc.add_note("operation=query_embedding")
+        logger.bind(operation="query_embedding", stage=exc.violation.stage).warning(
+            "query_embedding_retry_budget_refused"
+        )
+        return {
+            "retrieved_chunks": [],
+            "retrieved_rows": [],
+            "stage_warnings": [_violation_warning(exc.violation)],
+            **_stage_usage("retrieve_fusion", 1),
+        }
     chunk_ids = state.get("graph_chunk_ids") or None
     # Local imports (noqa: PLC0415): `documents.service` imports this package at
     # module load, so top-level imports would close a cycle. The fused
@@ -699,26 +823,46 @@ async def _retrieve_fused_state(  # noqa: PLR0914 — scope, fusion, and outage 
             "require_graphiti_verified": bool(state.get("require_graphiti_verified", False)),
         }
     )
-    rows_result = await retry_immediate(
-        lambda: retrieve_fused(
-            repo=repo,
-            user_id=state["user_id"],
-            tenant_id=state.get("tenant_id"),
-            query_text=plan.rewritten_query,
-            query_embedding=embedding,
-            candidate_limit=HYBRID_CANDIDATE_LIMIT,
-            limit=20,
-            filter_params=filter_params,
-            weights=[plan.keyword_weight, plan.vector_weight]
-            + ([RRF_WEIGHT_GRAPHITI] if graphiti_branch is not None else []),
-            bm25_threshold=plan.bm25_threshold,
-            exact_phrase=plan.exact_phrase,
-            graphiti=graphiti_branch,
-            document_versions=state.get("document_versions", []),
-            document_contracts=state.get("document_contracts", []),
-        ),
-        label="postgres_fused_search",
-    )
+    try:
+        rows_result = await retry_immediate(
+            _charged_attempts(
+                context,
+                STAGE_RETRIEVE_FUSION,
+                document_class,
+                lambda: retrieve_fused(
+                    repo=repo,
+                    user_id=state["user_id"],
+                    tenant_id=state.get("tenant_id"),
+                    query_text=plan.rewritten_query,
+                    query_embedding=embedding,
+                    candidate_limit=HYBRID_CANDIDATE_LIMIT,
+                    limit=20,
+                    filter_params=filter_params,
+                    weights=[plan.keyword_weight, plan.vector_weight]
+                    + ([RRF_WEIGHT_GRAPHITI] if graphiti_branch is not None else []),
+                    bm25_threshold=plan.bm25_threshold,
+                    exact_phrase=plan.exact_phrase,
+                    graphiti=graphiti_branch,
+                    document_versions=state.get("document_versions", []),
+                    document_contracts=state.get("document_contracts", []),
+                ),
+            ),
+            label="postgres_fused_search",
+        )
+    except _StageBudgetRefusalError as exc:
+        # A retry past the spent retrieval allowance is refused like any other
+        # charge: the stage degrades to empty retrieval with the typed
+        # warning, never an unbounded spend.
+        exc.add_note("operation=postgres_fused_search")
+        logger.bind(operation="postgres_fused_search", stage=exc.violation.stage).warning(
+            "fused_search_retry_budget_refused"
+        )
+        return {
+            "retrieved_chunks": [],
+            "retrieved_rows": [],
+            "stage_warnings": [_violation_warning(exc.violation)],
+            **_stage_usage("retrieve_fusion", 1),
+        }
     graphiti_degraded = False
     if isinstance(rows_result, Failure):
         error = rows_result.failure()
@@ -730,6 +874,21 @@ async def _retrieve_fused_state(  # noqa: PLR0914 — scope, fusion, and outage 
             # degrades honestly — Graphiti is never legal truth.
             record_degradation(GRAPHITI_UNAVAILABLE, surface="ask_hybrid_node")
             graphiti_degraded = True
+            # The rerun is another billable fused read: charged per call like
+            # every attempt, a refusal degrades to empty retrieval with the
+            # typed warning instead of an unbounded spend.
+            rerun_refusal = (
+                context.budgets.try_charge(STAGE_RETRIEVE_FUSION, document_class=document_class)
+                if context.budgets is not None
+                else None
+            )
+            if rerun_refusal is not None:
+                return {
+                    "retrieved_chunks": [],
+                    "retrieved_rows": [],
+                    "stage_warnings": [_violation_warning(rerun_refusal)],
+                    **_stage_usage("retrieve_fusion", 1),
+                }
             rows_result = await retrieve_fused(
                 repo=repo,
                 user_id=state["user_id"],
@@ -1164,22 +1323,40 @@ def make_context_grader_node() -> Callable[[RetrievalState, Any], Awaitable[dict
         document_class = _state_document_class(state)
         refusals = _charge_stage(context, STAGE_GRADE, document_class)
         if refusals:
-            # The same degrade the seam-failure path chose — proceed to
-            # generation — but honest: the envelope names the stage and budget.
-            grade = ContextGrade(sufficient=True, missing_aspects=[])
+            # A refused grading charge never marks unchecked evidence
+            # sufficient: the grade is the typed insufficiency and the
+            # iteration lands on the cap, so generation takes its no-evidence
+            # fallback outcome (the same escape an exhausted grade loop takes)
+            # instead of answering over evidence no grader ever saw.
+            grade = ContextGrade(sufficient=False, missing_aspects=["Grading budget exhausted"])
             return {
                 "context_grade": grade,
-                "iteration_count": state.get("iteration_count", 0) + 1,
+                "iteration_count": _GRADE_LOOP_MAX_ATTEMPTS,
                 **_stage_usage(STAGE_GRADE, 0),
                 **_violation_state(refusals),
             }
         async with _stage_span(STAGE_GRADE, context.budgets, document_class) as violations:
-            grade = await _grade_context(
-                grader_llm=_structured(context.llm, ContextGrade),
-                grader=context.grader,
-                query=plan.rewritten_query,
-                reranked=chunks,
-            )
+            try:
+                grade = await _grade_context(
+                    grader_llm=_structured(context.llm, ContextGrade),
+                    grader=context.grader,
+                    query=plan.rewritten_query,
+                    reranked=chunks,
+                    context=context,
+                    document_class=document_class,
+                )
+            except _StageBudgetRefusalError as exc:
+                # A retry past the spent grading allowance is refused like any
+                # other charge: the run escapes to the fallback outcome, never
+                # an unchecked sufficient grade.
+                return {
+                    "context_grade": ContextGrade(
+                        sufficient=False, missing_aspects=["Grading budget exhausted"]
+                    ),
+                    "iteration_count": _GRADE_LOOP_MAX_ATTEMPTS,
+                    **_stage_usage(STAGE_GRADE, 1),
+                    **_violation_state([exc.violation]),
+                }
         iteration_count = state.get("iteration_count", 0) + 1
         # Structured decision-log event (task 1.7): outcome, iteration, and
         # the cap-exhaustion escape flag, so the escape rate is derivable
@@ -1206,6 +1383,8 @@ async def _grade_context(
     grader: ContextGrader | None,
     query: str,
     reranked: Sequence[RetrievedChunk],
+    context: RetrievalGraphContext,
+    document_class: str,
 ) -> ContextGrade:
     """Grade retrieval sufficiency through the structured seam, or its legacy twin.
 
@@ -1223,7 +1402,9 @@ async def _grade_context(
         {"query": query, "chunks": [chunk.model_dump() for chunk in reranked]}
     )
     if grader is None:
-        return await _grade_context_via_llm(grader_llm=grader_llm, payload=payload)
+        return await _grade_context_via_llm(
+            grader_llm=grader_llm, payload=payload, context=context, document_class=document_class
+        )
 
     request = TextGenerationRequest(
         prompt=payload,
@@ -1245,12 +1426,23 @@ async def _grade_context(
     return ContextGrade.model_validate(result.unwrap().output)
 
 
-async def _grade_context_via_llm(*, grader_llm: Any, payload: str) -> ContextGrade:
+async def _grade_context_via_llm(
+    *,
+    grader_llm: Any,
+    payload: str,
+    context: RetrievalGraphContext,
+    document_class: str,
+) -> ContextGrade:
     """Legacy inline grading path, kept verbatim for the seam-absent degrade."""
     messages = [SystemMessage(content=_GRADE_SEAM_SYSTEM_PROMPT), HumanMessage(content=payload)]
     try:
         raw = await retry_immediate(
-            lambda: grader_llm.ainvoke(cast("list[Any]", messages)),
+            _charged_attempts(
+                context,
+                STAGE_GRADE,
+                document_class,
+                lambda: grader_llm.ainvoke(cast("list[Any]", messages)),
+            ),
             label="documents_context_grader",
         )
         return ContextGrade.model_validate(raw)
@@ -1348,7 +1540,23 @@ def make_generator_node() -> Callable[[RetrievalState, Any], Awaitable[dict[str,
                 **_stage_usage(STAGE_GENERATE, 0),
                 **refusal_state,
             }
-        answer, violations = await _generate_answer(context, state, plan, chunks)
+        try:
+            answer, violations = await _generate_answer(context, state, plan, chunks)
+        except _StageBudgetRefusalError as exc:
+            # A retry past the spent generation allowance is refused like any
+            # other charge: the typed fallback outcome stands — no second
+            # provider call — and the envelope names the exhausted budget.
+            exc.add_note("operation=generator")
+            logger.bind(operation="generator", stage=exc.violation.stage).warning(
+                "generator_retry_budget_refused"
+            )
+            refusal_state = _violation_state([exc.violation])
+            refusal_warnings = cast("list[StageWarning]", refusal_state.get("stage_warnings", []))
+            return {
+                **(await _fallback_outcome(state, redis, extra_warnings=refusal_warnings)),
+                **_stage_usage(STAGE_GENERATE, 1),
+                **refusal_state,
+            }
 
         if answer.confidence == "uncertain" and FALLBACK_ANSWER not in answer.answer:
             answer = answer.model_copy(update={"answer": f"{answer.answer}\n\n{FALLBACK_ANSWER}"})
@@ -1400,15 +1608,23 @@ async def _generate_answer(
         HumanMessage(content=payload),
     ]
     generator_llm = _structured(context.llm, GeneratedAnswer)
-    async with _stage_span(
-        STAGE_GENERATE, context.budgets, _state_document_class(state)
-    ) as violations:
+    document_class = _state_document_class(state)
+    async with _stage_span(STAGE_GENERATE, context.budgets, document_class) as violations:
         try:
             raw_answer = await retry_immediate(
-                lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
+                _charged_attempts(
+                    context,
+                    STAGE_GENERATE,
+                    document_class,
+                    lambda: generator_llm.ainvoke(cast("list[Any]", messages)),
+                ),
                 label="gemini_grounded_generator",
             )
             return GeneratedAnswer.model_validate(raw_answer), violations
+        except _StageBudgetRefusalError:
+            # Not the hard-fallback degrade: the node turns the refusal into
+            # the typed fallback outcome with the envelope naming the budget.
+            raise
         except Exception as exc:  # noqa: BLE001 — generator failure must return hard fallback
             exc.add_note("operation=generator")
             logger.bind(operation="generator", error=str(exc)).warning(

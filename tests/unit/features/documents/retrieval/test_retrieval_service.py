@@ -260,3 +260,81 @@ async def test_ok_result_carries_provenance_rows() -> None:
     assert row["document_version"] == 1
     assert pipeline_version(row) == "p1"
     assert result.rank_by_chunk_id[_FUSED[0].chunk_id] == 1
+
+
+_GRAPH_ONLY_CHUNK = "00000000-0000-0000-0000-0000000000bb"
+
+
+@pytest.fixture
+def _patched_fusion_with_graph_only_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fusion returns the canonical chunk plus a graph-only match the SQL legs
+    never return (they exclude it on the active filters)."""
+    canonical_row = {
+        **_ROWS[0],
+        "chunk_metadata": {"pipeline_version": "p1", "jurisdiction": "Ontario"},
+    }
+    graph_row = {
+        **_ROWS[0],
+        "chunk_id": _GRAPH_ONLY_CHUNK,
+        "clause_type": "payment",
+        "graphiti_verified": False,
+        "chunk_metadata": {"jurisdiction": "Alberta"},
+    }
+
+    async def _embed(*_args: Any, **_kwargs: Any) -> list[float]:
+        return [0.0]
+
+    async def _retrieve_fused(**_kwargs: Any) -> Any:
+        return Success(
+            (
+                [
+                    RankedChunk(chunk_id=_FUSED[0].chunk_id, score=0.9, rank=1),
+                    RankedChunk(chunk_id=_GRAPH_ONLY_CHUNK, score=0.8, rank=2),
+                ],
+                {_FUSED[0].chunk_id: dict(canonical_row), _GRAPH_ONLY_CHUNK: dict(graph_row)},
+            )
+        )
+
+    monkeypatch.setattr(retrieval_service, "embed_text", _embed)
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _retrieve_fused)
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_graph_only_match")
+async def test_graph_only_match_is_held_to_the_active_clause_filter() -> None:
+    """The Graphiti branch bypasses the SQL filters, so the fusion's predicate
+    re-runs post-fusion: a graph-only match excluded by clause_type earns no
+    row — and downstream, no evidence handle."""
+    result = await retrieve(_context(), "query", _filters(clause_type="termination"), 5, None)
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == [_FUSED[0].chunk_id]
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_graph_only_match")
+async def test_jurisdiction_filter_excludes_the_graph_only_match() -> None:
+    result = await retrieve(_context(), "query", _filters(jurisdiction="Ontario"), 5, None)
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == [_FUSED[0].chunk_id]
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_graph_only_match")
+async def test_graph_indexed_requirement_excludes_the_unverified_graph_match() -> None:
+    result = await retrieve(_context(), "query", _filters(require_graphiti_verified=True), 5, None)
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == [_FUSED[0].chunk_id]
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_graph_only_match")
+async def test_every_match_excluded_by_a_filter_is_no_evidence() -> None:
+    """A filter that excludes every candidate — graph-only ones included — is
+    the valid-negative answer, never a silently narrowed ok result."""
+    result = await retrieve(_context(), "query", _filters(clause_type="confidentiality"), 5, None)
+    assert result.status == "no_evidence"
+    assert result.rows == []
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_graph_only_match")
+async def test_unfiltered_search_keeps_the_graph_only_match() -> None:
+    """With no active filter the predicate is a no-op: the graph match stands."""
+    result = await retrieve(_context(), "query", _filters(), 5, None)
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == [_FUSED[0].chunk_id, _GRAPH_ONLY_CHUNK]

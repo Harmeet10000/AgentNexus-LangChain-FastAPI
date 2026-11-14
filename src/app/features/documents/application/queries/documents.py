@@ -714,11 +714,16 @@ class DocumentQueryService:
         payload: documents_dto.UnifiedRagRequest,
     ) -> DocumentResult[UnifiedRagResponse]:
         tenant_id = _resolve_tenant_id(tenant_id, user_id)
+        # ``UnifiedSearchRequest`` is a strict (extra="forbid") schema while ``UnifiedRagRequest``
+        # adds ``max_tokens``. Dumping the RAG payload verbatim and re-validating it against the
+        # strict search schema always failed on the inherited ``max_tokens`` default (F1) — every
+        # /search/rag request 500'd. Drop the RAG-only field before the strict re-validation.
+        search_payload = UnifiedSearchRequest.model_validate(payload.model_dump(exclude={"max_tokens"}))
         search_result = await self.search(
             user_id=user_id,
             tenant_id=tenant_id,
             allowed_doc_ids=allowed_doc_ids,
-            payload=UnifiedSearchRequest.model_validate(payload.model_dump()),
+            payload=search_payload,
         )
         if isinstance(search_result, Failure):
             return Failure(search_result.failure())

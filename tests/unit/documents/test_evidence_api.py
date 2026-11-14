@@ -362,3 +362,57 @@ async def test_no_evidence_is_not_retryable_and_reports_coverage(
     assert result.status == "no_evidence"
     assert result.retryable is False
     assert result.coverage.documents_requested == 1
+
+
+_GRAPH_ONLY_CHUNK = "00000000-0000-0000-0000-0000000000bb"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "request_overrides",
+    [
+        pytest.param({"require_graph_indexed": True}, id="graph-indexed-required"),
+        pytest.param({"clause_type": "termination"}, id="clause-type-filter"),
+        pytest.param({"jurisdiction": "Ontario"}, id="jurisdiction-filter"),
+    ],
+)
+async def test_graph_only_match_is_filtered_before_a_handle_is_issued(
+    monkeypatch: pytest.MonkeyPatch, request_overrides: dict[str, Any]
+) -> None:
+    """A Graphiti-only match bypasses the SQL filters, so the fusion's
+    predicate re-runs in the shared `retrieve` service: a match excluded by
+    any active filter never earns an evidence handle."""
+    from app.features.documents.application.queries import documents as queries_documents
+    from app.features.documents.retrieval import service as retrieval_service
+
+    repo = _Repo()
+    graph_only = dict(repo.row)
+    graph_only["chunk_id"] = _GRAPH_ONLY_CHUNK
+    graph_only["clause_type"] = "payment"
+    graph_only["graphiti_verified"] = False
+    graph_only["chunk_metadata"] = {"jurisdiction": "Alberta"}
+
+    async def _embed(*_: object, **__: object) -> list[float]:
+        return [0.0]
+
+    async def _fused(**_: object) -> Any:
+        return Success(
+            (
+                [RankedChunk(chunk_id=_GRAPH_ONLY_CHUNK, score=0.9, rank=1)],
+                {_GRAPH_ONLY_CHUNK: graph_only},
+            )
+        )
+
+    monkeypatch.setattr(retrieval_service, "embed_text", _embed)
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _fused)
+    evidence = EvidenceService(repo=repo, handle_store=InMemoryEvidenceHandleStore())
+    result = await evidence.search_evidence(
+        principal_id="alice",
+        tenant_id="tenant-a",
+        allowed_doc_ids=(DOC_A,),
+        thread_id="thread-a",
+        run_id="run-a",
+        request=EvidenceSearchRequest(query="termination", **request_overrides),
+    )
+    assert result.status == "no_evidence"
+    assert result.items == []

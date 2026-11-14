@@ -23,6 +23,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
+from app.observability.logging import logger
+
 if TYPE_CHECKING:
     from app.features.documents.retrieval.graph.state import RetrievedChunk
     from app.retrieval.token_counter import CountTokens
@@ -125,11 +127,11 @@ def _walk(
     resolved = node
     if isinstance(resolved, str):
         resolved = _resolve_reference(root, resolved)
-        if resolved is None:
-            return heading_path
+    elif isinstance(resolved, Mapping):
+        resolved = _resolve_ref_node(root, cast("Mapping[str, object]", resolved))
     if not isinstance(resolved, Mapping):
         return heading_path
-    node_map = cast("Mapping[str, object]", resolved)
+    node_map = resolved
 
     self_ref = _string(node_map.get("self_ref"))
     if self_ref:
@@ -182,6 +184,28 @@ def _string(value: object) -> str:
 
 def _node_text(node: Mapping[str, object]) -> str:
     return _string(node.get("text")) or _string(node.get("name")) or _string(node.get("title"))
+
+
+def _resolve_ref_node(
+    root: Mapping[str, object], node: Mapping[str, object]
+) -> Mapping[str, object] | None:
+    """Resolve a ``{"$ref": ...}``/``{"cref": ...}`` child against the tree root.
+
+    Stored Docling trees serialize children as reference objects (the shape
+    ``structural_navigator`` resolves), not plain ``"#/texts/3"`` strings.
+    Directly nested child mappings are accepted as well. An unresolvable
+    reference returns None — the walker skips that child and records the typed
+    warning, it never raises.
+    """
+    reference = _string(node.get("$ref")) or _string(node.get("cref"))
+    if not reference:
+        return node
+    resolved = _resolve_reference(root, reference)
+    if resolved is None:
+        logger.bind(operation="section_hydration", reference=reference).warning(
+            "section_hydration_ref_unresolved"
+        )
+    return resolved
 
 
 def _resolve_reference(root: Mapping[str, object], reference: str) -> Mapping[str, object] | None:

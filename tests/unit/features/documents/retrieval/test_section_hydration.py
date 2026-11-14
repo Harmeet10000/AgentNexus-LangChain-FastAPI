@@ -137,6 +137,102 @@ def test_hydrate_sections_for_chunks_maps_by_chunk_id() -> None:
     assert "material breach" in hydrated["chunk-1"]
 
 
+def _ref_tree() -> dict[str, object]:
+    """The stored Docling shape: children are ``{"$ref": ...}`` objects."""
+    return {
+        "name": "Master Services Agreement",
+        "body": {
+            "children": [
+                {"$ref": "#/texts/0"},
+                {"$ref": "#/texts/1"},
+                {"cref": "#/groups/0"},
+            ]
+        },
+        "groups": [
+            {
+                "self_ref": "#/groups/0",
+                "label": "section",
+                "name": "sub",
+                "children": [{"$ref": "#/texts/2"}, {"$ref": "#/texts/3"}],
+            }
+        ],
+        "texts": [
+            {"self_ref": "#/texts/0", "label": "section_header", "text": "Term and Termination"},
+            {
+                "self_ref": "#/texts/1",
+                "label": "text",
+                "text": "Either party may terminate for material breach on thirty days notice.",
+            },
+            {
+                "self_ref": "#/texts/2",
+                "label": "section_header",
+                "text": "Consequences of Termination",
+                "level": 2,
+            },
+            {
+                "self_ref": "#/texts/3",
+                "label": "text",
+                "text": "Accrued payment obligations survive termination of this agreement.",
+            },
+        ],
+    }
+
+
+def test_ref_shaped_children_hydrate_the_parent_section() -> None:
+    """Stored trees serialize children as reference objects: the walker
+    resolves them, so section hydration works for real stored documents."""
+    section = section_text_for_heading_path(
+        _ref_tree(),
+        ["Term and Termination"],
+        count_tokens=_count_tokens,
+    )
+    assert section is not None
+    assert "material breach" in section
+    # The nested subsection (a `cref` reference) hydrates too; the next
+    # top-level section does not exist here to leak in.
+    assert "Accrued payment obligations" in section
+
+
+def test_unresolvable_ref_skips_the_child_with_a_warning() -> None:
+    from loguru import logger as loguru_logger
+
+    tree = {
+        "body": {
+            "children": [
+                {"$ref": "#/texts/0"},
+                {"$ref": "#/texts/99"},
+                {"$ref": "#/texts/1"},
+            ]
+        },
+        "texts": [
+            {"self_ref": "#/texts/0", "label": "section_header", "text": "Term and Termination"},
+            {
+                "self_ref": "#/texts/1",
+                "label": "text",
+                "text": "Either party may terminate for material breach.",
+            },
+        ],
+    }
+    events: list[dict[str, object]] = []
+
+    def _sink(message: Any) -> None:
+        record = message.record
+        if record["message"] == "section_hydration_ref_unresolved":
+            events.append({"reference": record["extra"].get("reference")})
+
+    sink_id = loguru_logger.add(_sink, level="DEBUG", format="{message}")
+    try:
+        section = section_text_for_heading_path(
+            tree, ["Term and Termination"], count_tokens=_count_tokens
+        )
+    finally:
+        loguru_logger.remove(sink_id)
+    # The unresolvable reference is skipped with its typed warning — never a
+    # raise — and the resolvable siblings still hydrate the section.
+    assert section == "Either party may terminate for material breach."
+    assert events == [{"reference": "#/texts/99"}]
+
+
 @pytest.fixture
 def _hydration_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DOCUMENTS_SECTION_HYDRATION_ENABLED", "true")

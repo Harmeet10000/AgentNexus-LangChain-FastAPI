@@ -21,6 +21,7 @@ signal while canonical chunks stand; deadlines surface as the typed
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -224,7 +225,23 @@ async def retrieve(  # noqa: PLR0912, PLR0914 — one readable typed-status pipe
         lookup_to_rows,
     )
 
-    rows = lookup_to_rows(fused, lookup)[:k]
+    # The Graphiti branch receives document/contract scope only — never the
+    # metadata filters the SQL legs enforce — so a graph-only match can rank
+    # into the fusion even when an active filter excluded it. The SQL
+    # branches' predicate re-runs here before any evidence handle is issued
+    # over the rows: canonical rows pass it idempotently, an excluded graph
+    # match is dropped.
+    rows = [
+        row for row in lookup_to_rows(fused, lookup) if _matches_active_filters(row, filter_params)
+    ]
+    if not rows:
+        record_degradation(NO_EVIDENCE, surface="retrieval_service")
+        return RetrievalResult(
+            status="no_evidence",
+            message="No evidence was found in the authorized documents.",
+            coverage=EvidenceCoverage(documents_requested=len(narrowed)),
+        )
+    rows = rows[:k]
     chunks = [row_hydration.row_to_chunk(row) for row in rows]
     chunks = _apply_token_budget(
         chunks, filters.max_result_tokens, count_tokens=default_count_tokens
@@ -350,6 +367,37 @@ async def _fused_search(
 def _is_graphiti_branch_failure(error: object) -> bool:
     details = getattr(error, "details", None)
     return isinstance(details, dict) and details.get("branch") == _GRAPHITI_BRANCH
+
+
+def _matches_active_filters(row: dict[str, Any], filter_params: Mapping[str, Any]) -> bool:
+    """The SQL branches' filter predicate, re-checked against one hydrated row.
+
+    Mirrors the active branches of ``_FILTER_SQL`` (document kind, jurisdiction,
+    contract type/index, clause type, graph-indexed requirement) in Python so a
+    Graphiti-derived match is held to the same bar the BM25/vector legs
+    enforce. Every comparison is skipped when the filter is unset, so an
+    unfiltered search is a no-op.
+    """
+    metadata = row.get("metadata_")
+    metadata_map = metadata if isinstance(metadata, Mapping) else {}
+    document_kind = filter_params.get("document_kind")
+    if document_kind is not None and row.get("chunk_kind") != document_kind:
+        return False
+    jurisdiction = filter_params.get("jurisdiction")
+    if jurisdiction is not None and metadata_map.get("jurisdiction") != jurisdiction:
+        return False
+    contract_type = filter_params.get("contract_type")
+    if contract_type is not None and metadata_map.get("contract_type") != contract_type:
+        return False
+    contract_index = filter_params.get("contract_index")
+    if contract_index is not None and row.get("contract_index") != contract_index:
+        return False
+    clause_type = filter_params.get("clause_type")
+    if clause_type is not None and row.get("clause_type") != clause_type:
+        return False
+    return not (
+        bool(filter_params.get("require_graphiti_verified")) and not row.get("graphiti_verified")
+    )
 
 
 def _transient_result(exc: Exception, operation: str) -> RetrievalResult:
