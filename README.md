@@ -152,7 +152,8 @@ labels (typed relationship edges landed with the retired plan's Phase D — the
 [archived plan](openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md)
 carries the completion audit), retrieval unification
 ([mount-retrieval-graph](openspec/changes/mount-retrieval-graph/proposal.md)) and the
-portfolio tool layer (see [PLAN-agent-tools.md](PLAN-agent-tools.md)).
+portfolio tool layer (see
+[PLAN-agent-tools.md](openspec/changes/archive/PLAN-agent-tools.md)).
 
 ## Security model
 
@@ -278,8 +279,8 @@ import-linter contracts, per-feature disposition — is recorded in
 - [`openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md`](openspec/changes/archive/2026-10-31-plan-bulletproof-ingestion.md) — retired
   ingestion-hardening plan (north star: the pipeline never lies; delivered 2026-10-31,
   residues tracked in `openspec/changes/`)
-- [`PLAN-agent-tools.md`](PLAN-agent-tools.md) — agent tool-set plan (tiny
-  projection, big catalog, authority at the executor)
+- [`openspec/changes/archive/PLAN-agent-tools.md`](openspec/changes/archive/PLAN-agent-tools.md) —
+  agent tool-set plan (tiny projection, big catalog, authority at the executor)
 - [`evals/ADJUDICATION-RUNBOOK.md`](evals/ADJUDICATION-RUNBOOK.md) — how the legal
   SME adjudicates disputed labels
 - [`docs/runbooks/`](docs/runbooks/) — tenant migration, upload budgets, live testing
