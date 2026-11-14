@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 from io import BytesIO
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import asyncer
@@ -57,7 +58,13 @@ async def parse_document(
     state that docling does not document as thread-safe. Caching it belongs with a claim about
     that, which this task does not have.
     """
-    del content_type
+    if _is_plain_text(filename, content_type):
+        return _parse_plain_text(
+            raw_bytes=raw_bytes,
+            filename=filename,
+            max_pages=max_pages,
+            max_output_bytes=max_output_bytes,
+        )
     if extraction_timeout_seconds <= 0 or max_pages < 1 or max_output_bytes < 1:
         message = "document extraction budgets must be positive"
         raise ValueError(message)
@@ -152,6 +159,52 @@ def _serialize_structural_tree(document: DoclingDocument) -> dict[str, object]:
         tree = model_dump(mode="json")
         return tree if isinstance(tree, dict) else {}
     return {}
+
+
+_TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown"})
+_TEXT_CONTENT_TYPES = frozenset({"text/plain", "text/markdown"})
+
+
+def _is_plain_text(filename: str, content_type: str) -> bool:
+    """True when the upload is plain text and needs no document conversion.
+
+    Docling models plain text as a single-page PDF-shaped document and re-wraps
+    it on export, which shifts chunk boundaries away from the text itself —
+    pointless work for a format the pipeline can parse directly.
+    """
+    suffix = Path(filename).suffix.casefold()
+    if suffix in _TEXT_EXTENSIONS:
+        return True
+    return content_type.casefold() in _TEXT_CONTENT_TYPES
+
+
+def _parse_plain_text(
+    *,
+    raw_bytes: bytes,
+    filename: str,
+    max_pages: int,
+    max_output_bytes: int,
+) -> ParsedDocument:
+    """Parse plain text (txt/md) directly — no OCR, no tables, no converter."""
+    if not raw_bytes:
+        return ParsedDocument(title=filename or "uploaded-document", markdown="", page_count=0)
+    text = raw_bytes.decode("utf-8", errors="replace")
+    # Form feeds are the only page signal plain text carries.
+    page_count = text.count("\f") + 1
+    if page_count > max_pages:
+        message = f"document has {page_count} pages; limit is {max_pages}"
+        raise DocumentExtractionBudgetError(message)
+    output_size = len(text.encode("utf-8"))
+    if output_size > max_output_bytes:
+        message = f"extracted output is {output_size} bytes; limit is {max_output_bytes}"
+        raise DocumentExtractionBudgetError(message)
+    # ocr_confidence/coverage stay None: ParsedDocument's contract documents
+    # None as "the parser could not measure the signal (non-PDF formats)".
+    return ParsedDocument(
+        title=_extract_title(text, filename),
+        markdown=text,
+        page_count=page_count,
+    )
 
 
 def _extract_title(markdown: str, filename: str) -> str:
