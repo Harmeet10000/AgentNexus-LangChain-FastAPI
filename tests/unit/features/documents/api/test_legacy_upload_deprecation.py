@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 from io import BytesIO
+from typing import TYPE_CHECKING
 
 import pytest
-from fastapi import Response
+from fakeredis.aioredis import FakeRedis
+from fastapi import FastAPI, Response
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from returns.result import Success
 from starlette.datastructures import Headers, UploadFile
 
 from app.config import get_settings
+from app.features.documents.api.http import dependencies as document_dependencies
 from app.features.documents.api.http import legacy_ingest_router as ingestion_router_module
+from app.features.documents.application.commands.upload_document import (
+    DocumentUploadResponse as CanonicalUploadResponse,
+)
 from app.features.documents.ingestion.legacy_dto import DocumentUploadResponse
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -167,3 +177,84 @@ async def test_legacy_upload_keeps_deprecation_headers_on_validation_failure(
     assert response.headers["deprecation"] == "true"
     assert response.headers["link"].startswith("</documents/upload>")
     assert result.success is False
+
+
+# --------------------------------------------------------------------------------------
+# F2: the canonical command-service branch must survive FastAPI response serialization
+# --------------------------------------------------------------------------------------
+
+
+class _FakeAuthorization:
+    """Minimal stand-in for the canonical tenant-aware authorization context."""
+
+    user_id = "user-legacy"
+    tenant_id = "personal:user-legacy"
+
+
+class _FakeCommandService:
+    """Queues like the canonical service and answers before extraction runs.
+
+    The real `DocumentCommandService.upload_document` returns the canonical
+    `dto.DocumentUploadResponse`, which carries none of the four legacy
+    extraction counts — the exact shape that killed serialization (F2).
+    """
+
+    def __init__(self) -> None:
+        self.persisted = False
+
+    async def upload_document(self, **_kwargs: object) -> Success[CanonicalUploadResponse]:
+        self.persisted = True
+        return Success(
+            CanonicalUploadResponse(doc_id="doc-legacy-1", status="queued", duplicate=False)
+        )
+
+
+@pytest.fixture
+def legacy_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """The legacy router mounted on a live FastAPI app with faked dependencies.
+
+    The defect was a `ResponseValidationError` — FastAPI validating the endpoint's declared
+    response model AFTER the handler ran and AFTER the document persisted. Direct function
+    calls (the tests above) skip exactly that validation, so this test must drive the full
+    stack. `app.state.redis` gets a fakeredis client so the upload rate limiter runs for real.
+    """
+    service = _FakeCommandService()
+    app = FastAPI()
+    app.state.redis = FakeRedis()
+    app.include_router(ingestion_router_module.router)
+    app.dependency_overrides[document_dependencies.get_document_command_service] = lambda: service
+    app.dependency_overrides[document_dependencies.get_document_authorization] = (
+        _FakeAuthorization
+    )
+    with TestClient(app, raise_server_exceptions=False) as client:
+        yield client
+
+
+def test_canonical_upload_via_legacy_route_survives_response_serialization(
+    legacy_client: TestClient,
+) -> None:
+    """F2 regression: 201 + deprecation headers, no ResponseValidationError after persist.
+
+    The smoke run showed the document row created and the object written to R2, then a 500
+    from `ResponseValidationError` because the declared response model demanded
+    `entity_count/clause_count/relationship_count/dropped_entity_count` that the canonical
+    command service never supplies. The counts are optional with deprecation defaults now, so
+    serialization succeeds and the promised headers finally reach the client.
+    """
+    response = legacy_client.post(
+        "/ingestion/documents/upload",
+        files={"file": ("contract.txt", b"clause text", "text/plain")},
+    )
+
+    assert response.status_code == 201
+    assert response.headers["deprecation"] == "true"
+    assert response.headers["sunset"] == get_settings().API_SUNSET_DATE
+    assert response.headers["link"].startswith("</documents/upload>")
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["doc_id"] == "doc-legacy-1"
+    assert body["data"]["status"] == "queued"
+    # Legacy counts are honestly absent on the queued-document path, not fabricated.
+    assert body["data"]["entity_count"] is None
+    assert body["data"]["clause_count"] is None

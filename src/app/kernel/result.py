@@ -242,8 +242,14 @@ def _serialize_data(data: Any) -> Any:
     return data
 
 
-def _build_request_meta() -> RequestMeta:
-    """Build request metadata from the current request context."""
+def _build_request_meta(correlation_id: str | None = None) -> RequestMeta:
+    """Build request metadata from the current request context.
+
+    ``correlation_id`` overrides the ContextVar value. The catch-all 500 handler needs it: by
+    the time ``ServerErrorMiddleware`` invokes the global exception handler, the
+    ``request_state`` ContextVar has been reset, so the handler passes the correlation id it
+    reads from the ASGI scope instead.
+    """
     settings = get_settings()
     ctx = request_state.get({})
 
@@ -255,7 +261,7 @@ def _build_request_meta() -> RequestMeta:
         ip=ip,
         method=ctx.get("method"),
         url=ctx.get("url"),
-        correlation_id=ctx.get("request_id"),
+        correlation_id=correlation_id if correlation_id is not None else ctx.get("request_id"),
     )
 
 
@@ -284,12 +290,13 @@ def http_error(
     trace: str | None = None,
     inner_error: str | None = None,
     flow: str | None = None,
+    correlation_id: str | None = None,
 ) -> APIResponse[Any]:
     """Create standardized HTTP error response using ContextVar."""
     return APIResponse[Any](
         success=False,
         status_code=status_code,
-        request=_build_request_meta(),
+        request=_build_request_meta(correlation_id=correlation_id),
         message=message,
         data=None,
         error=ErrorDetail(
@@ -328,6 +335,7 @@ def render_result[T](
     failure_data: Any = None,
     trace: str | None = None,
     flow: str | None = None,
+    correlation_id: str | None = None,
 ) -> APIResponse[T] | APIResponse[Any]:
     """Render a Result to the standard envelope, setting the transport status.
 
@@ -347,6 +355,7 @@ def render_result[T](
             error_code=_error_code_value(failure_code or error.code),
             trace=trace,
             flow=flow,
+            correlation_id=correlation_id,
         )
     # Success path
     response.status_code = success_status
@@ -362,6 +371,7 @@ def render_exception(
     headers: Mapping[str, str] | None = None,
     trace: str | None = None,
     flow: str | None = None,
+    correlation_id: str | None = None,
 ) -> Response:
     """Render an exception failure through :func:`render_result` for HTTP transport."""
     response = Response(status_code=status_code, headers=headers)
@@ -373,6 +383,7 @@ def render_exception(
         failure_data=data,
         trace=trace,
         flow=flow,
+        correlation_id=correlation_id,
     )
 
     if not is_body_allowed_for_status_code(response.status_code):

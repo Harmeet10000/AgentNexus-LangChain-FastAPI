@@ -46,6 +46,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from app.middleware import RequestStateLoggingMiddleware, register_exception_handlers
+from app.observability.logging import logger
 from app.utils import ErrorCode, UnauthorizedException
 
 if TYPE_CHECKING:
@@ -216,6 +217,73 @@ def test_an_unexpected_exception_arrives_with_a_body(client: TestClient) -> None
     _assert_is_envelope(
         response.json(), status_code=500, error_code=ErrorCode.INTERNAL_SERVER_ERROR
     )
+
+
+# --------------------------------------------------------------------------------------
+# F1: the 500 catch-all must not disclose internals (traceback leak, null correlationId)
+# --------------------------------------------------------------------------------------
+
+
+def test_a_forced_500_body_never_carries_the_traceback(client: TestClient) -> None:
+    """The catch-all's formatted traceback is server-side diagnostics only.
+
+    The smoke run (docs/server-smoke-2026-11-15.md, F1) caught the full Python traceback —
+    starlette middleware frames plus app frames with absolute file paths — serialized into
+    `error.trace` of the HTTP response. Every frame that reaches a 500 body is an internal-path
+    disclosure, so this asserts the whole body is clean, not just that the `trace` key is null.
+    """
+    response = client.get("/branch-4-unexpected")
+
+    body = response.text
+    assert "Traceback" not in body, "traceback frames leaked into the 500 response body"
+    assert ".py" not in body, "source-file paths leaked into the 500 response body"
+    assert "/home/" not in body, "filesystem paths leaked into the 500 response body"
+    assert "/src/" not in body, "filesystem paths leaked into the 500 response body"
+    error_block = response.json()["error"]
+    assert error_block is not None
+    assert error_block["trace"] is None
+    # The generic message goes to the client; the exception type stays server-side.
+    assert _UNEXPECTED not in body
+
+
+def test_a_forced_500_still_logs_the_traceback(client: TestClient) -> None:
+    """The traceback leaves the HTTP body but must not leave observability.
+
+    The handler binds the formatted trace as `internal_trace` and raises through
+    `logger.exception`, so the journal sink still receives the full stack. Removing the leak by
+    also removing the log record would trade an internal-path disclosure for a blind 500.
+    """
+    records: list[Any] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="ERROR", serialize=False)
+
+    try:
+        client.get("/branch-4-unexpected")
+    finally:
+        logger.remove(sink_id)
+
+    logged = [r for r in records if r["extra"].get("status_code") == 500]
+    assert logged, "the catch-all 500 produced no ERROR log record"
+    record = logged[-1]
+    assert record["extra"].get("internal_trace") is not None
+    assert "Traceback" in record["extra"]["internal_trace"]
+    assert _UNEXPECTED in record["extra"]["internal_trace"]
+    assert record["exception"] is not None, "logger.exception lost the live exception"
+
+
+def test_a_forced_500_carries_the_client_correlation_id(client: TestClient) -> None:
+    """Branch 4 runs after the middleware reset its ContextVars — the scope still has the id.
+
+    `RequestStateLoggingMiddleware` copies the correlation id into `scope["state"]` precisely so
+    the outermost handler can still read it. The smoke run showed `request.correlationId: null`
+    on the 500 envelope, which severed the client's error report from the journal entry.
+    """
+    response = client.get(
+        "/branch-4-unexpected", headers={"X-Correlation-ID": "smoke-correlation-42"}
+    )
+
+    assert response.status_code == 500
+    request_meta = response.json()["request"]
+    assert request_meta["correlationId"] == "smoke-correlation-42"
 
 
 # --------------------------------------------------------------------------------------

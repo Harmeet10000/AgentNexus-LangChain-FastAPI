@@ -6,16 +6,27 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.config import get_settings
 from app.kernel.result import render_exception
 from app.observability.logging import execution_path, logger
 from app.shared.jobs.errors import CircuitBreakerOpenError, IdempotencyLockError
 from app.utils import APIException, ErrorCode
 
 
-async def global_exception_handler(_request: Request, exc: Exception) -> Response:
-    settings = get_settings()
+def _correlation_id_from_scope(request: Request) -> str | None:
+    """Read the correlation id straight from the ASGI scope.
 
+    ``RequestStateLoggingMiddleware`` copies it into ``scope["state"]`` precisely because the
+    ``request_state`` ContextVar it also sets is reset in its ``finally`` block before
+    ``ServerErrorMiddleware`` (which owns the catch-all branch) invokes this handler — the
+    ContextVar read inside :func:`app.kernel.result._build_request_meta` therefore comes back
+    empty and the envelope's ``request.correlationId`` was ``null`` on every 500 (F1).
+    """
+    state = request.scope.get("state") or {}
+    correlation_id = state.get("correlation_id")
+    return str(correlation_id) if correlation_id is not None else None
+
+
+async def global_exception_handler(request: Request, exc: Exception) -> Response:
     # Extract the current function chain from our ContextVar.
     #
     # The `[]` default is load-bearing, not defensive padding. `execution_path` is set by
@@ -148,21 +159,28 @@ async def global_exception_handler(_request: Request, exc: Exception) -> Respons
     error_code = ErrorCode.INTERNAL_SERVER_ERROR
     message = "An unexpected error occurred"
 
-    trace = traceback.format_exc() if settings.ENVIRONMENT != "production" else None
+    # The formatted traceback belongs in server diagnostics ONLY — never in the HTTP body
+    # (F1: the smoke run showed starlette + app frames serialized into `error.trace`). It
+    # reaches the journal twice over: `logger.exception` attaches the live exception, and the
+    # bound `internal_trace` field keeps the exact formatted trace queryable in the sink.
+    trace = traceback.format_exc()
     exc_type = type(exc).__name__
     path = execution_path.get([])
     last_function = path[-1] if path else "unknown_layer"
     dynamic_message = f"Unhandled {exc_type} crashed in {last_function}"
 
     logger.bind(
-        status_code=status_code, error_code=error_code, crashed_at_flow=current_flow
+        status_code=status_code,
+        error_code=error_code,
+        crashed_at_flow=current_flow,
+        internal_trace=trace,
     ).exception(dynamic_message)
 
     return render_exception(
         message=message,
         status_code=status_code,
         error_code=error_code,
-        trace=trace,
+        correlation_id=_correlation_id_from_scope(request),
         flow=current_flow,
     )
 
