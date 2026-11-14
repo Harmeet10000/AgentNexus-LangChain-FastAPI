@@ -473,3 +473,196 @@ FIXED) · F8 (P2) crawler task fails at capability task boundary · F9 (P2)
 /auth/sessions always empty · F10 (P3) version identity null at receive ·
 F11 (P3) invoices vs subscriptions envelope inconsistency · F12 (P3) cold-boot
 health 503, transient Redis 503 on upload, failed boot left no logs.
+
+## Post-fix verification round (2026-11-15)
+
+Second full sweep AFTER the fix batch landed on main as six commits
+(`cf5e0f7` retrieval, `cbb3e85` auth, `831a783` http, `c923804`
+worker/security/health, `e9eae0f` rate-limit coverage, `ddeece7` smoke docs)
+and the stack was restarted by the orchestrator. Gate: `/tmp/fix_crews_complete`.
+Unit suite reported 2570 passed before the round. Evidence: curl status + body
+(jq) + unit journals. No commits, no branch switches, no source/`.env` edits,
+no unit restarts by the tester.
+
+**Provenance:** all four systemd units active at pre-flight;
+`GET /health` → 200 with `data.git_sha = "ddeece7"` (deep health now carries
+build provenance). Note: the API unit was stopped/started twice at 04:19:08 and
+04:19:21 IST during the sweep (not by the tester; journal shows only systemd
+lines) — all probes after ~04:19 hit the restarted process; no probe was
+corrupted by the boundary. `GET /` root envelope STILL reports
+`git_sha: "unknown"` (residual — see F3 verdict).
+
+**Environment observations during the round:** postgres unhealthy for the
+ENTIRE round (latency 3243 ms at pre-flight → 3570 ms at 04:56; `/health`
+degraded to overall 503 mid-round, `/health/ready` 503, typed per-dep status
+correct). This is not cold-start — it persisted 40+ minutes. One login attempt
+returned a typed 503 `DATABASE_ERROR` "Failed to create refresh-token family"
+during the latency spike (G4). The uvicorn journal contains **zero application
+output lines** in 90 minutes (F12c persists/worsened: not even access lines, so
+Razorpay dashboard deliveries and worker task receipts are unobservable from
+journals).
+
+### Defect verdicts (evidence-based)
+
+| Defect | Verdict | Evidence |
+|---|---|---|
+| F1 rag deterministic 500 + traceback leak | **FIXED** | POST /api/v2/search/rag with `{"query":"termination notice","max_tokens":2000}` → **200** `{items:[],context:[],cache_hit:false}`; without max_tokens → 200 (cache_hit:true). Every 5xx body observed this round had `error.trace: null` (no "Traceback", no filesystem paths) |
+| F2 legacy upload 500-after-persist | **FIXED** | POST /api/v2/ingestion/documents/upload → **201**, headers `deprecation: true`, `sunset: 2027-06-15`, `link: </documents/upload>; rel="successor-version"`; body carries doc_id `f0102088…` AND the full legacy field set (`entity_count`, `clause_count`, `relationship_count`, `dropped_entity_count`) |
+| F3 branch poisoning / provenance | **PARTIAL** | `/health` data.git_sha = `ddeece7` (requirement met); root route `GET /` still `git_sha:"unknown", build_date:"unknown"` |
+| F4 refresh-reuse detection | **PARTIAL** (mechanism FIXED, rendering broken — G1) | refresh → 200 rotation; re-POST OLD token → **500 INTERNAL_SERVER_ERROR** (deterministic ×2, correlationId `1grNr4PKC4L2h5r71hvT1`); family + session ARE revoked: the successor child token then → 401 `INVALID_CREDENTIALS` "Session expired or revoked"; garbage token → 401 `UNAUTHORIZED`. Typed code `REFRESH_TOKEN_REUSE` exists in `src/app/features/auth/domain/errors.py` but never reaches the wire — hypothesis: an exception after the Lua-script revocation (e.g. the security-event emit in `service.refresh`) escapes the Failure path and hits the generic handler |
+| F5 ingestion worker silent exit | **STILL BROKEN** | Unit (recreated 04:21:02 by orchestrator, clean import) died silently at **04:23:06** (2 m 4 s, 57.3 M memory peak, zero app output, no task receipt). Document `2552abb2…` stayed `received` through ~20 min of 5 s polling (POLL DONE final=received); second doc `f0102088…` also stuck `received`. The role-node-name half of the fix IS in code (`src/app/worker/celery/cli.py` forces `-n {role}@%h` and rejects caller `-n`), but runtime node names are unobservable (no journal output) and the silent exit itself reproduces |
+| F6 unscoped GCRA buckets | **FIXED** | Scoped buckets verified: `scope="register"` (3/60) and `scope="login"` (5/60) (`auth/api/http/router.py:49-50`). 3 registers → first login got typed 401 (NOT 429). Register class: 4th rapid register → 429 `TOO_MANY_REQUESTS` `retry-after: 13`. Login class: rapid burst → 200 ×5-ish then 429 ×4 with `retry-after: 3`/`2`. (One earlier 6-burst all-200 anomaly recorded honestly — likely Redis fail-open transient; immediately after, the same burst tripped at #4) |
+| F7 verification gate / SMTP | **STILL BROKEN** (unchanged) | fresh-user login → 401 `INVALID_CREDENTIALS` "Email not verified. Check your inbox."; resend-verification/forgot-password → canned 200s. Resend key+templates now configured but delivery to a non-owner inbox is unconfirmable (test mode) — BLOCKED-pending-user |
+| F8 crawler task-boundary failure | **STILL BROKEN** (new root cause — G2) | POST /crawl → 202 `c21821a9…`; consumed and terminal `failed` ~45 s with `error_message: "Unexpected error in _crawl_web at line 1448 in _make_config_signature (crawl4ai/browser_manager.py): Error: 'dict' object has no attribute 'latitude'"` + code context. The old "Capability owner synchronous operations" error is GONE (boundary fix landed — the task now executes), but geolocation is passed as a dict where crawl4ai expects an object; happy path still unreachable |
+| F9 sessions list empty | **FIXED** | GET /auth/sessions → 200 with `n=3`: `{sessionId, deviceId, deviceName, ipAddress:"127.0.0.1", userAgent:"curl/8.18.0", createdAt, expiresAt, isCurrent}` |
+| F10 version null at receive | **STILL BROKEN** | GET /documents/{id}/status at receive: `document_version: null, pipeline_version: null` (title/kind/chunk_count 0 present) |
+| F11 invoices vs subscriptions envelope | **STILL BROKEN** | GET /invoices → bare array `[]`; GET /subscriptions → `{items,limit,offset,total}` |
+| F12 resilience/observability | **PARTIAL** | (a) health degradation is typed (`/health` 503 with per-dep list; `/health/ready` 503) but postgres stayed unhealthy the whole round (G4); (b) the one transient infra blip on the auth write path produced a typed 503 (G4); (c) journal log sink STILL absent — 0 app lines in 90 min (worse than round 1, where access lines were visible; Razorpay deliveries and worker receipts are now unobservable) |
+| git_sha (gate requirement) | **PASS** | `/health` → `data.git_sha = "ddeece7"`, never "unknown" |
+| Webhooks | **PASS** | no signature → 401 `WEBHOOK_VERIFICATION_FAILED` "Missing X-Razorpay-Signature header"; invalid sig → 401 "Signature mismatch"; locally-computed valid HMAC (secret from `.env.development`, body hashed byte-exact) → **200 `{"accepted":true}`**; immediate duplicate → **200 `{"accepted":true}`** (idempotent). NOTE: a first "valid" probe failed 401 due to a tester-side newline bug (`echo` added `\n` to the body file while the HMAC was computed without it) — re-run with byte-exact body verified 200. Real Razorpay dashboard deliveries could NOT be observed: the journal has no app lines (F12c) |
+| Worker node names | **PASS (code-level)** | `cli.py` derives `-n {role}@%h` and forbids caller `-n`/`--hostname`; pidbox collision impossible by construction. Runtime confirmation unavailable (no journal output) |
+
+### Full endpoint results
+
+| Method + path | Status | Observed behavior | Required backend piece |
+|---|---|---|---|
+| GET / | 200 | envelope; `git_sha:"unknown"` residual | none |
+| GET /health | 200 → 503 | git_sha `ddeece7`; postgres unhealthy 3243→3570 ms all round; others healthy | Timescale |
+| GET /api/v2/health/live | 200 | server info envelope | none |
+| GET /api/v2/health/ready | 503 | typed unhealthy (postgres) with system block | postgres |
+| GET /api/v2/health/self | 200 | identity block | none |
+| GET /metrics | 200 | Prometheus text | none |
+| GET /swagger.json | 200 | 138 operations | none |
+| GET /openapi.json | 404 | docs disabled | none |
+| POST /api/v2/auth/register (fresh) | 201 | "Check your email"; Resend configured, delivery unconfirmable | Resend |
+| POST /api/v2/auth/register (duplicate) | 409 | `USER_CONFLICT` | none |
+| POST /api/v2/auth/register (class exhausted) | 429 | `TOO_MANY_REQUESTS`, `retry-after: 13` | Redis |
+| POST /api/v2/auth/login (principal) | 200 (+1×503 transient) | camelCase `accessToken/refreshToken`; the 503 = `DATABASE_ERROR` "Failed to create refresh-token family" during postgres spike (G4) | postgres |
+| POST /api/v2/auth/login (fresh unverified) | 401 | `INVALID_CREDENTIALS` email-not-verified (F7 gate) | Resend/verification |
+| POST /api/v2/auth/login (class exhausted) | 429 | `TOO_MANY_REQUESTS`, `retry-after: 3`/`2` | Redis |
+| GET /api/v2/auth/me | 200 / 401 no-token | same user id; typed `UNAUTHORIZED` | none |
+| GET /api/v2/auth/sessions | 200 | 3 sessions, sessionId/ip/ua/isCurrent (F9 FIXED) | Mongo/Redis |
+| POST /api/v2/auth/refresh | 200 | rotation OK | none |
+| POST /api/v2/auth/refresh (reused old) | **500** | `INTERNAL_SERVER_ERROR` ×2; family+session revoked anyway (G1) | none |
+| POST /api/v2/auth/refresh (successor after reuse) | 401 | `INVALID_CREDENTIALS` "Session expired or revoked" — family revocation propagates | none |
+| POST /api/v2/auth/refresh (garbage) | 401 | `UNAUTHORIZED` | none |
+| POST /api/v2/auth/resend-verification | 200 | canned "If that email is registered…" | Resend |
+| POST /api/v2/auth/forgot-password | 200 | canned | Resend |
+| GET/PATCH /api/v2/profile/ | 200/200 | PATCH persists (re-read confirms `fullName`); camelCase DTO | none |
+| PATCH /api/v2/profile/ (unknown field) | 422 | `VALIDATION_ERROR` | none |
+| POST /api/v2/profile/change-password (wrong current) | 401 | `CURRENT_CREDENTIAL_INVALID` | none |
+| POST /api/v2/profile/change-password (missing field) | 422 | field-level | none |
+| GET /api/v2/users/ + /{id} (role=user) | 403 | `FORBIDDEN` users:read | none |
+| PATCH /api/v2/tenants/{own}/members/{self}/legal-roles | 403 | `FORBIDDEN` "Corpus-admin authority is required" | none |
+| PATCH /api/v2/tenants/{own}/settings/self-review | 403 | same corpus-admin denial | none |
+| PATCH /api/v2/tenants/{foreign}/settings/self-review | 403 | distinct "Tenant membership does not grant access to this tenant" | none |
+| POST /api/v2/documents/upload (.txt) | 201 | `queued`, doc `2552abb2…`, task_id null (outbox path) | celery ingestion |
+| POST /api/v2/documents/upload (identical bytes) | 201 | `duplicate:true`, SAME doc_id | none |
+| POST /api/v2/documents/upload (.exe) | 422 | `INVALID_DOCUMENT` `EXTENSION_NOT_ALLOWED`, allowlist echoed | none |
+| POST /api/v2/documents/upload (55 MB) | 422 | `INVALID_DOCUMENT` `FILE_TOO_LARGE`, `max_size: 52428800` (round-1 NOT RUN → now pass) | none |
+| GET /api/v2/documents/{id}/status | 200 | truthful `received`; `document_version/pipeline_version` null (F10); one call took 20.1 s (postgres latency) | none |
+| GET /api/v2/documents/{unknown}/status | 404 | `STATUS_NOT_FOUND` | none |
+| GET/DELETE /api/v2/documents (list/delete) | — | still absent from router | — |
+| POST /api/v2/ingestion/documents/upload (legacy) | **201** | deprecation headers + legacy fields (F2 FIXED) | none |
+| POST /api/v2/search (scoped / unauth / empty) | 200 / 401 / 422 | typed empty result; typed errors | embedding+postgres |
+| POST /api/v2/search/rag (with and without max_tokens) | **200 / 200** | `{items,context,cache_hit}` — F1 FIXED, no trace leak | none |
+| POST /api/v2/search/ask | 200 | grounded decline, citations [], confidence "uncertain" | model provider |
+| POST /api/v2/legal/ask (field=query) | 200 | same decline shape | model provider |
+| POST /api/v2/search/hybrid | 200 | typed empty | postgres |
+| POST /api/v2/search/ingest (+poll) | — | BLOCKED: ingestion worker dead (F5) | celery ingestion |
+| GET /api/v2/crawler/rate-limit | 200 | `{remaining_minute:10, remaining_hour:99}` | Redis |
+| GET /api/v2/crawler/search?query= | 200 | Tavily live, real results | Tavily |
+| GET /api/v2/crawler/search?q= | 422 | param is `query` | none |
+| POST /api/v2/crawler/crawl | 202 | pending → consumed → terminal `failed` (G2, crawl4ai geolocation) | crawler worker |
+| GET /api/v2/crawler/crawl/{id} | 200 | truthful status + surfaced error_message | Redis |
+| GET /api/v2/crawler/crawl/{id}/pages, /chunks | 503 | typed fail-closed "not available yet" | crawler worker |
+| GET /api/v2/crawler/crawl/{id}/chunks/search | 422 | requires query param | none |
+| GET /api/v2/crawler/crawl/{unknown} | 404 | `NOT_FOUND` | Redis |
+| POST /api/v2/crawler/crawl/{id}/cancel | — | NOT RUN (crawl never reached running) | — |
+| GET /api/v2/plans | 200 | empty catalog `[]` | postgres |
+| GET /api/v2/plans/{non-uuid} | **500** | `PLAN_DATABASE_ERROR` with raw SQL + asyncpg error in `error.data` (G3; was 404 `PLAN_NOT_FOUND` in round 1) | none |
+| POST /api/v2/plans (role=user) | 403 | admin-only | none |
+| GET /api/v2/subscriptions | 200 | paginated envelope | postgres |
+| GET /api/v2/invoices | 200 | bare array (F11 persists) | postgres |
+| POST /api/v2/subscriptions (unknown plan) | 422 | `VALIDATION_ERROR` — plan_id now UUID-validated at the DTO (round-1 saw 404 `PLAN_NOT_FOUND`; benign earlier-rejection change) | none |
+| POST /api/v2/subscriptions/{unknown}/cancel | 422 | validation rejects unknown id | none |
+| GET /api/v2/credits/balance/{self} | 200 | `{totalBalance:0,…,currency:"INR"}` | postgres |
+| GET /api/v2/credits/balance/{other} | 403 | `CREDIT_FORBIDDEN` | none |
+| GET /api/v2/credits/history/{self} | 200 | history envelope | postgres |
+| POST /api/v2/credits (grant, role=user) | 403 | admin-only | none |
+| GET /api/v2/admin/billing/dunning (role=user) | 403 | `FORBIDDEN` | none |
+| POST /api/v2/webhooks/razorpay (no/invalid sig) | 401 | typed `WEBHOOK_VERIFICATION_FAILED` | none |
+| POST /api/v2/webhooks/razorpay (valid HMAC + duplicate) | 200 / 200 | `{"accepted":true}`, idempotent | none |
+| GET /api/v1/documents/{id}/status, POST /api/v1/search, GET /api/v1/auth/me | 200 | v1 dual-mount behavior + `deprecation: true`, `sunset: 2027-06-15`, successor `Link` headers all present | none |
+
+### New defects
+
+- **G1 (P1): refresh-token reuse renders 500 `INTERNAL_SERVER_ERROR` instead of
+  the typed 401 `REFRESH_TOKEN_REUSE`.** Deterministic ×2 (correlationId
+  `1grNr4PKC4L2h5r71hvT1` and one earlier). The rotation protocol itself is
+  correct — reuse is detected, family + session revoked, successor token
+  rejected with 401 — but the wire contract is wrong (F4's typed error exists
+  in `src/app/features/auth/domain/errors.py` yet never renders). Suspect an
+  exception after revocation (security-event emit path) escaping the Failure
+  render. No traceback/paths in the body (`error.trace: null`).
+- **G2 (P2): crawler happy path still unreachable with a new root cause.**
+  `error_message: "Unexpected error in _crawl_web at line 1448 in
+  _make_config_signature (…/crawl4ai/browser_manager.py): Error: 'dict' object
+  has no attribute 'latitude'"` — the app passes `geolocation` as a dict where
+  crawl4ai expects a `Geolocation` object. Zero pages attempted; terminal state
+  truthful. (Round-1 F8's capability-owner error is gone — that fix landed.)
+- **G3 (P1): `GET /api/v2/plans/{non-uuid}` → 500 `PLAN_DATABASE_ERROR`** with
+  the raw SQLAlchemy statement (full `plans` column list) and the asyncpg
+  DataError text serialized into `error.data`. Round-1 behavior was typed 404
+  `PLAN_NOT_FOUND` — a regression AND an internal SQL/schema disclosure (no
+  filesystem paths or "Traceback", but internal query text leaks).
+- **G4 (P2): postgres unhealthy for the entire round** (3.2–3.6 s latency,
+  `/health` and `/health/ready` degraded to typed 503 for 40+ minutes — not
+  cold-start), and one login during the spike returned typed 503
+  `DATABASE_ERROR` "Failed to create refresh-token family" — an infra blip on
+  one dependency fails the auth write path. (Observability caveat: the app's
+  stdout never reaches journald — 0 app lines in 90 min — so neither this nor
+  Razorpay deliveries could be correlated from logs; F12c.)
+
+### Counts
+
+| Metric | Count |
+|---|---|
+| Distinct HTTP operations probed (v2 + v1 spot checks) | 61 |
+| PASS | 53 |
+| FAIL (prerequisites available, behavior wrong) | 6 (G1 reuse 500, G2 crawl failed, G3 plans/unknown 500, F5 ingestion round-trip, F10 version null, F11 invoices envelope) |
+| BLOCKED | 4 (search/ingest pipeline — worker dead; subscription/order/payments lifecycle — no plan/admin; email delivery confirmation — Resend test mode; Razorpay dashboard-delivery observation — journal sink absent) |
+| NOT RUN | crawl cancel, impersonation/admin lifecycle, avatar upload, dunning run, webhook admin replay |
+| Unexpected 5xx | 3 distinct (G1, G3, G4-transient) — none leaked tracebacks/filesystem paths |
+| Cross-tenant data exposure | 0 |
+
+`pass_rate = 53/59 ≈ 90%` (BLOCKED/NOT RUN out of denominator). Prior-defect
+scoreboard: **F1, F2, F6, F9 FIXED · F4 PARTIAL (G1) · F3, F12 PARTIAL ·
+F5, F7, F8, F10, F11 STILL BROKEN · git_sha PASS · webhook PASS**.
+
+### Cleanup
+
+Test data left in infra: users `postfix-20261115-a/b/c/d@example.com`
+(unverified); documents `2552abb2…` (stuck received), `f0102088…` (legacy route,
+stuck received); crawl `c21821a9…` (failed); principal `fullName` set to
+"Postfix Sweep Tester". Token families deliberately poisoned during the F4
+reuse tests (principal re-logged-in afterward; final tokens left UNREVOKED so
+the orchestrator can keep using the principal — no destructive session cleanup
+was run). One webhook test event `payment.captured` id `pay_postfix_g1`
+accepted (idempotency verified on duplicate). No commits, no branch switches,
+no source or `.env.development` modifications were made by the tester.
+
+## Orchestrator observation (post-round-2, 2026-11-15 ~23:35 IST)
+
+- **G5 (P1, billing)**: `POST /api/v2/plans` with the correct `PlanCreateDTO` → plan row PERSISTS
+  locally (`GET /plans` shows `smoke-pro-monthly`, id `6eb09826-…`) while the client receives 500
+  `PLAN_DATABASE_ERROR` "The billing provider credentials were rejected". Direct probe with the
+  same key pair: Razorpay `/v1/webhooks` accepts (PUT 200), `/v1/plans` → **401 Unauthorized** —
+  the credentials are valid but the account/key pair lacks Plans capability. Owner action:
+  enable/verify Plans on the Razorpay dashboard or issue a key pair with plan rights.
+  Two defects in one: (a) local-persist-then-500 state divergence (F2 class), (b) the error code
+  `PLAN_DATABASE_ERROR` mislabels a provider-auth failure. Reconciliation of the local row is owed.
+- **Admin principal created** (owner-approved): `.testing-credentials.json` → `"admin"` key
+  (register → Mongo-seed verify → production role bump; JWT carries `role: admin` + full
+  permission set; `GET /api/v2/plans` 200 authenticated). Billing lifecycle unblocked for the
+  expanded sweep except provider-side plan mirroring (G5 above).
