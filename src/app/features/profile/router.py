@@ -1,12 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, File, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from returns.result import Failure
 
 from app.features.auth.api.http.dependencies import CurrentVerifiedUser
 from app.features.auth.api.http.dto import UserResponse
 from app.kernel.result import render_result
 from app.security.tokens import TokenClaims
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse, http_response
 
 from .dependencies import get_profile_service
@@ -16,6 +17,14 @@ from .dto import (
     UpdateProfileRequest,
 )
 from .exceptions import ProfileValidationError
+
+# Per-IP GCRA guards, one class per sensitivity: password changes are
+# auth-critical (tight, mirroring forgot-password), profile edits are
+# routine, avatar uploads are write-shaped like document uploads.
+limit_profile_mutation = get_rate_limiter(burst=10, rate=10, period=60, scope="profile-mutation")
+
+limit_change_password = get_rate_limiter(burst=5, rate=5, period=300, scope="change-password")
+limit_avatar_upload = get_rate_limiter(burst=5, rate=5, period=300, scope="avatar-upload")
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -43,7 +52,7 @@ async def get_profile(
     return http_response("Profile retrieved", data=result)
 
 
-@router.patch("/")
+@router.patch("/", dependencies=[Depends(limit_profile_mutation)])
 async def update_profile(
     body: UpdateProfileRequest,
     user: CurrentVerifiedUser,
@@ -73,7 +82,7 @@ async def update_profile(
     )
 
 
-@router.post("/change-password", response_model=APIResponse[None])
+@router.post("/change-password", response_model=APIResponse[None], dependencies=[Depends(limit_change_password)])
 async def change_password(
     body: ChangePasswordRequest,
     user: CurrentVerifiedUser,
@@ -105,7 +114,7 @@ async def change_password(
     return render_result(result, response, message=msg)
 
 
-@router.post("/avatar")
+@router.post("/avatar", dependencies=[Depends(limit_avatar_upload)])
 async def upload_avatar(
     user: CurrentVerifiedUser,
     request: Request,

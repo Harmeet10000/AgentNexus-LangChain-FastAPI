@@ -2,11 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Path, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response, status
 
 from app.features.auth.api.http.dependencies import CurrentVerifiedUser
 from app.features.billing.subscriptions.models import SubscriptionStatus
 from app.kernel.result import render_result
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 from .dependencies import SubscriptionServiceDep
@@ -20,6 +21,11 @@ from .dto import (
     SubscriptionResponse,
 )
 
+# Money-path writes (create/cancel/pause/resume/change-plan/trial) share
+# one per-IP billing-mutation class: 30/60 keeps real subscription
+# management flowing while bounding abuse and runaway clients.
+limit_billing_mutation = get_rate_limiter(burst=30, rate=30, period=60, scope="billing-mutation")
+
 router = APIRouter(prefix="/subscriptions", tags=["billing-subscriptions"])
 
 
@@ -28,7 +34,7 @@ def _request_idempotency_key(request: Request, header: str | None) -> str | None
     return header or getattr(request.state, "correlation_id", None)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(limit_billing_mutation)])
 async def create_subscription(  # noqa: PLR0917
     payload: SubscriptionCreateDTO,
     request: Request,
@@ -76,7 +82,7 @@ async def get_subscription(
     )
 
 
-@router.post("/{subscription_id}/cancel")
+@router.post("/{subscription_id}/cancel", dependencies=[Depends(limit_billing_mutation)])
 async def cancel_subscription(  # noqa: PLR0917
     subscription_id: Annotated[str, Path(min_length=1)],
     payload: SubscriptionCancelDTO,
@@ -97,7 +103,7 @@ async def cancel_subscription(  # noqa: PLR0917
     )
 
 
-@router.post("/{subscription_id}/pause")
+@router.post("/{subscription_id}/pause", dependencies=[Depends(limit_billing_mutation)])
 async def pause_subscription(  # noqa: PLR0917
     subscription_id: Annotated[str, Path(min_length=1)],
     payload: SubscriptionPauseDTO,
@@ -118,7 +124,7 @@ async def pause_subscription(  # noqa: PLR0917
     )
 
 
-@router.post("/{subscription_id}/resume")
+@router.post("/{subscription_id}/resume", dependencies=[Depends(limit_billing_mutation)])
 async def resume_subscription(  # noqa: PLR0917
     subscription_id: Annotated[str, Path(min_length=1)],
     service: SubscriptionServiceDep,
@@ -137,7 +143,7 @@ async def resume_subscription(  # noqa: PLR0917
     )
 
 
-@router.post("/{subscription_id}/change-plan")
+@router.post("/{subscription_id}/change-plan", dependencies=[Depends(limit_billing_mutation)])
 async def change_plan(  # noqa: PLR0917
     subscription_id: Annotated[str, Path(min_length=1)],
     payload: PlanChangeDTO,
@@ -172,7 +178,7 @@ async def change_preview(
     )
 
 
-@router.post("/{subscription_id}/trial-extension")
+@router.post("/{subscription_id}/trial-extension", dependencies=[Depends(limit_billing_mutation)])
 async def request_trial_extension(  # noqa: PLR0917
     subscription_id: Annotated[str, Path(min_length=1)],
     service: SubscriptionServiceDep,

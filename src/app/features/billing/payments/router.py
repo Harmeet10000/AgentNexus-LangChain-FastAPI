@@ -2,17 +2,21 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Path, Query, Response, status
 from returns.result import Failure
 
 from app.features.auth.api.http.dependencies import CurrentVerifiedUser
 from app.features.billing.subscriptions.dependencies import SubscriptionServiceDep
 from app.kernel.result import render_result
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 from .dependencies import PaymentServiceDep
 from .dto import PaymentResponse, RefundRequestDTO, RefundResponse
 from .exceptions import PaymentCollaboratorError
+
+# Refunds are rare, irreversible-ish money movements; tight per-IP guard.
+limit_refund = get_rate_limiter(burst=5, rate=5, period=300, scope="payment-refund")
 
 router = APIRouter(tags=["billing-payments"])
 
@@ -62,7 +66,7 @@ async def get_payment(
     return render_result(result, response, message="Payment")
 
 
-@router.post("/payments/{payment_id}/refund")
+@router.post("/payments/{payment_id}/refund", dependencies=[Depends(limit_refund)])
 async def refund_payment(  # noqa: PLR0917 - endpoint needs path payload, services, claims, response
     payment_id: Annotated[str, Path(min_length=1)],
     payload: RefundRequestDTO,

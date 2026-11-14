@@ -156,7 +156,7 @@ def _make_ingest_document_node(
             logger.bind(document_id=job.document_id, model=exc.model).warning(
                 "Document ingestion parked: embedding quota exhausted"
             )
-            await _record_quota_exhaustion(
+            parked = await _record_quota_exhaustion(
                 repo,
                 document_id=job.document_id,
                 tenant_id=job.tenant_id,
@@ -165,6 +165,26 @@ def _make_ingest_document_node(
                 task_id=job.task_id,
                 detail=exc.detail,
             )
+            if not parked:
+                # The park write itself failed (DB outage, guard refusal).
+                # Claiming the park anyway would let the worker mark the job
+                # completed and block same-version redelivery for the
+                # idempotency TTL while the row sits in a pre-park state.
+                # Celery owns this failure instead: a retryable raise re-drives
+                # the graph once the store recovers, and if the budget is
+                # exhausted the on_failure bridge persists the typed code
+                # verbatim.
+                logger.bind(document_id=job.document_id).error(
+                    "Quota park persistence failed; falling back to Celery retry"
+                )
+                return {
+                    "status": "failed",
+                    "error_code": EmbeddingQuotaExhaustedError.error_code,
+                    "error_message": (
+                        f"{exc.detail} (quota park persistence failed; retrying)"
+                    ),
+                    "error_retryable": True,
+                }
             return {
                 "status": "quota_exhausted",
                 "error_code": EmbeddingQuotaExhaustedError.error_code,
@@ -224,7 +244,7 @@ async def _record_quota_exhaustion(
     attempt: int = 0,
     task_id: str | None = None,
     detail: str,
-) -> None:
+) -> bool:
     """Persist the non-terminal ``quota_exhausted`` park with typed metadata.
 
     Deliberately unlike ``_record_ingestion_failure``: no terminal ``failed``
@@ -232,6 +252,11 @@ async def _record_quota_exhaustion(
     metadata rides the same typed ``ingestion_error`` shape so the cause is
     one read away, and ``extraction_incomplete`` stays ``False`` (extraction
     succeeded; the failure is at the indexing seam).
+
+    Returns whether the park write actually landed. A swallowed failure here
+    would let the caller claim a park that does not exist (the worker would
+    mark the job completed and block same-version redelivery for the
+    idempotency TTL), so the boolean is load-bearing, not informational.
     """
     metadata: dict[str, object] = {
         "ingestion_error": {
@@ -258,11 +283,11 @@ async def _record_quota_exhaustion(
         logger.bind(document_id=document_id, error=str(exc)).exception(
             "Quota-exhausted status persistence raised"
         )
-    else:
-        if isinstance(status_result, Failure):
-            log_expected_failure(
-                error=status_result.failure(), operation="record_quota_exhaustion"
-            )
+        return False
+    if isinstance(status_result, Failure):
+        log_expected_failure(error=status_result.failure(), operation="record_quota_exhaustion")
+        return False
+    return True
 
 
 async def _record_ingestion_failure(

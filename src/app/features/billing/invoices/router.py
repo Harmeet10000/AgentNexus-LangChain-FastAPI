@@ -2,14 +2,18 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 
 from app.features.auth.api.http.dependencies import CurrentVerifiedUser
 from app.kernel.result import render_result
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 from .dependencies import InvoiceServiceDep
 from .dto import InvoiceResponse, VoidInvoiceDTO
+
+# Invoice voids are rare corrective money movements; tight per-IP guard.
+limit_invoice_void = get_rate_limiter(burst=5, rate=5, period=300, scope="invoice-void")
 
 router = APIRouter(prefix="/invoices", tags=["billing-invoices"])
 
@@ -45,7 +49,7 @@ async def get_invoice(
     return render_result(result, response, message="Invoice")
 
 
-@router.post("/{invoice_id}/void")
+@router.post("/{invoice_id}/void", dependencies=[Depends(limit_invoice_void)])
 async def void_invoice(
     invoice_id: Annotated[str, Path(min_length=1)],
     payload: VoidInvoiceDTO,

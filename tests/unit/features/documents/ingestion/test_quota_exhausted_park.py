@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from returns.result import Success
+from returns.result import Failure, Success
 
 from app.ai.embeddings import EmbeddingQuotaExhaustedError
 from app.features.documents.adapters.persistence.postgres.document_repository import (
@@ -30,6 +30,7 @@ from app.features.documents.domain.document import (
     TERMINAL_DOCUMENT_STATUSES,
     DocumentStatus,
 )
+from app.features.documents.domain.errors import DocumentDatabaseError
 from app.features.documents.ingestion.workflow import _make_ingest_document_node
 from app.utils.storage import StorageService
 
@@ -120,6 +121,48 @@ async def test_quota_raise_parks_the_document_non_terminally() -> None:
     assert ingestion_error["retryable"] is False
     assert ingestion_error["ingestion_state"]["document_id"] == DOCUMENT_ID
     assert call.get("extraction_incomplete", False) is not True
+
+
+async def test_failed_park_write_falls_back_to_celery_retry() -> None:
+    # Greptile finding: a swallowed park write let the node claim a park that
+    # does not exist — the worker then marks the job completed and blocks
+    # same-version redelivery for the idempotency TTL. The park write's
+    # outcome must change the caller's answer: a failed persistence returns
+    # the RETRYABLE failure dict so Celery re-drives once the store recovers,
+    # carrying the typed quota code either way.
+    repo = _FailingParkRepo()
+
+    async def _quota_boom(**_kwargs: Any) -> object:
+        quota_detail = (
+            "Embedding provider daily quota exhausted for model gemini-embedding-001"
+        )
+        raise EmbeddingQuotaExhaustedError(
+            quota_detail,
+            model="gemini-embedding-001",
+            provider_status=429,
+        )
+
+    node = _node(_quota_boom, repo)
+    result = await node(_state(), _config(repo))  # type: ignore[operator]
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "embedding_quota_exhausted"
+    assert result["error_retryable"] is True
+    assert "park persistence failed" in str(result["error_message"])
+    assert repo.status_calls  # the park was attempted, then its failure honored
+
+
+class _FailingParkRepo(_RecordingRepo):
+    """The park write itself fails — a DB outage at the worst moment.
+
+    The repository's failures are FeatureError-shaped (``DocumentResult``
+    contract), which is what ``log_expected_failure`` consumes.
+    """
+
+    async def update_document_status(self, **kwargs: Any) -> object:
+        self.status_calls.append(kwargs)
+        store_outage = DocumentDatabaseError("store unavailable during park write")
+        return Failure(store_outage)
 
 
 async def test_quota_status_is_non_terminal_and_typed() -> None:

@@ -29,9 +29,34 @@ from pymongo import AsyncMongoClient
 
 BASE_URL = os.environ.get("LIVE_BASE_URL", "http://127.0.0.1:5000")
 API = f"{BASE_URL}/api/v1"
-TESTING_EMAIL = "testing@live-measurement.dev"
-TESTING_PASSWORD = "LiveMeasurement!2026"
+TESTING_EMAIL = os.environ.get("LIVE_TESTING_EMAIL", "testing@live-measurement.dev")
 CREDENTIALS_PATH = Path(".testing-credentials.json")
+
+
+def _testing_password() -> str:
+    """Resolve the testing principal's password WITHOUT a source literal.
+
+    The password is a credential for a real, verified account (Greptile
+    security finding, 2026-11-15): anyone with the committed value and API
+    reach could act as this principal. Sources, first match wins:
+    ``LIVE_TESTING_PASSWORD`` env, then an existing ``.testing-credentials.json``
+    (gitignored). With neither, generation is the only path — which requires
+    the operator to set the env var, because a minted password that exists
+    nowhere would defeat the idempotent re-run this script exists for.
+    """
+    env_password = os.environ.get("LIVE_TESTING_PASSWORD")
+    if env_password:
+        return env_password
+    if CREDENTIALS_PATH.exists():
+        stored = json.loads(CREDENTIALS_PATH.read_text(encoding="utf-8"))
+        stored_password = stored.get("password")
+        if isinstance(stored_password, str) and stored_password:
+            return stored_password
+    msg = (
+        "no testing password available: set LIVE_TESTING_PASSWORD, or keep the "
+        "existing .testing-credentials.json (never hardcode it here)"
+    )
+    raise RuntimeError(msg)
 
 
 def _sha(token: str) -> str:
@@ -66,13 +91,14 @@ async def _mongo_flip_and_identity() -> tuple[str, str]:
 
 
 async def main() -> None:
+    password = _testing_password()
     transport = httpx.AsyncClient(base_url=API, timeout=60.0)
 
     register = await transport.post(
         "/auth/register",
         json={
             "email": TESTING_EMAIL,
-            "password": TESTING_PASSWORD,
+            "password": password,
             "full_name": "Live Measurement Testing",
         },
     )
@@ -85,7 +111,7 @@ async def main() -> None:
         raise RuntimeError(f"verify-email failed [{verify.status_code}]: {verify.text[:300]}")
 
     login = await transport.post(
-        "/auth/login", json={"email": TESTING_EMAIL, "password": TESTING_PASSWORD}
+        "/auth/login", json={"email": TESTING_EMAIL, "password": password}
     )
     if login.status_code != 200:
         raise RuntimeError(f"login failed [{login.status_code}]: {login.text[:300]}")
@@ -93,7 +119,7 @@ async def main() -> None:
     cookie_header = dict(transport.cookies)
     creds = {
         "email": TESTING_EMAIL,
-        "password": TESTING_PASSWORD,
+        "password": password,
         "user_id": user_id,
         "base_url": BASE_URL,
         "api_prefix": "/api/v1",

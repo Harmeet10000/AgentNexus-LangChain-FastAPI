@@ -7,10 +7,14 @@ from fastapi import APIRouter, Depends, Header, Path, Query, Response, status
 from app.features.auth.api.http.dependencies import AuthorizationContext, require_role
 from app.features.auth.domain.user import UserRole
 from app.kernel.result import render_result
+from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 from .dependencies import PlanServiceDep
 from .dto import PlanCreateDTO, PlanResponse, PlanUpdateDTO
+
+# Admin-only plan catalog writes; guarded per IP like other mutations.
+limit_billing_admin = get_rate_limiter(burst=30, rate=30, period=60, scope="billing-admin")
 
 router = APIRouter(prefix="/plans", tags=["billing-plans"])
 
@@ -40,6 +44,7 @@ async def get_plan(
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_billing_admin)],
 )
 async def create_plan(
     payload: PlanCreateDTO,
@@ -61,6 +66,7 @@ async def create_plan(
 
 @router.patch(
     "/{plan_id}",
+    dependencies=[Depends(limit_billing_admin)],
 )
 async def update_plan(  # noqa: PLR0917 — FastAPI's explicit endpoint dependency parameters
     plan_id: Annotated[str, Path(min_length=1)],
@@ -81,6 +87,7 @@ async def update_plan(  # noqa: PLR0917 — FastAPI's explicit endpoint dependen
 
 @router.post(
     "/{plan_id}/archive",
+    dependencies=[Depends(limit_billing_admin)],
 )
 async def archive_plan(
     plan_id: Annotated[str, Path(min_length=1)],
