@@ -1,0 +1,3539 @@
+{
+ "label": "live_baseline",
+ "branch": "bm25",
+ "note": "vector leg PENDING \u2014 Gemini free-tier daily quota exhausted (see RUNBOOK)",
+ "generated_at": "2026-11-14T14:09:37.742019+00:00",
+ "queries": 155,
+ "elapsed_seconds": 528.6,
+ "overall": {
+  "recall@10": 0.16451612903225807,
+  "mrr": 0.10532258064516128,
+  "ndcg@10": 0.1157561004488457
+ },
+ "by_document_kind": {
+  "contracts": {
+   "recall@10": 0.17669172932330826,
+   "mrr": 0.10770676691729322,
+   "ndcg@10": 0.11986613210203823
+  },
+  "filings": {
+   "recall@10": 0.0,
+   "mrr": 0.0,
+   "ndcg@10": 0.0
+  },
+  "judgments": {
+   "recall@10": 0.0,
+   "mrr": 0.0,
+   "ndcg@10": 0.0
+  },
+  "statutes": {
+   "recall@10": 0.15384615384615385,
+   "mrr": 0.15384615384615385,
+   "ndcg@10": 0.15384615384615385
+  }
+ },
+ "by_jurisdiction": {
+  "GB": {
+   "recall@10": 0.0,
+   "mrr": 0.0,
+   "ndcg@10": 0.0
+  },
+  "India": {
+   "recall@10": 0.2073170731707317,
+   "mrr": 0.13272357723577236,
+   "ndcg@10": 0.14587150869569987
+  }
+ },
+ "per_query": [
+  {
+   "case_id": "direct_answer-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c24",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c24",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-006",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c12"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-007",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SRC-04:p139:c16",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-008",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SRC-04:p139:c16",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c24",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-009",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c03",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-010",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c12",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.5,
+    "ndcg@k": 0.637280313659631,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "multi_document-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SRC-04:p139:c16",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c09",
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c24"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_document-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c12",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SRC-07:p120:c06",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_document-lr2-003",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_document-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c24",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_document-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_document-lr2-006",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_hop-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SRC-04:p139:c16"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.25,
+    "ndcg@k": 0.4061261981781177,
+    "hits": 2
+   }
+  },
+  {
+   "case_id": "multi_hop-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 0.7831792739258486,
+    "hits": 2
+   }
+  },
+  {
+   "case_id": "multi_hop-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c12",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_hop-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c24",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_hop-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_hop-lr2-006",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c16",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "unanswerable-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c15",
+    "SRC-04:p139:c16",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "unanswerable-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "unanswerable-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "unanswerable-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c08",
+    "SYN-02:p2:c10",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "unanswerable-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "statute_not_in_corpus-lr2-001",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "statute_not_in_corpus-lr2-002",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c12",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c24",
+    "SRC-07:p120:c06"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "statute_not_in_corpus-lr2-003",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c03",
+    "SRC-07:p120:c06",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c24"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "statute_not_in_corpus-lr2-004",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "conflicting_clauses-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.25,
+    "ndcg@k": 0.40612619817811774,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "conflicting_clauses-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c14",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c12"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.5,
+    "ndcg@k": 0.5473079576807652,
+    "hits": 2
+   }
+  },
+  {
+   "case_id": "conflicting_clauses-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "conflicting_clauses-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 0.9098219503234678,
+    "hits": 2
+   }
+  },
+  {
+   "case_id": "conflicting_clauses-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c11",
+    "SRC-04:p139:c16",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c08",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.5,
+    "ndcg@k": 0.637280313659631,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "near_miss_clause-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c08",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "near_miss_clause-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "near_miss_clause-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c01",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "near_miss_clause-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c14",
+    "SRC-04:p139:c16",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "near_miss_clause-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c11",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "near_miss_clause-lr2-006",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c08",
+    "SYN-03:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "definition_exception_trap-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c24",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "definition_exception_trap-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c24",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "definition_exception_trap-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c10",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "definition_exception_trap-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c08",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "definition_exception_trap-lr2-005",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c08",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c24",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "injection_content-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "injection_content-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.5,
+    "ndcg@k": 0.637280313659631,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "injection_content-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c15",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 0.5,
+    "mrr": 0.25,
+    "ndcg@k": 0.24804927707849178,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "injection_content-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c11",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c16",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "injection_content-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.5,
+    "ndcg@k": 0.637280313659631,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "cross_tenant_isolation-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c12"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.125,
+    "ndcg@k": 0.25881623096034434,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "cross_tenant_isolation-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SRC-04:p139:c16"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.16666666666666666,
+    "ndcg@k": 0.31203383392079603,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "cross_tenant_isolation-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SRC-07:p120:c06",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "cross_tenant_isolation-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c12",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.3333333333333333,
+    "ndcg@k": 0.4896335682000245,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "stale_version-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c12",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SRC-07:p120:c06"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "stale_version-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c12",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SRC-07:p120:c06"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "stale_version-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "stale_version-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "amendment_overrides-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "amendment_overrides-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.25,
+    "ndcg@k": 0.40612619817811774,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "amendment_overrides-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c15",
+    "SRC-04:p139:c16",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "amendment_overrides-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c12",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "no_evidence_vs_ingestion_failure-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "no_evidence_vs_ingestion_failure-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "no_evidence_vs_ingestion_failure-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c12",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "no_evidence_vs_ingestion_failure-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "no_evidence_vs_ingestion_failure-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c12",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "index_not_ready-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "index_not_ready-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "index_not_ready-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "index_not_ready-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.5,
+    "ndcg@k": 0.637280313659631,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SRC-07:p120:c06",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c08",
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c09",
+    "SRC-07:p120:c06",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c15",
+    "SRC-07:p120:c06",
+    "SYN-01:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-005",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c03",
+    "SRC-07:p120:c06",
+    "SYN-02:p1:c12",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "ocr_semantic_flip-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "ocr_semantic_flip-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "ocr_semantic_flip-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "ocr_semantic_flip-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "table_misalignment-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c10",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "table_misalignment-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "table_misalignment-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c08",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "table_misalignment-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c24",
+    "SRC-07:p120:c06",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "footnote_as_operative-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "footnote_as_operative-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "footnote_as_operative-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "annexure_as_main-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c24",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "annexure_as_main-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c24",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "annexure_as_main-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "annexure_as_main-lr2-004",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c24"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "wrong_jurisdiction-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SRC-04:p139:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "wrong_jurisdiction-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "wrong_jurisdiction-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "wrong_date_version_authority-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "wrong_date_version_authority-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c12",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "wrong_date_version_authority-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c12",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "partial_coverage_answer-lr2-001",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c24",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "partial_coverage_answer-lr2-002",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c08",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "partial_coverage_answer-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "handle_integrity-lr2-001",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c10",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c12",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "handle_integrity-lr2-002",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c12",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "handle_integrity-lr2-003",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-011",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-012",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-013",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-014",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c08",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-015",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c24",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-016",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c11",
+    "SRC-04:p139:c16",
+    "SYN-02:p1:c12",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-017",
+   "document_kind": "statutes",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-006",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14",
+    "SRC-07:p120:c06",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-007",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c01",
+    "SRC-07:p120:c06"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.2,
+    "ndcg@k": 0.3512930009892055,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-018",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-019",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c12",
+    "SRC-07:p120:c06"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-020",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 1.0,
+    "ndcg@k": 1.0,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-021",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c14",
+    "SRC-04:p139:c16",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-022",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c11",
+    "SYN-04:p1:c01",
+    "SYN-03:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c24"
+   ],
+   "scores": {
+    "recall@k": 1.0,
+    "mrr": 0.5,
+    "ndcg@k": 0.637280313659631,
+    "hits": 1
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-023",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-024",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-025",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-026",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-027",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-02:p1:c12",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-028",
+   "document_kind": "judgments",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c10",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-029",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-053",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c08",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-030",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-031",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-03:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-032",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c12",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-033",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c24",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-034",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c03",
+    "SYN-02:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-035",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c03",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c09",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-036",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SRC-07:p120:c06",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c01",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c10",
+    "SYN-02:p1:c12"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-037",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-038",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c08",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-039",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-040",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c24",
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-041",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c09",
+    "SYN-03:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-042",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p1:c10",
+    "SYN-02:p2:c14",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c12",
+    "SYN-03:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c01"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-043",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p1:c10",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c10",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c24"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-008",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c01",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c10",
+    "SYN-02:p2:c14",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c01",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c24",
+    "SYN-02:p1:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-009",
+   "document_kind": "contracts",
+   "jurisdiction": "GB",
+   "ranked": [
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c01",
+    "SRC-07:p120:c06",
+    "SYN-02:p1:c14",
+    "SRC-04:p139:c16",
+    "SYN-03:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-044",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c12",
+    "SYN-01:p1:c24"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-045",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c08",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c03",
+    "SYN-03:p1:c08"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-046",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-01:p1:c16",
+    "SYN-01:p1:c08",
+    "SYN-01:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-047",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c24",
+    "SYN-04:p1:c15",
+    "SRC-04:p139:c16",
+    "SYN-03:p1:c08",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c10",
+    "SYN-02:p1:c10",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-048",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c11",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-03:p1:c08",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c03",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-049",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c09",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c14",
+    "SYN-01:p1:c08",
+    "SRC-04:p139:c16",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c09",
+    "SYN-04:p1:c15",
+    "SYN-01:p1:c03"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-050",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c10",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-04:p1:c01",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c15"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-051",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c10",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c09",
+    "SRC-04:p139:c16",
+    "SYN-01:p1:c03",
+    "SYN-04:p1:c11",
+    "SYN-04:p1:c15",
+    "SYN-02:p2:c10"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "direct_answer-lr2-052",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c16",
+    "SYN-04:p1:c15",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c24",
+    "SYN-03:p1:c09",
+    "SYN-02:p1:c01",
+    "SYN-04:p1:c11"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-010",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c01",
+    "SYN-02:p2:c10",
+    "SYN-04:p1:c11",
+    "SYN-03:p1:c08",
+    "SYN-02:p1:c14",
+    "SYN-02:p2:c14",
+    "SYN-02:p1:c01",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-011",
+   "document_kind": "contracts",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-01:p1:c09",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08",
+    "SYN-04:p1:c01",
+    "SYN-04:p1:c11",
+    "SYN-02:p2:c14",
+    "SYN-04:p1:c15",
+    "SYN-02:p1:c14",
+    "SYN-03:p1:c09",
+    "SYN-01:p1:c16"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  },
+  {
+   "case_id": "multi_contract_boundary-lr2-012",
+   "document_kind": "filings",
+   "jurisdiction": "India",
+   "ranked": [
+    "SYN-04:p1:c15",
+    "SYN-04:p1:c01",
+    "SYN-01:p1:c16",
+    "SYN-02:p1:c01",
+    "SYN-03:p1:c09",
+    "SYN-04:p1:c11",
+    "SYN-01:p1:c03",
+    "SYN-01:p1:c08",
+    "SYN-03:p1:c08",
+    "SYN-01:p1:c09"
+   ],
+   "scores": {
+    "recall@k": 0.0,
+    "mrr": 0.0,
+    "ndcg@k": 0.0,
+    "hits": 0
+   }
+  }
+ ]
+}

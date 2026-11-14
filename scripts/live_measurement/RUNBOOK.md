@@ -101,3 +101,13 @@ autoretries burned it. Quota resets ~12h from first 429 (2026-11-10 ~09:00 UTC).
 Provider note: switching embeddings to OpenAI is NOT viable without a schema
 change — `chunks.embedding` is vector(768) and no OpenAI model emits 768 dims;
 mixed-provider vectors are meaningless. The quota reset is the path.
+
+## OOM root cause (2026-11-11, user-confirmed)
+
+The worker/driver deaths were the **kernel OOM killer under memory pressure**
+(7.5 GiB machine; swap hit 5 GiB). The in-process driver runs Docling on the
+37 MB SRC-04 inside its own process — peak RSS is several GB. Mitigations for
+the driver run: stop uvicorn and the default worker first (the in-process path
+needs neither); run the driver alone. Production note: the worker profiles
+already carry --max-memory-per-child (child recycling); the API-side idle
+LISTEN shutdown after the Postgres drop was the same pressure event.

@@ -161,6 +161,47 @@ replaces did.
 - **THEN** the ask endpoints SHALL fail closed with a typed unavailability rather than falling back
   to any other answering path
 
+### Requirement: The `graphiti_verified` difference between `/legal/ask` and the canonical-chunk path is deliberate
+
+`/legal/ask` keeps the `graph_indexed_only` evidence policy: its retrieval leg filters chunks on the
+persisted `graphiti_verified` column, so a chunk that has never been graph-indexed SHALL NOT enter
+its served evidence. Agent Saul's canonical-chunk path (the evidence tools and the qna engine's
+compiled-graph invocation, which pin `require_graphiti_verified=false`) runs under
+`mechanically_verified`: a chunk that is canonical but not graph-indexed SHALL still be served, and
+the absence of graph verification SHALL be disclosed as coverage — `graph_indexed=false` provenance
+on the evidence reference and `graph_unavailable_documents` in the coverage envelope — rather than
+hidden. The difference is deliberate, not drift. The invariant on BOTH paths: Graphiti is never
+legal truth — it is coverage and an index signal. No answer or finding MAY treat graph verification
+as legal authority, and a Graphiti outage MUST degrade coverage disclosure, never the canonical
+chunk evidence itself.
+
+#### Scenario: The ask policy excludes non-graph-indexed chunks
+
+- **WHEN** `/legal/ask` answers with `require_graphiti_verified=true`
+- **THEN** the retrieval filter binds the graph-indexed requirement so only chunks with
+  `graphiti_verified=true` are eligible for its served evidence
+- **AND** the response carries `evidence_policy` of `graph_indexed_only`
+
+#### Scenario: The canonical-chunk path serves non-indexed chunks with disclosure
+
+- **WHEN** Agent Saul's canonical-chunk path retrieves a chunk whose `graphiti_verified` is false
+- **THEN** the chunk is still served and cited under `evidence_policy` of `mechanically_verified`
+- **AND** the response discloses the missing graph verification through the evidence reference's
+  `graph_indexed` provenance and the coverage envelope's `graph_unavailable_documents` count
+
+#### Scenario: The difference is proven deliberate by a side-by-side test
+
+- **WHEN** the same corpus containing both graph-indexed and canonical-only chunks is queried
+  through the ask policy and through the canonical-chunk path
+- **THEN** a permanent test SHALL assert both behaviours side by side, so a change to either
+  behaviour without a deliberate decision fails as drift
+
+#### Scenario: Neither path treats Graphiti as legal truth
+
+- **WHEN** either path answers or grounds a finding
+- **THEN** graph verification SHALL function only as an index filter and a coverage signal, and
+  SHALL NOT be recorded or rendered as legal verification of the content
+
 ### Requirement: Answer cache keys are version-aware
 
 The ask answer cache SHALL derive its key from the query, the tenant, the authorized document

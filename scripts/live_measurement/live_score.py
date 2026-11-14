@@ -26,6 +26,9 @@ sys.path.insert(0, str(REPO))
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text  # noqa: E402
 from app.config import get_settings  # noqa: E402
+from app.features.documents.adapters.persistence.postgres.document_repository import (  # noqa: E402
+    build_search_filter_params,
+)
 from returns.result import Failure  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
@@ -39,6 +42,7 @@ GOLDEN = REPO / "evals" / "golden" / "legal_retrieval_v2.jsonl"
 CORPUS = REPO / "evals" / "corpus" / "artifacts"
 REPORTS = REPO / "evals" / "reports"
 K = 10
+BRANCH = __import__("os").environ.get("LIVE_BRANCH", "bm25")
 
 
 def normalize(text: str) -> str:
@@ -125,18 +129,42 @@ class LiveIndex:
                     best_id, best_len = cid, len(ctext)
         return best_id
 
-    async def rank(self, query: str, k: int = K) -> list[str]:
-        """Production ranking: embed the query, run the vector branch, map."""
-        embedding = await embed_text(query, task_type=EmbeddingTaskType.QUERY)
+    async def rank(self, query: str, k: int = K, branch: str = "bm25") -> list[str]:
+        """Production ranking over the live index.
+
+        branch='bm25'/'trigram' run the text-based legs (no embeddings — usable
+        during the Gemini quota block); branch='vector' embeds via Gemini and
+        is recorded PENDING when the quota is exhausted.
+        """
+        if branch == "vector":
+            embedding = await embed_text(query, task_type=EmbeddingTaskType.QUERY)
         async with self._session_factory() as session:
             repo = DocumentRepository(session)
-            result = await repo.vector_search(
-                user_id=self.creds["user_id"],
-                tenant_id=self.creds.get("tenant_id"),
-                embedding=embedding,
-                candidate_limit=50,
-                filter_params={},
-            )
+            filter_params = build_search_filter_params(metadata_filter={})
+            if branch == "bm25":
+                result = await repo.bm25_search(
+                    user_id=self.creds["user_id"],
+                    tenant_id=self.creds.get("tenant_id"),
+                    query=query,
+                    candidate_limit=50,
+                    filter_params=filter_params,
+                )
+            elif branch == "trigram":
+                result = await repo.trigram_search(
+                    user_id=self.creds["user_id"],
+                    tenant_id=self.creds.get("tenant_id"),
+                    query=query,
+                    candidate_limit=50,
+                    filter_params=filter_params,
+                )
+            else:
+                result = await repo.vector_search(
+                    user_id=self.creds["user_id"],
+                    tenant_id=self.creds.get("tenant_id"),
+                    embedding=embedding,
+                    candidate_limit=50,
+                    filter_params=filter_params,
+                )
         if isinstance(result, Exception):
             raise result
         if hasattr(result, "unwrap"):
@@ -150,11 +178,22 @@ class LiveIndex:
             rows = result.unwrap()
         else:
             rows = result
+        # The search legs project chunk_id + score only; hydrate content for the
+        # convention-id containment mapping.
+        ids = [str(row.get("chunk_id")) for row in rows[:k] if isinstance(row, dict)]
+        if not ids:
+            return []
+        contents: dict[str, str] = {}
+        async with self.engine.connect() as conn:
+            res = await conn.execute(
+                text("select id::text, content, preamble from chunks where id::text = any(:ids)"),
+                {"ids": ids},
+            )
+            for cid, content, preamble in res.all():
+                contents[cid] = (preamble or "") + " " + (content or "")
         mapped: list[str] = []
-        for row in rows[:k]:
-            cid = row.get("chunk_id") if isinstance(row, dict) else None
-            content = row.get("content") if isinstance(row, dict) else ""
-            conv = self.map_to_convention(content or "")
+        for cid in ids:
+            conv = self.map_to_convention(contents.get(cid, ""))
             if conv:
                 mapped.append(conv)
         return mapped
@@ -182,7 +221,7 @@ async def run_pass(index: LiveIndex, golden: list[dict[str, Any]], label: str) -
     per_query = []
     started = time.perf_counter()
     for row in golden:
-        ranked = await index.rank(row["query"])
+        ranked = await index.rank(row["query"], branch=BRANCH)
         per_query.append(
             {
                 "case_id": row.get("case_id"),
@@ -210,6 +249,8 @@ async def run_pass(index: LiveIndex, golden: list[dict[str, Any]], label: str) -
         by_jur[r["jurisdiction"] or "unknown"].append(r)
     report = {
         "label": label,
+        "branch": BRANCH,
+        "note": "vector leg PENDING — Gemini free-tier daily quota exhausted (see RUNBOOK)" if BRANCH != "vector" else "vector branch",
         "generated_at": datetime.now(UTC).isoformat(),
         "queries": len(per_query),
         "elapsed_seconds": round(elapsed, 1),
