@@ -9,6 +9,9 @@ if TYPE_CHECKING:
     from typing import NoReturn
 
     from crawl4ai import AsyncWebCrawler
+    from redis.asyncio import Redis
+
+    from app.features.crawler.application.egress import CrawlerEgressPolicy
 
 from playwright.async_api import Error as PlaywrightError
 from redis.exceptions import RedisError
@@ -16,11 +19,16 @@ from returns.result import Failure
 
 from app.config import get_settings
 from app.connections.redis import create_redis_client
-from app.features.crawler.crawler import WebCrawler
-from app.features.crawler.dto import CrawlRequest
-from app.features.crawler.job_store import CrawlJobStore
-from app.features.crawler.processor import get_processor
-from app.features.crawler.service import CrawlerService
+from app.features.crawler.adapters.crawl4ai.crawler import WebCrawler
+from app.features.crawler.adapters.persistence.redis.job_store import CrawlJobStore
+from app.features.crawler.api.http.dto import CrawlRequest
+from app.features.crawler.application.egress import (
+    build_egress_policy,
+    is_boundary_outage,
+    relay_redis_url,
+)
+from app.features.crawler.application.processor import get_processor
+from app.features.crawler.application.service import CrawlerService
 from app.observability.logging import logger
 from app.shared.jobs.names import CRAWLER_CRAWL
 from app.utils import InfrastructureException, ServiceUnavailableException
@@ -60,10 +68,48 @@ def _is_retryable(exc: BaseException) -> bool:
     return isinstance(exc, _RETRYABLE_EXC)
 
 
+def _resolve_egress_policy() -> CrawlerEgressPolicy:
+    """Resolve the deployment's egress boundary for this worker process.
+
+    The crawler worker has no route to public destinations and no route to its
+    managed Redis other than the one this policy declares, so an absent or
+    unsafe boundary fails the job closed instead of degrading it.
+    """
+    return build_egress_policy(get_settings())
+
+
+def _create_worker_redis() -> Redis:
+    """Create the crawler worker's Redis client, honouring the fixed relay.
+
+    When the deployment declares a relay, the worker reaches its managed
+    Redis *only* through it. There is no direct fallback: a relay or TLS
+    failure fails the job closed instead of reopening a public route.
+    """
+    settings = get_settings()
+    relay = _resolve_egress_policy().redis_relay
+    if relay is None:
+        return create_redis_client(settings.REDIS_URL)
+    return create_redis_client(
+        relay_redis_url(settings.REDIS_URL, relay),
+        ssl_ca_certs=relay.ca_file,
+        ssl_certfile=relay.cert_file,
+        ssl_keyfile=relay.key_file,
+    )
+
+
 def _unhealthy_browser_failure(failure_message: str, crawl_id: str) -> NoReturn:
     """Raise a retryable failure for a browser-level crawl failure."""
     raise InfrastructureException(
         detail=f"Crawler browser unhealthy: {failure_message}",
+        retryable=True,
+        data={"crawl_id": crawl_id},
+    )
+
+
+def _boundary_outage_failure(crawl_id: str) -> NoReturn:
+    """Raise a retryable failure for a transient egress-boundary outage."""
+    raise InfrastructureException(
+        detail="Crawler egress boundary is unavailable",
         retryable=True,
         data={"crawl_id": crawl_id},
     )
@@ -87,8 +133,7 @@ async def _mark_terminal(store: CrawlJobStore, crawl_id: str, message: str) -> N
 
 async def _mark_failed_best_effort(crawl_id: str, message: str) -> None:
     """Persist a terminal job status without the worker-owned browser loop."""
-    settings = get_settings()
-    redis = create_redis_client(settings.REDIS_URL)
+    redis = _create_worker_redis()
     try:
         await _mark_terminal(CrawlJobStore(redis), crawl_id, message)
     except Exception as store_exc:  # noqa: BLE001 — best-effort terminal write
@@ -113,8 +158,7 @@ async def _run_crawl_job(
     final_attempt: bool,
     browser: AsyncWebCrawler,
 ) -> None:
-    settings = get_settings()
-    redis = create_redis_client(settings.REDIS_URL)
+    redis = _create_worker_redis()
     store = CrawlJobStore(redis)
     try:
         if await store.is_cancelled(crawl_id):
@@ -122,13 +166,24 @@ async def _run_crawl_job(
             return
         await store.mark_running(crawl_id)
         request = CrawlRequest.model_validate(request_payload)
+        # A provider transport that cannot honour the egress boundary stays
+        # disabled: the job is refused with a bounded terminal outcome rather
+        # than silently regaining direct egress.
+        external_processing = _resolve_egress_policy().external_processing_enabled
+        if not external_processing and (request.extract_structured or request.summary):
+            await _mark_terminal(
+                store,
+                crawl_id,
+                "Crawler external processing is disabled by the egress policy",
+            )
+            return
         # The browser was provisioned at the task boundary and handed in: a
         # synchronous owner operation from inside this coroutine (which runs ON
         # the owner loop) raises CapabilityUsageError, which is exactly the
         # deterministic "capability owner synchronous operations must run at a
         # task boundary" failure the 2026-11-15 smoke recorded (F8 — every
         # crawl died in ~226 ms before attempting a page).
-        processor = await get_processor()
+        processor = await get_processor() if external_processing else None
         crawler = WebCrawler(redis_client=redis, browser=browser)
         service = CrawlerService(crawler=crawler, processor=processor, redis_client=redis)
         result = await service.crawl(request, crawl_id=crawl_id)
@@ -137,6 +192,10 @@ async def _run_crawl_job(
             return
         if isinstance(result, Failure):
             failure_message = result.failure().message
+            if is_boundary_outage(failure_message):
+                # A proxy outage or TLS failure is transient: keep the job
+                # retryable instead of terminating it as a content failure.
+                _boundary_outage_failure(crawl_id)
             if not await aprobe_crawler_browser():
                 # Browser-level failure disguised as a result: the crawler
                 # converts Playwright errors into Failure, so a dead browser

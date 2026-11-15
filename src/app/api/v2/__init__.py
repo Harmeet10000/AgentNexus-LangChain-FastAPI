@@ -14,7 +14,7 @@ from app.features.billing.payments.router import router as payments_router
 from app.features.billing.plans.router import router as plans_router
 from app.features.billing.subscriptions.router import router as subscriptions_router
 from app.features.billing.webhooks.router import router as webhooks_router
-from app.features.crawler.router import router as crawler_router
+from app.features.crawler.api.http.router import router as crawler_router
 from app.features.documents.api.http.legacy_ingest_router import router as ingestion_router
 from app.features.documents.api.http.router import router as documents_router
 from app.features.health.router import router as health_router

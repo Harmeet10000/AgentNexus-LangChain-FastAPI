@@ -1,0 +1,42 @@
+asyncapi: 3.0.0
+info:
+  title: harden-crawler-runtime task interface
+  version: 1.0.0
+  description: >
+    The crawler task message remains wire-compatible. This document records
+    the existing command consumed by the worker; no new event or payload is
+    introduced by this change.
+channels:
+  crawlerTask:
+    address: crawler
+    description: RabbitMQ routing key for task name tasks.crawler_crawl.
+    messages:
+      CrawlJobCommand:
+        $ref: '#/components/messages/CrawlJobCommand'
+operations:
+  consumeCrawlerJob:
+    action: receive
+    channel:
+      $ref: '#/channels/crawlerTask'
+    messages:
+      - $ref: '#/channels/crawlerTask/messages/CrawlJobCommand'
+components:
+  messages:
+    CrawlJobCommand:
+      name: CrawlJobCommand
+      title: Existing crawler job command
+      summary: Existing durable crawl task accepted by the crawler worker.
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - crawl_id
+          - request_payload
+        properties:
+          crawl_id:
+            type: string
+            description: Stable identity used by Redis job state across retries.
+          request_payload:
+            type: object
+            description: Existing serialized CrawlRequest payload.
+            additionalProperties: true

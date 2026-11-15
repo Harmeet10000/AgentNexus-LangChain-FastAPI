@@ -550,7 +550,6 @@ section-order = [
 "src/app/resilience/idempotency.py" = ["TC001", "TC002", "TC003"]
 # Same @tool get_type_hints constraint holds at the tools' owning features.
 "src/app/features/documents/application/tools/*.py" = ["TC001", "TC002", "TC003"]
-"src/app/features/crawler/tools/*.py" = ["TC001", "TC002", "TC003"]
 # Docs-site scripts are standalone tools, not package modules.
 "docs-site/scripts/*" = ["INP001", "TC003", "S101", "T201", "PLC0415", "PT018"]
 "src/app/examples/rag_agent_advanced.py" = [
@@ -633,7 +632,6 @@ section-order = [
     "S105",
     "S106",
 ]
-"src/app/features/crawler/dependencies.py" = ["PLC0415"]
 "src/app/mcp/server/*.py" = ["PLC0415"]
 "src/app/mcp/__init__.py" = ["F822", "PLC0415"] # lazy __getattr__ exports; imports inside __getattr__
 
@@ -931,10 +929,10 @@ forbidden_modules = ["app.features"]
 # engines (policy already moved).
 ignore_imports = [
     "app.extraction.docling.chunker -> app.features.documents.ingestion.chunking.classification",
-    # The crawl4ai adapter constructs the engine it adapts; config stays
-    # engine-owned because WebCrawler itself takes it.
-    "app.connections.crawl4ai -> app.features.crawler.config",
-    "app.connections.crawl4ai -> app.features.crawler.crawler",
+    # The crawl4ai connection constructs the adapter's config by design.
+    "app.connections.crawl4ai -> app.features.crawler.adapters.crawl4ai.config",
+    # The crawl4ai connection exposes the feature's shared crawler adapter.
+    "app.connections.crawl4ai -> app.features.crawler.adapters.crawl4ai.crawler",
     # Pre-existing edge preserved through the 4.1 graph move and the shared/rag
     # relocation (clause-episode writer protocol references clause types);
     # consolidation is section 5 work.
@@ -978,6 +976,9 @@ source_modules = [
     # Agent Saul use cases moved into the hexagonal application layer (wave-3
     # restructure); the wildcard above no longer matches the nested layout.
     "app.features.agent_saul.application.**",
+    # Crawler use cases moved into the nested application layer; protect all
+    # application modules from importing worker task entry points.
+    "app.features.crawler.application.**",
     "app.features.billing.jobs",
     "app.features.billing.credits.jobs",
 ]

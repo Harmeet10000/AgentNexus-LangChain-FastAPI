@@ -85,6 +85,43 @@ def auth_service(refresh_token_repo) -> AuthService:
     return AuthService(mock_user_repo, refresh_token_repo)
 
 
+@pytest.fixture(autouse=True)
+def _crawler_egress_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the crawler worker an inert, valid egress boundary.
+
+    The worker fails closed when no boundary is declared, so every test that
+    provisions a browser would otherwise have to declare one. The boundary
+    here is inert: the proxy is never contacted and the process environment
+    is left untouched, so no other test inherits a proxy.
+    """
+    from app.features.crawler.adapters.proxy.preflight import EgressPreflightResult
+    from app.features.crawler.application.egress import CrawlerEgressPolicy
+    from app.worker.capabilities import crawler as worker_crawler
+    from app.worker.jobs import crawler as worker_crawler_jobs
+
+    policy = CrawlerEgressPolicy(
+        proxy_url="http://crawler-egress-proxy.test:4750",
+        public_probe_url="https://example.com/",
+        loopback_probe_url="http://127.0.0.1:9/",
+        preflight_timeout_seconds=5.0,
+        allowed_scheme_ports={"http": (80,), "https": (443,)},
+        bypass_destinations=("rabbitmq", "crawler-redis-relay", "localhost", "127.0.0.1", "::1"),
+    )
+
+    async def _available(_policy: object) -> EgressPreflightResult:
+        return EgressPreflightResult(
+            available=True,
+            reason="the egress boundary is stubbed for tests",
+            public_probe_status=200,
+            denial_status=407,
+        )
+
+    monkeypatch.setattr(worker_crawler, "_resolve_egress_policy", lambda: policy)
+    monkeypatch.setattr(worker_crawler, "run_egress_preflight", _available)
+    monkeypatch.setattr(worker_crawler, "_apply_egress_environment", lambda _policy: None)
+    monkeypatch.setattr(worker_crawler_jobs, "_resolve_egress_policy", lambda: policy)
+
+
 def make_mock_user(**kwargs) -> MagicMock:
     from app.features.auth.domain.user import (
         User,  # local import to avoid import-order side effects

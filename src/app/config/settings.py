@@ -429,6 +429,37 @@ class Settings(BaseSettings):
     # --- Crawl4AI: Monitor ---
     CRAWL4AI_ENABLE_MONITOR: bool = Field(default=False)
 
+    # --- Crawler Egress Boundary ---
+    # The crawler worker reaches public destinations only through the
+    # deployment's fail-closed proxy. These fields are the *declaration* of
+    # that boundary; the typed policy in app.features.crawler.application.egress rejects an
+    # absent or unsafe combination instead of degrading to direct networking.
+    CRAWLER_EGRESS_ENABLED: bool = Field(default=True)
+    CRAWLER_EGRESS_PROXY_URL: str | None = Field(default=None)
+    # Operator-controlled public URL the preflight must be able to fetch
+    # through the proxy. It is a probe, not an allowlist entry.
+    CRAWLER_EGRESS_PUBLIC_PROBE_URL: str | None = Field(default=None)
+    # Loopback URL the preflight must be *denied* by the policy. Plain HTTP so
+    # the proxy answers with a denial response instead of a CONNECT failure.
+    CRAWLER_EGRESS_LOOPBACK_PROBE_URL: str = Field(default="http://127.0.0.1:9/")
+    CRAWLER_EGRESS_PREFLIGHT_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0, le=60)
+    # Only HTTP/80 and HTTPS/443 may ever be requested by the browser.
+    CRAWLER_EGRESS_ALLOWED_SCHEME_PORTS: str = Field(default="http:80,https:443")
+    # Comma-separated hosts allowed to bypass the HTTP proxy. Only internal
+    # destinations are accepted; a public name here would reopen the boundary.
+    CRAWLER_EGRESS_NO_PROXY: str = Field(default="")
+    # Crawler-worker-only endpoint of the fixed-destination managed-Redis
+    # relay. When set, the worker reaches Redis *only* through it.
+    CRAWLER_REDIS_RELAY_HOST: str | None = Field(default=None)
+    CRAWLER_REDIS_RELAY_PORT: int = Field(default=6379, ge=1, le=65535)
+    CRAWLER_REDIS_RELAY_CA_FILE: str | None = Field(default=None)
+    CRAWLER_REDIS_RELAY_CERT_FILE: str | None = Field(default=None)
+    CRAWLER_REDIS_RELAY_KEY_FILE: str | None = Field(default=None)
+    # External (provider) processing inside the crawler worker. Off by
+    # default: a provider transport that cannot honour the proxy boundary
+    # must stay disabled rather than regain direct egress.
+    CRAWLER_EXTERNAL_PROCESSING_ENABLED: bool = Field(default=False)
+
     # --- Tavily Search Configuration ---
     TAVILY_API_KEY: SecretStr = Field(default=SecretStr(""))
     TAVILY_BASE_URL: str = Field(default="https://api.tavily.com")

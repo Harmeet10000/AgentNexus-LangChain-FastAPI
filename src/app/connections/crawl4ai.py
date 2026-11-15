@@ -12,13 +12,13 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig
 from fastapi.requests import HTTPConnection
 
 from app.config import get_settings
-from app.features.crawler.config import get_crawler_config
+from app.features.crawler.adapters.crawl4ai.config import get_crawler_config
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
-    from app.features.crawler.config import CrawlerConfig
-    from app.features.crawler.crawler import WebCrawler
+    from app.features.crawler.adapters.crawl4ai.config import CrawlerConfig
+    from app.features.crawler.adapters.crawl4ai.crawler import WebCrawler
 
 
 def _ensure_playwright_platform_override() -> None:
@@ -47,18 +47,26 @@ def _ensure_playwright_platform_override() -> None:
 _ensure_playwright_platform_override()
 
 
-async def create_crawl4ai_crawler() -> AsyncWebCrawler:
+async def create_crawl4ai_crawler(*, proxy_url: str | None = None) -> AsyncWebCrawler:
     """Create and start a Crawl4AI browser for lifespan management.
 
     Uses full CrawlerConfig for consistent BrowserConfig across all paths.
+
+    ``proxy_url`` is the mandatory egress proxy of a worker-owned browser. It
+    overrides the optional ``CRAWL4AI_PROXY`` setting, because the worker's
+    browser must never be able to reach the public internet without the
+    deployment's policy boundary.
 
     Raises:
         Exception: Propagates any browser-launch error to lifespan caller.
     """
 
     config: CrawlerConfig = get_crawler_config()
+    browser_config = config.to_browser_config()
+    if proxy_url is not None:
+        browser_config["proxy"] = {"server": proxy_url}
     crawler = AsyncWebCrawler(
-        config=BrowserConfig(**config.to_browser_config()),
+        config=BrowserConfig(**browser_config),
     )
     await crawler.start()
     return crawler
@@ -86,6 +94,6 @@ async def get_crawler(
     Callers outside a FastAPI lifespan may omit ``browser`` and receive the
     isolated per-operation fallback.
     """
-    from app.features.crawler.crawler import WebCrawler
+    from app.features.crawler.adapters.crawl4ai.crawler import WebCrawler
 
     return WebCrawler(redis_client=redis_client, browser=browser)

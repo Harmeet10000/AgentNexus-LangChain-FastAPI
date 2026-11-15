@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING, override
 
 from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
 from crawl4ai import AsyncWebCrawler
 from pydantic import BaseModel, ConfigDict
 
+from app.config import get_settings
 from app.connections.crawl4ai import close_crawl4ai_crawler, create_crawl4ai_crawler
+from app.features.crawler.adapters.crawl4ai.request_guard import install_egress_request_guard
+from app.features.crawler.adapters.proxy.preflight import run_egress_preflight
+from app.features.crawler.application.egress import CrawlerEgressConfigError, build_egress_policy
 from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
 from app.worker.capabilities.owner import (
@@ -21,6 +26,8 @@ from app.worker.capabilities.owner import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from typing import Any
+
+    from app.features.crawler.application.egress import CrawlerEgressPolicy
 
 
 class CrawlerWorkerResources(BaseModel):
@@ -36,9 +43,44 @@ _WORKER_RUNNER: asyncio.Runner | None = None
 _WORKER_RESOURCES: CrawlerWorkerResources | None = None
 
 
+def _resolve_egress_policy() -> CrawlerEgressPolicy:
+    """Resolve the deployment's egress boundary, failing closed when unsafe."""
+    return build_egress_policy(get_settings())
+
+
+def _apply_egress_environment(policy: CrawlerEgressPolicy) -> None:
+    """Point every proxy-aware HTTP client in this process at the boundary.
+
+    The bypass list is the deployment's minimal internal set. A client that
+    ignores these variables loses public connectivity — it never regains a
+    direct route.
+    """
+    bypass = ",".join(policy.bypass_destinations)
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        os.environ[name] = policy.proxy_url
+    for name in ("NO_PROXY", "no_proxy"):
+        os.environ[name] = bypass
+
+
 async def _provision_crawler_worker() -> CrawlerWorkerResources:
-    """Create the per-worker browser on the loop that will execute tasks."""
-    return CrawlerWorkerResources(browser=await create_crawl4ai_crawler())
+    """Create the per-worker browser on the loop that will execute tasks.
+
+    The crawler worker reaches public destinations only through the
+    deployment's egress boundary, so provisioning proves that boundary first:
+    an absent, unsafe, or unreachable proxy leaves the crawler unavailable
+    rather than falling back to direct networking.
+    """
+    policy = _resolve_egress_policy()
+    preflight = await run_egress_preflight(policy)
+    if not preflight.available:
+        raise ServiceUnavailableException(
+            detail=f"Crawler egress boundary is unavailable: {preflight.reason}",
+            data={"capability": "crawler_egress"},
+        )
+    _apply_egress_environment(policy)
+    browser = await create_crawl4ai_crawler(proxy_url=policy.proxy_url)
+    install_egress_request_guard(browser, policy)
+    return CrawlerWorkerResources(browser=browser)
 
 
 async def _close_crawler_browser(resources: CrawlerWorkerResources) -> None:
@@ -85,6 +127,12 @@ def _ensure_crawler_worker() -> None:
         _CRAWLER_OWNER.ensure()
     except CapabilityUsageError:
         raise
+    except CrawlerEgressConfigError as exc:
+        exc.add_note("capability=crawler, operation=worker_provision")
+        raise ServiceUnavailableException(
+            detail=f"Crawler egress boundary is misconfigured: {exc}",
+            data={"capability": "crawler_egress"},
+        ) from exc
     except Exception as exc:
         exc.add_note("capability=crawler, operation=worker_provision")
         _sync_crawler_compat_state()

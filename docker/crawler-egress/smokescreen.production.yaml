@@ -1,0 +1,20 @@
+ip: 0.0.0.0
+port: 4750
+network: ip
+acl_file: /etc/smokescreen/acl.yaml
+allow_missing_role: true
+connect_timeout: 10s
+dns_timeout: 5s
+idle_timeout: 2m
+read_header_timeout: 10s
+read_timeout: 5m
+write_timeout: 5m
+transport_max_idle_conns: 100
+transport_max_idle_conns_per_host: 10
+time_connect: true
+unsafe_allow_private_ranges: false
+max_concurrent_requests: 100
+max_request_rate: 50
+max_request_burst: 100
+max_concurrent_connect_tunnels: 50
+deny_message_extra: Crawler egress policy denied the destination.

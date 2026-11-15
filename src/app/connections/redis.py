@@ -1,5 +1,6 @@
 # app/db/redis_connect.py
 import socket
+from typing import TYPE_CHECKING
 
 from redis.asyncio import Redis
 from redis.backoff import ExponentialBackoff
@@ -8,6 +9,9 @@ from starlette.requests import HTTPConnection
 
 from app.config import get_settings
 from app.utils import InfrastructureException
+
+if TYPE_CHECKING:
+    from typing import Any
 
 # from tenacity import retry, stop_after_attempt, max_attempt_number, wait_exponential
 
@@ -32,7 +36,14 @@ def _tcp_keepalive_options() -> dict[int, int]:
 
 
 # @retry(stop=stop_after_attempt(max_attempt_number=3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def create_redis_client(url: str, *, max_connections: int | None = None) -> Redis:
+def create_redis_client(
+    url: str,
+    *,
+    max_connections: int | None = None,
+    ssl_ca_certs: str | None = None,
+    ssl_certfile: str | None = None,
+    ssl_keyfile: str | None = None,
+) -> Redis:
     """
     Create and return a configured async Redis client.
     The client is connection-pooled and intended to live
@@ -44,6 +55,11 @@ def create_redis_client(url: str, *, max_connections: int | None = None) -> Redi
     pool in this deployment must be bounded: Redis Cloud refuses all
     connections once the plan's client cap is exceeded and does not recover
     on its own (G8).
+
+    The ``ssl_*`` arguments carry deployment-issued mutual-TLS material for
+    the crawler worker's fixed-destination Redis relay.  They are passed
+    through untouched: hostname verification stays on (redis-py's default)
+    and the client certificate is never replaced by an insecure context.
     """
 
     retry_strategy = Retry(
@@ -54,7 +70,20 @@ def create_redis_client(url: str, *, max_connections: int | None = None) -> Redi
         retries=3,  # maxRetriesPerRequest
     )
 
-    budget = max_connections if max_connections is not None else get_settings().REDIS_WORKER_MAX_CONNECTIONS
+    budget = (
+        max_connections
+        if max_connections is not None
+        else get_settings().REDIS_WORKER_MAX_CONNECTIONS
+    )
+
+    tls: dict[str, Any] = {}
+    if ssl_ca_certs is not None:
+        tls["ssl_ca_certs"] = ssl_ca_certs
+        tls["ssl_cert_reqs"] = "required"
+    if ssl_certfile is not None:
+        tls["ssl_certfile"] = ssl_certfile
+    if ssl_keyfile is not None:
+        tls["ssl_keyfile"] = ssl_keyfile
 
     return Redis.from_url(
         url,
@@ -75,6 +104,7 @@ def create_redis_client(url: str, *, max_connections: int | None = None) -> Redi
         health_check_interval=30,
         # Client budget (G8): bounded pools only.
         max_connections=budget,
+        **tls,
     )
 
 

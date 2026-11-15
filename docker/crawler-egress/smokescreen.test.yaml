@@ -1,0 +1,20 @@
+ip: 0.0.0.0
+port: 4750
+network: ip
+acl_file: /etc/smokescreen/acl.yaml
+allow_missing_role: true
+allow_ranges:
+  - 198.18.0.0/24
+connect_timeout: 2s
+dns_timeout: 1s
+idle_timeout: 30s
+read_header_timeout: 5s
+read_timeout: 30s
+write_timeout: 30s
+time_connect: true
+unsafe_allow_private_ranges: false
+max_concurrent_requests: 20
+max_request_rate: 20
+max_request_burst: 40
+max_concurrent_connect_tunnels: 10
+deny_message_extra: Deterministic crawler egress fixture denial.

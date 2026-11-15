@@ -1,0 +1,1 @@
+"""Static deployment-contract tests."""

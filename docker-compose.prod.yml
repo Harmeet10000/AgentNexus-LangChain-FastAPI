@@ -79,15 +79,81 @@ services:
     command: worker --role crawler --loglevel=info
     environment:
       ENVIRONMENT: production
+      CRAWLER_EGRESS_ENABLED: "true"
+      CRAWLER_EGRESS_PROXY_URL: http://crawler-egress-proxy:4750
+      CRAWLER_EGRESS_PUBLIC_PROBE_URL: ${CRAWLER_EGRESS_PUBLIC_PROBE_URL:?CRAWLER_EGRESS_PUBLIC_PROBE_URL must be set}
+      CRAWLER_REDIS_RELAY_HOST: crawler-redis-relay
+      CRAWLER_REDIS_RELAY_PORT: "6379"
+      CRAWLER_REDIS_RELAY_CA_FILE: /run/secrets/crawler_redis_relay_ca
+      CRAWLER_REDIS_RELAY_CERT_FILE: /run/secrets/crawler_redis_client_cert
+      CRAWLER_REDIS_RELAY_KEY_FILE: /run/secrets/crawler_redis_client_key
+      CRAWLER_EGRESS_NO_PROXY: rabbitmq,crawler-redis-relay,localhost,127.0.0.1,::1
+      CRAWLER_EXTERNAL_PROCESSING_ENABLED: "false"
+      HTTP_PROXY: http://crawler-egress-proxy:4750
+      HTTPS_PROXY: http://crawler-egress-proxy:4750
+      NO_PROXY: rabbitmq,crawler-redis-relay,localhost,127.0.0.1,::1
+      CRAWL4AI_PROXY_ENABLED: "true"
+      CRAWL4AI_PROXY: http://crawler-egress-proxy:4750
     env_file:
       - .env.production
+    secrets:
+      - crawler_redis_relay_ca
+      - crawler_redis_client_cert
+      - crawler_redis_client_key
     networks:
-      - langchain-network
+      - crawler-control
     restart: unless-stopped
     stop_grace_period: 45s
     depends_on:
       rabbitmq:
         condition: service_healthy
+      crawler-egress-proxy:
+        condition: service_healthy
+      crawler-redis-relay:
+        condition: service_healthy
+
+  crawler-egress-proxy:
+    image: ${SMOKESCREEN_IMAGE:?SMOKESCREEN_IMAGE must be a digest-pinned image built from docker/crawler-egress/smokescreen.Dockerfile}
+    command:
+      - --config-file
+      - /etc/smokescreen/config.yaml
+      - --expose-prometheus-metrics
+      - --prometheus-listen-ip
+      - 0.0.0.0
+      - --prometheus-port
+      - "9810"
+    volumes:
+      - ./docker/crawler-egress/smokescreen.production.yaml:/etc/smokescreen/config.yaml:ro
+      - ./docker/crawler-egress/smokescreen.production.acl.yaml:/etc/smokescreen/acl.yaml:ro
+    networks:
+      - crawler-control
+      - langchain-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/smokescreen", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  crawler-redis-relay:
+    image: haproxy:3.4.7-alpine@sha256:b9fe316f718d5015c5cfebd8ca019591f3e44656f61d93cb8b59a1028961e530
+    environment:
+      CRAWLER_REDIS_UPSTREAM_HOST: ${CRAWLER_REDIS_UPSTREAM_HOST:?CRAWLER_REDIS_UPSTREAM_HOST must be set}
+      CRAWLER_REDIS_UPSTREAM_PORT: ${CRAWLER_REDIS_UPSTREAM_PORT:-6380}
+    volumes:
+      - ./docker/crawler-egress/haproxy.redis.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    secrets:
+      - crawler_redis_relay_server_pem
+      - crawler_redis_relay_client_ca
+    networks:
+      - crawler-control
+      - langchain-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   celery-beat:
     image: ghcr.io/harmeet10000/langchain-fastapi-production:${IMAGE_TAG:?IMAGE_TAG must be set}
@@ -117,6 +183,7 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
     networks:
       - langchain-network
+      - crawler-control
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -162,6 +229,21 @@ services:
 networks:
   langchain-network:
     driver: bridge
+  crawler-control:
+    driver: bridge
+    internal: true
+
+secrets:
+  crawler_redis_relay_server_pem:
+    file: ${CRAWLER_REDIS_RELAY_SERVER_PEM_FILE:?CRAWLER_REDIS_RELAY_SERVER_PEM_FILE must be set}
+  crawler_redis_relay_client_ca:
+    file: ${CRAWLER_REDIS_RELAY_CLIENT_CA_FILE:?CRAWLER_REDIS_RELAY_CLIENT_CA_FILE must be set}
+  crawler_redis_relay_ca:
+    file: ${CRAWLER_REDIS_RELAY_CA_FILE:?CRAWLER_REDIS_RELAY_CA_FILE must be set}
+  crawler_redis_client_cert:
+    file: ${CRAWLER_REDIS_CLIENT_CERT_FILE:?CRAWLER_REDIS_CLIENT_CERT_FILE must be set}
+  crawler_redis_client_key:
+    file: ${CRAWLER_REDIS_CLIENT_KEY_FILE:?CRAWLER_REDIS_CLIENT_KEY_FILE must be set}
 
 volumes:
   timescale-data:
