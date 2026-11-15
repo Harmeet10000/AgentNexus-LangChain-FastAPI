@@ -123,6 +123,16 @@ class CatalogValidatingWorker(Worker):
 class CatalogValidatingBeat(Beat):
     """Validate beat's schedule/config surface before starting its scheduler."""
 
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        # The F1 twin: celery's click path constructs ``app.Beat(...)``
+        # without an ``app=`` kwarg exactly as it does for ``app.Worker``,
+        # and ``Beat.__init__`` reads ``self.app`` (None) before the click
+        # context binds it — ``'NoneType' object has no attribute 'either'``
+        # at startup. Bind the registry's active app first.
+        if kwargs.get("app") is None and _apps.active is not None:
+            kwargs["app"] = _apps.active
+        super().__init__(*args, **kwargs)
+
     @override
     def run(self) -> None:
         self.init_loader()
