@@ -743,3 +743,26 @@ async def test_credit_routes_use_live_role_for_cross_user_access(
 
     service.get_credit_balance.assert_not_awaited()
     service.get_credit_history.assert_not_awaited()
+
+
+async def test_revoking_an_unknown_session_is_session_not_found_not_user_not_found() -> None:
+    """Sweep 2026-11-15: DELETE /auth/sessions/{bogus} mislabeled the 404.
+
+    The route is session-scoped; the typed code must say which resource was
+    not found so clients can distinguish a stale session id from an account
+    problem.  USER_NOT_FOUND leaks nothing but teaches nothing.
+    """
+    from returns.result import Success
+
+    from app.features.auth.domain.errors import AuthSessionNotFoundError
+
+    service = AuthService(account_store=AsyncMock(), token_repo=AsyncMock())
+    service._token_repo.get_session.return_value = Success(None)
+
+    result = await service.revoke_session("bogus-session", "user-1")
+
+    assert isinstance(result, Failure)
+    error = result.failure()
+    assert isinstance(error, AuthSessionNotFoundError)
+    assert error.code == "SESSION_NOT_FOUND"
+    assert error.session_id == "bogus-session"

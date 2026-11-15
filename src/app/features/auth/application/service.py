@@ -59,6 +59,7 @@ from app.features.auth.domain.errors import (
     AuthNotFoundError,
     AuthProvisioningPendingError,
     AuthRefreshReuseError,
+    AuthSessionNotFoundError,
     AuthValidationError,
 )
 from app.features.auth.domain.tenancy import LegalRole, ProvisioningState
@@ -1334,7 +1335,14 @@ class AuthService:
             return Failure(error)
         resolved_session = session_result.unwrap()
         if resolved_session is None:
-            return Failure(AuthNotFoundError(message="Session not found", source="auth_service"))
+            # Session-scoped 404, not USER_NOT_FOUND (2026-11-15 sweep mislabel).
+            return Failure(
+                AuthSessionNotFoundError(
+                    message="Session not found",
+                    source="auth_service",
+                    session_id=session_id,
+                )
+            )
         if resolved_session.user_id != user_id:
             return Failure(
                 AuthAuthorizationError(
@@ -1426,7 +1434,14 @@ class AuthService:
             return Failure(error)
         resolved_session = session_result.unwrap()
         if resolved_session is None:
-            return Failure(AuthNotFoundError(message="Session not found", source="auth_service"))
+            # Session-scoped 404, not USER_NOT_FOUND (2026-11-15 sweep mislabel).
+            return Failure(
+                AuthSessionNotFoundError(
+                    message="Session not found",
+                    source="auth_service",
+                    session_id=session_id,
+                )
+            )
         if resolved_session.user_id != user_id:
             return Failure(
                 AuthAuthorizationError(

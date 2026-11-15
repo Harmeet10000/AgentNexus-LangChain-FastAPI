@@ -72,6 +72,10 @@ class _StubRepository:
         self.lookup_failure = lookup_failure
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.rollbacks = 0
+        # Documents "flushed" in the current uncommitted scope; rollback()
+        # undoes them, mirroring what a real session.rollback() does to
+        # flushed-but-uncommitted adds.
+        self._flushed_keys: list[tuple[str, str]] = []
         # Documents keyed by the dedupe identity — (tenant_id, content_hash) —
         # so dedupe tests exercise real keying, not a canned single return.
         self.documents: dict[tuple[str, str], SearchDocument] = {}
@@ -86,6 +90,9 @@ class _StubRepository:
 
     async def rollback(self) -> None:
         self.rollbacks += 1
+        for key in self._flushed_keys:
+            self.documents.pop(key, None)
+        self._flushed_keys.clear()
 
     async def get_document_by_content_hash(self, *, tenant_id: str, content_hash: str) -> Any:
         self._record("get_document_by_content_hash", {"tenant_id": tenant_id})
@@ -106,6 +113,7 @@ class _StubRepository:
             doc_metadata=kwargs["doc_metadata"],
         )
         self.documents[kwargs["tenant_id"], kwargs["content_hash"]] = document
+        self._flushed_keys.append((kwargs["tenant_id"], kwargs["content_hash"]))
         return Success(document)
 
     async def get_document_by_id(self, *, tenant_id: str, document_id: str) -> Any:
@@ -393,6 +401,37 @@ async def test_staging_failure_rolls_back_and_fails_typed() -> None:
     # Without this rollback, get_postgres_db would commit the pending row and
     # every later submission would report it as an in-flight duplicate.
     assert repo.rollbacks == 1
+
+
+@pytest.mark.asyncio
+async def test_staging_failure_leaves_no_orphan_row_in_the_dedupe_store() -> None:
+    """G9a: the typed 503 carries data.document_id, but the store must not.
+
+    The sweep observed ``503 SEARCH_INFRASTRUCTURE_ERROR`` with
+    ``data.document_id`` present and inferred a persist-then-fail orphan.
+    The document_id in the body is the client-visible dedupe identity, not
+    persistence: the service unwinds the flushed row on the failure path
+    (rollback pin above), so a re-ingest after the outage stages fresh —
+    the permanent "in-flight duplicate" the orphan would produce never
+    happens.
+    """
+    repo = _StubRepository()
+    staging = _RecordingStagingAdapter(failure=RuntimeError("broker down"))
+    service = _service(repo, job_bus=_job_bus(staging), redis=FakeRedis(decode_responses=True))
+
+    result = await service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
+
+    assert isinstance(result, Failure)
+    assert "document_id" in (result.failure().details or {})
+    assert (TENANT, PAYLOAD_HASH) not in repo.documents
+
+    # The retry after the outage is a fresh stage, not a dedupe orphan hit.
+    retry = _RecordingStagingAdapter()
+    retry_service = _service(repo, job_bus=_job_bus(retry), redis=FakeRedis(decode_responses=True))
+    retry_result = await retry_service.ingest_document(tenant_id=TENANT, payload=_ingest_payload())
+    assert isinstance(retry_result, Success)
+    assert retry_result.unwrap().status == "queued"
+    assert retry_result.unwrap().duplicate is False
 
 
 @pytest.mark.asyncio

@@ -214,6 +214,18 @@ class Settings(BaseSettings):
     # Note: REDIS_DB and CACHE_TTL were not in your ENV, so they remain as defaults
     REDIS_DB: int = Field(default=0)
     CACHE_TTL: int = Field(default=3600)
+
+    # G8 (2026-11-15 smoke): per-process Redis connection budgets.  The
+    # deployment runs one API process and three worker processes against a
+    # Redis Cloud instance that enforces a server-side client cap; every pool
+    # used to be unbounded, so a 40-request parallel burst crossed the plan's
+    # client limit and Redis then refused EVERY connection with
+    # "max number of clients reached" for ~22 minutes with no self-recovery.
+    # Documented process budget: API <= 50 + 3 workers <= 16 each = <= 98
+    # clients total, well under the client cap of even the smallest paid
+    # Redis Cloud tiers, leaving headroom for operational tooling.
+    REDIS_MAX_CONNECTIONS: int = Field(default=50, ge=1)
+    REDIS_WORKER_MAX_CONNECTIONS: int = Field(default=16, ge=1)
     # Handles must survive the documented 24-hour HITL pause window.
     EVIDENCE_HANDLE_TTL_SECONDS: int = Field(default=86_400, ge=86_400, le=7 * 86_400)
 

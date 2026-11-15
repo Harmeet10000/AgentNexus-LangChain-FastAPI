@@ -70,6 +70,25 @@ def console_format(record: dict[str, Any]) -> str:
     return fmt + "\n"
 
 
+def _console_sink_stream() -> object:
+    """Pick the real stderr even when a framework has proxied ``sys.stderr``.
+
+    G7 (2026-11-15 sweep): a Celery prefork child redirects ``sys.stderr`` to
+    a ``LoggingProxy`` *before* the ``worker_process_init`` signal fires, so
+    a sink captured from ``sys.stderr`` loops back into the stdlib logger
+    chain where celery's recursion guard swallows it — every task-time line
+    (task receipts, ``task_payload_rejected``, task body logs) vanished from
+    the journal while boot lines still appeared.  When the current stderr is
+    celery's proxy, bind to ``sys.__stderr__`` — the interpreter's original
+    stream, which journald captures regardless of the proxy.  Other
+    substitutions (pytest capture, test doubles) keep binding to the current
+    ``sys.stderr``.
+    """
+    if type(sys.stderr).__name__ == "LoggingProxy":
+        return sys.__stderr__
+    return sys.stderr
+
+
 def setup_logging(*, level: str | None = None) -> None:
     """Configure the single stdout/stderr Loguru pipeline from application settings."""
     settings = get_settings() if level is None else None
@@ -78,7 +97,7 @@ def setup_logging(*, level: str | None = None) -> None:
     loguru_logger.remove()
 
     loguru_logger.add(
-        sink=sys.stderr,
+        sink=_console_sink_stream(),
         format=console_format,
         level=configured_level,
         colorize=not serialize,

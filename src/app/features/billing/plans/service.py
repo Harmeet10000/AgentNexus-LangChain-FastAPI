@@ -385,17 +385,63 @@ class PlanService:
         if not values:
             return Success(_plan_to_response(plan))
 
-        archive_result = await self.plans.archive(plan_id)
-        if isinstance(archive_result, Failure):
-            return archive_result
-
         financial_changed = any(
             value is not None
             for value in (dto.amount, dto.currency, dto.interval, dto.interval_count)
         )
+
+        # G6b (2026-11-15 sweep): a non-financial edit used to archive the
+        # existing row and create a successor version, silently flipping the
+        # addressed plan to isActive=false.  Every later PATCH then hit
+        # INVALID_PLAN_UPDATE and subscription creation hit "Plan is not
+        # active" — one description edit bricked the plan.  Pricing fields
+        # keep the versioning semantics (Requirement 24); presentation
+        # metadata changes mutate the active row in place, so the plan id
+        # clients already hold stays active and addressable.
+        if not financial_changed:
+            # Idempotency bindings live on the plan's metadata; keep any
+            # metadata the DTO carries and stamp the operation keys onto it.
+            dto_metadata = values.pop("metadata_", None)
+            values["metadata_"] = {
+                **(dto_metadata if isinstance(dto_metadata, dict) else dict(plan.metadata_ or {})),
+                "billing_operation_key": operation_key,
+                "billing_idempotency_scope": idempotency_scope,
+                "billing_request_fingerprint": request_fingerprint,
+            }
+            updated_result = await self.plans.update(plan, values=values)
+            if isinstance(updated_result, Failure):
+                return updated_result
+            updated = updated_result.unwrap()
+            audit_result = await self.audit.create(
+                AuditLog(
+                    entity_type="plan",
+                    entity_id=str(plan.id),
+                    action=AuditAction.PLAN_UPDATED.value,
+                    user_id=user_id,
+                    changes=dict(values),
+                )
+            )
+            if isinstance(audit_result, Failure):
+                error = audit_result.failure()
+                return Failure(
+                    inner_value=PlanInfrastructureError(
+                        message=error.message,
+                        details=error.details,
+                        source="plan_service",
+                        operation="create_audit_log",
+                    )
+                )
+            return Success(_plan_to_response(updated))
+
+        archive_result = await self.plans.archive(plan_id)
+        if isinstance(archive_result, Failure):
+            return archive_result
+
         new_version = Plan(
             parent_plan_id=plan.id,
-            razorpay_plan_id=None if financial_changed else plan.razorpay_plan_id,
+            # A financial change always mints a new provider plan; the local
+            # binding is re-synced below (the provider's plan is immutable).
+            razorpay_plan_id=None,
             name=dto.name or plan.name,
             description=dto.description if dto.description is not None else plan.description,
             amount=dto.amount if dto.amount is not None else plan.amount,
@@ -410,7 +456,9 @@ class PlanService:
                 else plan.trial_period_days
             ),
             tax_rate=dto.tax_rate if dto.tax_rate is not None else plan.tax_rate,
-            refund_policy=dto.refund_policy or plan.refund_policy,
+            refund_policy=dto.refund_policy
+            if dto.refund_policy is not None
+            else plan.refund_policy,
             features=dto.features if dto.features is not None else plan.features,
             metadata_=dto.metadata if dto.metadata is not None else plan.metadata_,
             is_active=True,
@@ -433,7 +481,7 @@ class PlanService:
             return created_result
         created = created_result.unwrap()
 
-        if self._sync_razorpay_enabled() and financial_changed:
+        if self._sync_razorpay_enabled():
             synced = await self._sync_provider_plan(created)
             if isinstance(synced, Failure):
                 return synced

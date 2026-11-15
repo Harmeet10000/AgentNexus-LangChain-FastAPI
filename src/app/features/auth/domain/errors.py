@@ -13,6 +13,7 @@ from app.kernel.result import http_status_for_kind
 class AuthCode(StrEnum):
     INVALID_USER_ID = "INVALID_USER_ID"
     USER_NOT_FOUND = "USER_NOT_FOUND"
+    SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
     USER_CONFLICT = "USER_CONFLICT"
     INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
     REFRESH_TOKEN_REUSE = "REFRESH_TOKEN_REUSE"  # noqa: S105 — typed error code, not a secret
@@ -33,6 +34,18 @@ class AuthNotFoundError(FeatureError):
     kind: ClassVar[ErrorKind] = ErrorKind.NOT_FOUND
     code: ClassVar[AuthCode] = AuthCode.USER_NOT_FOUND
     retryable: ClassVar[bool] = False
+
+
+class AuthSessionNotFoundError(FeatureError):
+    """A session-scoped 404: the addressed session does not exist (or is not
+    the caller's).  Renders as ``SESSION_NOT_FOUND`` — never ``USER_NOT_FOUND``,
+    which mislabeled session revocation failures in the 2026-11-15 sweep."""
+
+    kind: ClassVar[ErrorKind] = ErrorKind.NOT_FOUND
+    code: ClassVar[AuthCode] = AuthCode.SESSION_NOT_FOUND
+    retryable: ClassVar[bool] = False
+
+    session_id: str | None = None
 
 
 class AuthConflictError(FeatureError):
@@ -102,6 +115,7 @@ class AuthProvisioningPendingError(FeatureError):
 type AuthError = (
     AuthValidationError
     | AuthNotFoundError
+    | AuthSessionNotFoundError
     | AuthConflictError
     | AuthAuthenticationError
     | AuthRefreshReuseError
@@ -114,7 +128,12 @@ type AuthResult[T] = Result[T, AuthError]
 
 def auth_error_to_http_status(error: AuthError) -> int:
     match error:
-        case AuthValidationError() | AuthNotFoundError() | AuthConflictError():
+        case (
+            AuthValidationError()
+            | AuthNotFoundError()
+            | AuthSessionNotFoundError()
+            | AuthConflictError()
+        ):
             return http_status_for_kind(error.kind)
         case (
             AuthAuthenticationError()

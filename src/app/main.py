@@ -1,5 +1,7 @@
 # ruff: noqa: E402 — dotenv must load before modules that cache Settings
 
+import os
+
 from dotenv import load_dotenv
 
 # Load environment variables before importing modules that construct cached
@@ -61,6 +63,13 @@ def create_app() -> FastAPI:
         redoc_url="/api-redoc",
         openapi_url="/swagger.json",
     )
+    # G8: the API's SDK-managed pool reads its budget from the SDK's env
+    # contract (REDIS_MAX_CONNECTIONS).  Mirror the app-level setting into it
+    # before the lifespan constructs the pool so every process is bounded —
+    # an unbounded pool crossed Redis Cloud's plan client cap during the
+    # 2026-11-15 40-parallel burst and the server then refused all
+    # connections for ~22 minutes with no self-recovery.
+    os.environ.setdefault("REDIS_MAX_CONNECTIONS", str(settings.REDIS_MAX_CONNECTIONS))
     FastAPIRedis(app).lifespan()
 
     # ============================================================================

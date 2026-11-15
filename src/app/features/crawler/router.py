@@ -28,6 +28,7 @@ from .dto import (
     CrawlJobChunkList,
     CrawlJobPageList,
     CrawlJobSearchResponse,
+    CrawlJobStatus,
     CrawlRequest,
     RateLimitInfo,
     SearchRequest,
@@ -37,6 +38,17 @@ from .job_store import CrawlJobStore
 from .service import CrawlerService
 
 router = APIRouter(prefix=CRAWLER_PREFIX, tags=[CRAWLER_TAG])
+
+#: Terminal crawl states: cancelling one is a no-op the store answers with
+#: the unchanged job, so the response must report the truthful status.
+_TERMINAL_CRAWL_STATUSES = frozenset(
+    {
+        CrawlJobStatus.COMPLETED,
+        CrawlJobStatus.PARTIAL,
+        CrawlJobStatus.FAILED,
+        CrawlJobStatus.CANCELLED,
+    }
+)
 
 
 def get_client_identifier(request: Request) -> str:
@@ -204,6 +216,16 @@ async def cancel_crawl(
     if result is None:
         resource = "Crawl job"
         raise NotFoundException(resource, crawl_id)
+    if result.status in _TERMINAL_CRAWL_STATUSES:
+        # Truthful state, not an accept (sweep 2026-11-15: cancelling an
+        # already-FAILED crawl answered "Crawler cancellation requested").
+        # The store's contract is idempotent — a terminal job is returned
+        # unchanged, no cancel flag is set — so the response must say the
+        # job already finished, and revoking its task is pointless.
+        return http_response(
+            message=f"Crawl job already finished with status {result.status.value}",
+            data=result,
+        )
     task_id = await store.task_id(crawl_id, owner=get_client_identifier(request))
     celery = getattr(request.app.state, "celery", None)
     if task_id and celery is not None:

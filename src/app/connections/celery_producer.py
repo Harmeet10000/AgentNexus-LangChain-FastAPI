@@ -12,9 +12,15 @@ from kombu import Queue
 from kombu.exceptions import OperationalError
 
 from app.config import get_settings
+from app.observability.logging import logger
 from app.shared.jobs import DirectPublicationAdapter as DirectPublicationPort
 from app.shared.jobs.telemetry import log_task_published
-from app.shared.jobs.topology import TASK_DLX_EXCHANGE, TASK_EXCHANGE, task_routes
+from app.shared.jobs.topology import (
+    TASK_EXCHANGE,
+    dead_letter_queue,
+    declare_dead_letter_topology,
+    task_routes,
+)
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
@@ -24,6 +30,40 @@ if TYPE_CHECKING:
 
 before_task_publish.connect(log_task_published)
 settings = get_settings()
+
+#: One declaration per producer process.  Declaring is idempotent at the
+#: broker; the flag only avoids a round trip on every publish.
+_dead_letter_state = {"declared": False}
+
+
+def ensure_dead_letter_declared(celery: Celery) -> None:
+    """Declare the dead-letter topology before the first publish (G6).
+
+    The DLX/DLQ/binding exist in ``task_queues`` but no consumer declares
+    them, so without this the exchange never materializes on RabbitMQ and
+    ``Reject(requeue=False)`` poisons are dropped by the broker.  A failed
+    declaration never blocks publishing — the work queues already exist and
+    the poison path is a safety net, not the delivery path; the flag stays
+    unset so the next publish retries.
+    """
+    if _dead_letter_state["declared"]:
+        return
+    try:
+        with celery.broker_connection() as connection:
+            declare_dead_letter_topology(connection)
+        _dead_letter_state["declared"] = True
+        logger.info("Dead-letter topology declared", exchange=settings.CELERY_DEAD_LETTER_EXCHANGE)
+    except Exception as exc:  # noqa: BLE001 — declaration is best-effort; publishing must proceed
+        # Any declaration failure shape (broker down, transport quirk, a
+        # transport not exposing broker_connection) is survivable: the work
+        # queues already exist, and the next publish retries the declaration.
+        exc.add_note(
+            "operation=dead_letter_topology_declaration, "
+            f"exchange={settings.CELERY_DEAD_LETTER_EXCHANGE}"
+        )
+        logger.bind(error=type(exc).__name__).warning(
+            "Dead-letter topology declaration failed; will retry on next publish"
+        )
 
 
 def create_celery_app() -> Celery:
@@ -105,13 +145,7 @@ def create_celery_app() -> Celery:
                     "x-dead-letter-routing-key": settings.CELERY_DEAD_LETTER_ROUTING_KEY,
                 },
             ),
-            Queue(
-                name=settings.CELERY_DEAD_LETTER_QUEUE,
-                exchange=TASK_DLX_EXCHANGE,
-                routing_key=settings.CELERY_DEAD_LETTER_ROUTING_KEY,
-                durable=True,
-                queue_arguments={"x-queue-type": "quorum"},
-            ),
+            dead_letter_queue(),
         ),
         task_routes=task_routes(),
     )
@@ -160,6 +194,7 @@ class DirectPublicationAdapter(DirectPublicationPort):
         no queue or routing choice of its own: routing is resolved from the
         application route table built from the immutable job catalog.
         """
+        ensure_dead_letter_declared(self._celery)
         try:
             return self._celery.send_task(
                 job.task_name,

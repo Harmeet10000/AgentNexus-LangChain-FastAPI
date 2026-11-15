@@ -22,6 +22,7 @@ from app.features.auth.domain.errors import (
     AuthNotFoundError,
     AuthProvisioningPendingError,
     AuthRefreshReuseError,
+    AuthSessionNotFoundError,
     AuthValidationError,
 )
 from app.features.auth.domain.user import User, UserRole
@@ -47,6 +48,10 @@ def _translate_identity_error(error: AuthError, *, operation: str, user_id: str)
                 message=error.message, details=details, source="users_repository"
             )
         case AuthNotFoundError():
+            return UsersNotFoundError(
+                message=error.message, details=details, source="users_repository", user_id=user_id
+            )
+        case AuthSessionNotFoundError():
             return UsersNotFoundError(
                 message=error.message, details=details, source="users_repository", user_id=user_id
             )

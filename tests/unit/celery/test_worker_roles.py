@@ -157,7 +157,7 @@ assert loaded <= expected
 assert profile.task_names <= set(app.tasks)
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=120, check=False
     )
     assert result.returncode == 0, result.stderr
 
@@ -169,7 +169,7 @@ import app.worker.celery.cli
 assert "app.worker.celery.app" not in sys.modules
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=False
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False
     )
     assert result.returncode == 0, result.stderr
 

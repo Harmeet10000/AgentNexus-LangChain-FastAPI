@@ -11,10 +11,15 @@ from returns.result import Failure, Success
 
 from app.features.audit.models import AuditAction, AuditLog
 from app.features.billing.exceptions import (
+    LifecycleCoordinatorProviderError,
     LifecycleCoordinatorVersionConflictError,
 )
 from app.features.billing.payments.models import PaymentStatus
-from app.features.billing.providers import CreateRefundOperation, ProviderReceipt
+from app.features.billing.providers import (
+    CreateRefundOperation,
+    ProviderErrorCode,
+    ProviderReceipt,
+)
 from app.kernel.errors import ErrorKind
 from app.observability.logging import logger, trace_layer
 
@@ -604,6 +609,26 @@ class SubscriptionService:
                 source="subscription_service",
                 subscription_id=error.subscription_id,
                 expected_version=error.expected_version,
+            )
+        # G9b (2026-11-15 sweep): a terminal provider rejection of the
+        # request itself is client-facing input, not an infrastructure
+        # failure — it rendered as a 500 DATABASE_ERROR while the local
+        # row stayed behind as remoteSync=permanent_failure for
+        # reconciliation.  INVALID_REQUEST is the provider saying "this
+        # request can never succeed" (e.g. the Subscriptions product not
+        # enabled on the key pair); render it as a typed 4xx with the
+        # provider_code surfaced.  Every other provider failure keeps
+        # its infrastructure classification.
+        if (
+            isinstance(error, LifecycleCoordinatorProviderError)
+            and not error.retryable
+            and error.provider_code is ProviderErrorCode.INVALID_REQUEST
+        ):
+            details["provider_code"] = str(ProviderErrorCode.INVALID_REQUEST)
+            return SubscriptionValidationError(
+                message=error.message,
+                details=details,
+                source="subscription_service",
             )
         if error.kind is ErrorKind.VALIDATION:
             return SubscriptionValidationError(

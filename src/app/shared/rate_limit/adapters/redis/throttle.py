@@ -82,5 +82,14 @@ class RateLimitService:
         except TooManyRequestsException:
             raise
         except (RedisError, ConnectionError, TimeoutError) as e:
-            # Fail open to prevent a Redis outage from taking down the API
+            # Deliberate policy decision (G8, 2026-11-15 smoke): rate limiting
+            # fails OPEN during a Redis outage — availability over
+            # enforcement.  The observed cost is that quota enforcement is
+            # silently disabled for the outage's duration; the alternative
+            # (fail closed) turns every limiter-guarded route into a 503 and
+            # magnifies an infrastructure failure into a full API outage.
+            # Contrast with AUTH session storage (app/connections/redis.py),
+            # which fails closed as honest typed 503 degradation — sessions
+            # cannot be served without Redis, and faking availability would
+            # break the auth invariant rather than preserve it.
             logger.bind(error=str(e)).exception("Redis rate limiting failed, bypassing")

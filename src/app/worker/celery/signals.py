@@ -1,11 +1,47 @@
 """Child reset and orderly cleanup; no slow provisioning in init handlers."""
 
-from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
+from celery.exceptions import CeleryError
+from celery.signals import (
+    celeryd_after_setup,
+    worker_process_init,
+    worker_process_shutdown,
+    worker_shutdown,
+)
+from kombu import Connection
+from kombu.exceptions import OperationalError
 
+from app.config import get_settings
 from app.features.auth.application.revocation.pending import close_production_resources
 from app.observability.logging import logger
+from app.shared.jobs.topology import declare_dead_letter_topology
 from app.worker.celery.task import ResilientTask
 from app.worker.execution import runtime
+
+
+@celeryd_after_setup.connect
+def declare_broker_topology(**_kwargs: object) -> None:
+    """Declare the dead-letter topology once per worker start (G6).
+
+    Producers declare before their first publish too; workers declare at
+    start so a poison ``Reject(requeue=False)`` is parked even when the
+    rejecting worker runs before any producer publish in this broker's
+    lifetime.  ``celeryd_after_setup`` fires only when a worker actually
+    starts (never at ``Worker`` construction — which unit tests do — nor in
+    pool children), and the connection here is the one place a worker boot
+    may pay a broker round trip.  Declares are idempotent; a failure never
+    blocks the worker start — the next boot retries.
+    """
+    settings = get_settings()
+    try:
+        with Connection(settings.RABBITMQ_URL) as connection:
+            declare_dead_letter_topology(connection)
+        logger.info(
+            "Dead-letter topology declared at worker boot",
+            exchange=settings.CELERY_DEAD_LETTER_EXCHANGE,
+        )
+    except (CeleryError, OperationalError, ConnectionError, OSError, TimeoutError) as exc:
+        exc.add_note("operation=dead_letter_topology_declaration, stage=celeryd_after_setup")
+        logger.warning("Dead-letter topology declaration failed at worker boot; will retry")
 
 
 @worker_process_init.connect

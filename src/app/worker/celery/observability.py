@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import ExitStack
 from functools import cache
 from typing import TYPE_CHECKING
 
 import opentelemetry.trace as otel_trace
+from celery.signals import (
+    setup_logging as celery_setup_logging,
+)
 from celery.signals import (
     task_failure,
     task_postrun,
@@ -44,6 +48,30 @@ def shutdown_celery_observability(**_: Any) -> None:
     shutdown_otel()
 
 
+@celery_setup_logging.connect
+def configure_celery_logging(*, loglevel: int | None = None, **_: Any) -> None:
+    """Own Celery's logging setup through its documented signal (G7).
+
+    Without a ``setup_logging`` receiver, Celery hijacks the root logger and
+    redirects the worker's stdout/stderr into its ``celery.redirected``
+    logger: the prefork child proxies ``sys.stderr`` BEFORE
+    ``worker_process_init`` runs, the loguru sink captured from the proxy
+    looped back into the stdlib chain, and celery's recursion guard silently
+    dropped every task-time line (task receipts, ``task_payload_rejected``,
+    task body logs) from the journal.  Declaring ownership here keeps celery
+    from hijacking or redirecting (``Worker._custom_logging`` becomes True),
+    so the stdlib bridge and the real stderr sink carry both boot and
+    task-time output.  Celery's logfile/format are deliberately ignored:
+    the pipeline is the app's single console sink.
+    """
+    level: str | None = None
+    if loglevel is not None:
+        name = logging.getLevelName(loglevel)
+        level = name if isinstance(name, str) else None
+    setup_logging(level=level)
+
+
+celery_setup_logging.connect(configure_celery_logging)
 worker_process_init.connect(initialize_celery_observability)
 worker_shutdown.connect(shutdown_celery_observability)
 

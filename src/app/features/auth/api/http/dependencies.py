@@ -32,6 +32,7 @@ from app.features.auth.domain.errors import (
     AuthProvisioningPendingError,
     AuthRefreshReuseError,
     AuthResult,
+    AuthSessionNotFoundError,
     AuthValidationError,
 )
 from app.features.auth.domain.tenancy import LegalRole
@@ -493,7 +494,7 @@ async def get_current_user(
                 raise ValidationException(
                     detail=error.message, error_code=error.code, data=error.details
                 )
-            case AuthNotFoundError():
+            case AuthNotFoundError() | AuthSessionNotFoundError():
                 raise NotFoundException(
                     resource="Auth resource", identifier=None, error_code=error.code
                 )
