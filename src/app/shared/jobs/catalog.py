@@ -31,6 +31,7 @@ from app.shared.jobs.names import (
     CREDITS_RECONCILE,
     DOCUMENTS_INGEST,
     DOCUMENTS_INGEST_TERMINAL,
+    DOCUMENTS_STUCK_SWEEP,
     SEARCH_INGEST,
     SEND_PASSWORD_RESET_EMAIL,
     SEND_VERIFICATION_EMAIL,
@@ -198,6 +199,13 @@ _CATALOG: dict[str, JobDefinition[CeleryTaskPayload]] = {
         queue=JobQueue.INGESTION,
         capability=JobCapability.DOCUMENT_INGESTION,
         declaring_module="app.worker.jobs.documents",
+    ),
+    DOCUMENTS_STUCK_SWEEP: _job(
+        DOCUMENTS_STUCK_SWEEP,
+        NoKwargsPayload,
+        queue=JobQueue.DEFAULT,
+        capability=JobCapability.DOCUMENT_INGESTION,
+        declaring_module="app.worker.jobs.maintenance",
     ),
     SEARCH_INGEST: _job(
         SEARCH_INGEST,

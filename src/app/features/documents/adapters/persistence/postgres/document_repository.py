@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -759,6 +759,66 @@ class DocumentRepository:  # noqa: PLR0904 — one method per lifecycle operatio
             return Success(None)
         age_seconds = max(0.0, (datetime.now(tz=UTC) - updated_at).total_seconds())
         return Success((status, age_seconds))
+
+    @trace_layer("repository")
+    async def find_stuck_documents(
+        self,
+        *,
+        threshold_seconds: float,
+        limit: int = 100,
+    ) -> DocumentResult[list[tuple[str, str, float]]]:
+        """C7: every document in a NON-terminal status past the age threshold.
+
+        The periodic sweep's read side (the per-document variant
+        ``ingestion_status_age`` only observes one row at task start). Rows
+        are the observation contract only — the sweep never mutates them;
+        re-drive belongs to the idempotent resume driver. Oldest first,
+        bounded per pass.
+        """
+        try:
+            cutoff = datetime.now(tz=UTC) - timedelta(seconds=threshold_seconds)
+            rows = (
+                (
+                    await self.session.execute(
+                        select(
+                            UnifiedDocument.id,
+                            UnifiedDocument.tenant_id,
+                            UnifiedDocument.status,
+                        )
+                        .where(
+                            UnifiedDocument.status.not_in(TERMINAL_DOCUMENT_STATUSES),
+                            UnifiedDocument.updated_at < cutoff,
+                        )
+                        .order_by(UnifiedDocument.updated_at.asc())
+                        .limit(limit)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        except SQLAlchemyError as exc:
+            add_database_error_note(exc, table="documents")
+            await self.session.rollback()
+            return Failure(
+                DocumentDatabaseError(
+                    message="Database error while scanning stuck documents",
+                    details={"threshold_seconds": threshold_seconds},
+                    source="document_repository",
+                )
+            )
+        now = datetime.now(tz=UTC)
+        return Success(
+            [
+                (
+                    str(row["id"]),
+                    str(row["status"]),
+                    max(0.0, (now - row["updated_at"]).total_seconds())
+                    if isinstance(row["updated_at"], datetime)
+                    else 0.0,
+                )
+                for row in rows
+            ]
+        )
 
     @trace_layer("repository")
     async def fetch_structural_trees(

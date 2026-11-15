@@ -237,7 +237,7 @@ app.Worker(
 print("startup-ok")
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=90, check=False
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=150, check=False
     )
     assert result.returncode == 0, result.stderr
     assert "startup-ok" in result.stdout

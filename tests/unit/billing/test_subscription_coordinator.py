@@ -16,6 +16,7 @@ from app.features.billing.providers import (
     ProviderUnavailableError,
 )
 from app.features.billing.subscriptions.coordinator import (
+    DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
     CoordinatorStatus,
     InMemoryLifecyclePersistence,
     IntentStatus,
@@ -167,7 +168,7 @@ async def test_upgrade_stages_before_capture_and_converges_once_after_capture() 
         CreateSubscriptionOperation(
             plan_id="plan-1",
             customer_id="cust-1",
-            total_count=0,
+            total_count=DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
             quantity=1,
             customer_notify=True,
             correlation_id="seed",
@@ -237,7 +238,7 @@ async def test_scheduled_capture_reconciles_exact_pending_link_before_plan_chang
         CreateSubscriptionOperation(
             plan_id="plan-1",
             customer_id="cust-1",
-            total_count=0,
+            total_count=DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
             quantity=1,
             customer_notify=True,
             correlation_id="seed",
@@ -449,7 +450,7 @@ async def test_effect_translation_gates_remote_plan_until_matching_capture() -> 
         CreateSubscriptionOperation(
             plan_id="plan-1",
             customer_id="cust-1",
-            total_count=0,
+            total_count=DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
             quantity=1,
             customer_notify=True,
             correlation_id="seed",

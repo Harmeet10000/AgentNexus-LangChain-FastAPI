@@ -89,8 +89,14 @@ def test_documented_deployment_budget_stays_under_the_plan_client_cap() -> None:
     settings = get_settings()
 
     total = settings.REDIS_MAX_CONNECTIONS + 3 * settings.REDIS_WORKER_MAX_CONNECTIONS
-    assert total == 98
-    assert total < 256
+    # The deployment env sizes the budget to THIS plan's verified cap: the
+    # live server reports maxclients=30 (INFO clients, 2026-11-15) — the
+    # original 98-client budget assumed a paid tier and locked logins out
+    # for 22 minutes under the sweep's parallel burst. 27 total leaves
+    # headroom for beat/scripts; the G-batch crew's 256-client comment
+    # described the smallest PAID tier, not this plan.
+    assert total == 27
+    assert total < 30
 
 
 def test_rate_limiter_fails_open_when_redis_is_down() -> None:

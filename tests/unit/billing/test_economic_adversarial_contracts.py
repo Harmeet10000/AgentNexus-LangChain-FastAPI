@@ -36,6 +36,7 @@ from app.features.billing.providers import (
     ProviderReceipt,
 )
 from app.features.billing.subscriptions.coordinator import (
+    DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
     CoordinatorStatus,
     InMemoryLifecyclePersistence,
     LifecycleRecord,
@@ -147,7 +148,7 @@ async def test_verified_capture_executes_pending_remote_plan_change_once() -> No
         CreateSubscriptionOperation(
             plan_id="rp_plan_old",
             customer_id="cust-1",
-            total_count=0,
+            total_count=DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
             quantity=1,
             customer_notify=True,
             correlation_id="seed-capture",

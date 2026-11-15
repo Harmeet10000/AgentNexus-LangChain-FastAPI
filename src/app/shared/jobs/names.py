@@ -4,6 +4,7 @@ from typing import Final
 
 DOCUMENTS_INGEST: Final = "tasks.documents_ingest"
 DOCUMENTS_INGEST_TERMINAL: Final = "tasks.documents_ingest_terminal"
+DOCUMENTS_STUCK_SWEEP: Final = "documents.stuck_document_sweep"
 SEARCH_INGEST: Final = "tasks.search_ingest"
 CRAWLER_CRAWL: Final = "tasks.crawler_crawl"
 INGESTION_TASK_NAMES: Final[frozenset[str]] = frozenset(

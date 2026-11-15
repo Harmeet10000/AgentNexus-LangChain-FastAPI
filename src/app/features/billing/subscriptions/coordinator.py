@@ -88,6 +88,15 @@ if TYPE_CHECKING:
 type LifecycleCoordinatorResult[T] = Result[T, LifecycleCoordinatorError]
 
 
+#: Razorpay requires ``total_count >= 1`` on subscription creation (there is
+#: no "indefinite" wire value): 0 made every provider create return
+#: invalid_request (observed live 2026-11-15 — the money-path blocker).
+#: 12 monthly cycles is the documented default billing horizon; a real
+#: per-plan/DTO billing term should replace this default when the product
+#: decides one.
+DEFAULT_SUBSCRIPTION_TOTAL_COUNT = 12
+
+
 class IntentStatus(StrEnum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"
@@ -1255,7 +1264,7 @@ class SubscriptionLifecycleCoordinator:
                         CreateSubscriptionOperation(
                             plan_id=provider_plan_id,
                             customer_id=customer_id,
-                            total_count=0,
+                            total_count=DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
                             quantity=1,
                             customer_notify=True,
                             correlation_id=correlation,
@@ -1553,7 +1562,7 @@ class SubscriptionLifecycleCoordinator:
         followup = CreateSubscriptionOperation(
             plan_id=provider_plan_id,
             customer_id=customer.provider_customer_id,
-            total_count=0,
+            total_count=DEFAULT_SUBSCRIPTION_TOTAL_COUNT,
             quantity=1,
             customer_notify=True,
             correlation_id=f"{intent.operation.correlation_id}:subscription",

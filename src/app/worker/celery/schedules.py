@@ -18,6 +18,7 @@ from app.shared.jobs.names import (
     BILLING_RENEWAL,
     CREDITS_EXPIRE,
     CREDITS_RECONCILE,
+    DOCUMENTS_STUCK_SWEEP,
 )
 
 settings = get_settings()
@@ -74,6 +75,16 @@ BEAT_SCHEDULE = {
         "task": AGENT_SAUL_TRANSCRIPT_SWEEP,
         # §6 trigger 3: bounded beat sweep (hints + stale non-terminal + GC);
         # [v3] a Redis outage skips derivation entirely on that beat.
+        "schedule": crontab(minute="*/15"),
+        "options": {"expires": 60},
+    },
+    "documents-stuck-sweep-periodic": {
+        "task": DOCUMENTS_STUCK_SWEEP,
+        # C7: the stuck-age safety net (harden 3.11) only fired on the next
+        # ingestion attempt; a doc that lost its terminal transition and is
+        # never retried would sit unobserved forever. This sweep OBSERVES
+        # (log + degradation counter) — re-drive stays with the idempotent
+        # resume driver, never the scheduler.
         "schedule": crontab(minute="*/15"),
         "options": {"expires": 60},
     },

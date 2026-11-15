@@ -83,12 +83,13 @@ def test_relational_handlers_note_before_rollback_and_failure() -> None:
                     for node in ast.walk(statement)
                 )
     # Includes the document scope resolver, the terminal-ingestion row-lock
-    # handlers, and the stuck-status age reader alongside the invoices and
-    # subscription lifecycle adapters — plus the D1 deletion handlers
-    # (harden 7.2: the deletion-inventory aggregate and the tenant-bound
-    # artifacts delete).  Keep this as an explicit inventory tripwire so a
-    # future SQL catcher cannot silently skip the note-before-rollback contract.
-    assert checked == 120
+    # handlers, the stuck-status age reader, and the C7 stuck-sweep scan
+    # alongside the invoices and subscription lifecycle adapters — plus the
+    # D1 deletion handlers (harden 7.2: the deletion-inventory aggregate and
+    # the tenant-bound artifacts delete).  Keep this as an explicit inventory
+    # tripwire so a future SQL catcher cannot silently skip the
+    # note-before-rollback contract.
+    assert checked == 121
 
 
 def test_rollback_gate_fixture_has_forbidden_and_permitted_forms() -> None:
