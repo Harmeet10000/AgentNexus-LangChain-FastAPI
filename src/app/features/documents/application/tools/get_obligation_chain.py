@@ -122,6 +122,10 @@ def make_get_obligation_chain_tool(
             ),
         )
         if graph_results is GRAPHTI_DEADLINE_MISSED:
+            # A deadline miss is the same Graphiti outage a transport failure
+            # is: count it, or the standing alert only ever sees the
+            # BoundGraphitiService-degraded reads and every miss is invisible.
+            record_degradation(GRAPHITI_UNAVAILABLE, surface="get_obligation_chain")
             return ToolResult.unavailable_result(
                 reason="Knowledge graph deadline expired before an obligation chain was produced.",
                 tool="get_obligation_chain",

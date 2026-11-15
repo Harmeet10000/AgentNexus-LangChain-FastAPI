@@ -228,10 +228,10 @@ ast-grep scan src/                              # structural rules
 
 # worker role profiles — queue, pool, concurrency and child-recycle are
 # owned by the role definition; do not add a second -Q or process-shape flag
-uv run worker --role default --loglevel=info
-uv run worker --role ingestion --loglevel=info
-uv run worker --role crawler --loglevel=info
-uv run beat --loglevel=info
+.venv/bin/worker --role default --loglevel=info
+.venv/bin/worker --role ingestion --loglevel=info
+.venv/bin/worker --role crawler --loglevel=info
+.venv/bin/beat --loglevel=info
 
 # local entry points, as make targets
 make backend            # FastAPI backend (BACKEND_HOST/BACKEND_PORT can override defaults)

@@ -137,8 +137,14 @@ class InvoiceRepository:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> InvoiceResult[list[Invoice]]:
-        """List issued/paid invoices for a user (Requirement 13)."""
+    ) -> InvoiceResult[tuple[list[Invoice], int]]:
+        """List issued/paid invoices for a user (Requirement 13) with the page total.
+
+        Returns ``(items, total_count)`` for the requested slice — the same
+        pagination contract the subscriptions list uses, so the invoice
+        endpoint renders the shared ``{items, total, limit, offset}`` envelope
+        (F11) instead of a bare array.
+        """
         try:
             conditions = [
                 Invoice.user_id == user_id,
@@ -151,6 +157,8 @@ class InvoiceRepository:
                 conditions.append(Invoice.subscription_id == subscription_id)
             if status is not None:
                 conditions.append(Invoice.status == status)
+            total_statement = select(func.count()).select_from(Invoice).where(*conditions)
+            total = (await self.session.execute(total_statement)).scalar_one()
             statement: Select[tuple[Invoice]] = (
                 select(Invoice)
                 .where(*conditions)
@@ -159,7 +167,7 @@ class InvoiceRepository:
                 .offset(offset)
             )
             result = await self.session.execute(statement)
-            return Success(list(result.scalars().all()))
+            return Success((list(result.scalars().all()), int(total)))
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="invoices")
             await self.session.rollback()

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from functools import partial
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from celery.exceptions import CeleryError
 from pydantic import ValidationError
@@ -36,6 +37,22 @@ class UnregisteredTaskError(TaskDispatchError):
         )
         super().__init__(message)
 
+    @override
+    def __reduce__(self) -> tuple[object, tuple[object, ...]]:
+        """Rebuild with the real constructor signature across a process boundary.
+
+        ``BaseException.__reduce__`` returns ``(cls, self.args)``, and ``args``
+        holds only the formatted message — unpickling then calls ``cls(message)``
+        and dies on the real signature. A pool child raising this inside a task
+        delivery therefore killed the pool PARENT's event loop with a
+        ``TypeError`` the moment it read the failure message (the F5 ~2-minute
+        worker death). Reconstructing from the constructor inputs keeps the
+        rejection report picklable so the worker stays up. The keyword-only
+        ``known_names`` is bound through a ``partial`` because pickle's
+        reconstruction only passes positional arguments.
+        """
+        return (partial(self.__class__, known_names=self.known_names), (self.task_name,))
+
 
 class TaskPayloadValidationError(TaskDispatchError):
     """A dispatched payload did not match the model its catalog entry declares."""
@@ -49,6 +66,16 @@ class TaskPayloadValidationError(TaskDispatchError):
             f"{validation_error}"
         )
         super().__init__(message)
+
+    @override
+    def __reduce__(self) -> tuple[object, tuple[object, ...]]:
+        """Rebuild with the real constructor signature across a process boundary.
+
+        Same defect and same death mechanism as :class:`UnregisteredTaskError`:
+        ``args`` carries only the formatted message, so unpickling a task
+        failure raised in a pool child crashed the pool parent's event loop.
+        """
+        return (self.__class__, (self.task_name, self.validation_error))
 
 
 class CeleryTaskRegistry:

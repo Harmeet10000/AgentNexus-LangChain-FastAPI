@@ -933,11 +933,22 @@ class DocumentRepository:  # noqa: PLR0904 — one method per lifecycle operatio
                         func.count().filter(UnifiedChunk.graphiti_verified),
                         Integer,
                     ).label("verified_chunk_count"),
-                    cast(func.max(UnifiedChunk.document_version), Integer).label(
-                        "document_version"
-                    ),
+                    # Version identity: the chunks carry the ingest-time truth,
+                    # but a document still awaiting its worker has no chunks —
+                    # fall back to the revision the receive write persisted
+                    # (smoke F10) so versions are never null at `received`.
+                    cast(
+                        func.coalesce(
+                            func.max(UnifiedChunk.document_version),
+                            UnifiedDocument.metadata_["document_version"].as_integer(),
+                        ),
+                        Integer,
+                    ).label("document_version"),
                     cast(func.max(UnifiedChunk.contract_index), Integer).label("contract_index"),
-                    func.max(UnifiedChunk.pipeline_version).label("pipeline_version"),
+                    func.coalesce(
+                        func.max(UnifiedChunk.pipeline_version),
+                        UnifiedDocument.metadata_["pipeline_version"].as_string(),
+                    ).label("pipeline_version"),
                     func.max(UnifiedChunk.graph_indexed_at).label("graph_indexed_at"),
                     UnifiedDocument.extraction_incomplete,
                     func.coalesce(

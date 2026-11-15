@@ -116,6 +116,10 @@ def make_query_knowledge_graph_tool(
             ),
         )
         if results is GRAPHTI_DEADLINE_MISSED:
+            # A deadline miss is the same Graphiti outage a transport failure
+            # is: count it, or the standing alert only ever sees the
+            # BoundGraphitiService-degraded reads and every miss is invisible.
+            record_degradation(GRAPHITI_UNAVAILABLE, surface="query_knowledge_graph")
             return ToolResult.unavailable_result(
                 reason="Knowledge graph deadline expired before a result was produced.",
                 tool="query_knowledge_graph",

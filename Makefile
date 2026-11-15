@@ -27,7 +27,12 @@ help:
 # Backend
 BACKEND_HOST ?= 0.0.0.0
 BACKEND_PORT ?= 5000
-BACKEND_CMD := uv run uvicorn app.main:app --host $(BACKEND_HOST) --port $(BACKEND_PORT)
+# Runtime processes execute through the venv entry points directly, NOT through
+# `uv run`: uv interposes its own relay on the child's stdout/stderr, and when
+# those fds are the journald socket of a systemd user unit the relayed output
+# never arrives (F12c — zero application lines in the journals). Dev tooling
+# below keeps `uv run` because a terminal target is unaffected.
+BACKEND_CMD := .venv/bin/uvicorn app.main:app --host $(BACKEND_HOST) --port $(BACKEND_PORT)
 
 backend:
 	$(BACKEND_CMD)
@@ -73,7 +78,10 @@ migrate-history:
 # Worker startup goes through the installed role interface. The profile resolves
 # queue, pool, concurrency and child recycling in one place; deployment files
 # only select a role and may add harmless Celery flags such as log level.
-CELERY_WORKER_CMD := uv run worker
+# Same F12c rule as BACKEND_CMD: run the venv entry point directly — `uv run`
+# interposes a relay that loses the child's stdout/stderr when the unit's fds
+# point at the journald socket, which made workers and the API journal-blind.
+CELERY_WORKER_CMD := .venv/bin/worker
 
 # The three commands the deployment actually runs, all derived from the one
 # interface. Two workers, not one:
@@ -95,7 +103,7 @@ CELERY_WORKER_CMD := uv run worker
 CELERY_DEFAULT_WORKER_CMD := $(CELERY_WORKER_CMD) --role default --loglevel=info
 CELERY_INGESTION_WORKER_CMD := $(CELERY_WORKER_CMD) --role ingestion --loglevel=info
 CELERY_CRAWLER_WORKER_CMD := $(CELERY_WORKER_CMD) --role crawler --loglevel=info
-CELERY_BEAT_CMD := uv run beat --loglevel=info
+CELERY_BEAT_CMD := .venv/bin/beat --loglevel=info
 CELERY_COMPLETENESS_CMD := uv run worker-completeness --consumed-queue default --consumed-queue ingestion --consumed-queue crawler
 
 celery:

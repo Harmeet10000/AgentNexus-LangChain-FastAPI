@@ -133,3 +133,14 @@ class ReportResponse(BaseModel):
     file_url: str | None = Field(default=None, serialization_alias="fileUrl")
     row_count: int | None = Field(default=None, serialization_alias="rowCount")
     created_at: datetime = Field(serialization_alias="createdAt")
+
+
+class InvoiceListResponse(BaseModel):
+    """Paginated list of invoices — the same envelope subscriptions uses (F11)."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True, serialize_by_alias=True)
+
+    items: list[InvoiceResponse]
+    total: int
+    limit: int
+    offset: int

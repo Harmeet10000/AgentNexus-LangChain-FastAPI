@@ -66,6 +66,7 @@ from app.features.documents.application.queries.documents import (
 )
 from app.features.documents.domain.constants import (
     ANALYZE_THRESHOLD_CHUNKS,
+    CANONICAL_PIPELINE_VERSION,
     INGEST_EMBEDDING_BATCH_SIZE,
 )
 from app.features.documents.domain.errors import (
@@ -404,7 +405,16 @@ class DocumentCommandService:
             jurisdiction=None,
             contract_type=None,
             parties=[],
-            metadata_={"content_type": content_type, "filename": filename},
+            # Version identity is assigned at receive time (smoke F10): the
+            # status endpoint must never report null versions for a received
+            # document, so the receive write persists the same revision the
+            # queued ingestion job carries.
+            metadata_={
+                "content_type": content_type,
+                "filename": filename,
+                "document_version": 1,
+                "pipeline_version": CANONICAL_PIPELINE_VERSION,
+            },
         )
         if isinstance(create_result, Failure):
             log_expected_failure(error=create_result.failure(), operation="document_upload")
@@ -492,6 +502,18 @@ class DocumentCommandService:
                         chunk_count=int(record["chunk_count"]),
                         verified_chunk_count=int(record["verified_chunk_count"]),
                         warning_count=len(warnings),
+                        # Version identity: chunk provenance once ingestion has
+                        # run, the receive-time revision before it (smoke F10).
+                        document_version=(
+                            int(record["document_version"])
+                            if record.get("document_version") is not None
+                            else None
+                        ),
+                        pipeline_version=(
+                            str(record["pipeline_version"])
+                            if record.get("pipeline_version") is not None
+                            else None
+                        ),
                         warnings=warnings,
                         graph_relationships=_relationship_state_from_metadata(metadata),
                         fidelity=_fidelity_metrics_from_metadata(metadata),
@@ -836,7 +858,7 @@ async def process_document_ingestion(  # noqa: PLR0912, PLR0914, PLR0915 — sta
     prepared_chunks, context_warnings = await apply_document_context(
         chunks=prepared_chunks,
         parsed=parsed,
-        classified=classified,
+        classified=_context_classified(classified, legal),
         llm=runtime.llm,
     )
     fidelity_metrics = build_fidelity_metrics(
@@ -1135,6 +1157,21 @@ def _unvalidated_classified(classified: ClassifiedDocument) -> ClassifiedDocumen
     return classified.model_copy(
         update={"jurisdiction": None, "contract_type": None, "parties": [], "metadata_": {}}
     )
+
+
+def _context_classified(
+    classified: ClassifiedDocument, legal: _LegalPreparation
+) -> ClassifiedDocument:
+    """The classification the context-summary pass may read (validation-seam).
+
+    The context pass is subject to the same rejected-metadata rule as the
+    segmentation loop and the status writes: a terminally validation-failed
+    extraction means the classified parties/jurisdiction/contract_type were
+    never corroborated, so the context summaries are generated from the
+    stripped classification — rejected guesses must not re-enter the searchable
+    preamble through a context sentence.
+    """
+    return _unvalidated_classified(classified) if legal.validation_failed else classified
 
 
 def _classification_metadata(

@@ -22,6 +22,7 @@ from app.observability.logging import logger, setup_logging
 
 from .api import v1_router, v2_router
 from .config import get_settings
+from .features.health.build_info import resolve_git_sha
 from .features.health.router import deep_health_router
 from .lifecycle import lifespan
 from .middleware import (
@@ -131,7 +132,10 @@ def create_app() -> FastAPI:
                     "message": "Root Route🚀",
                     "status": "healthy",
                     "version": settings.APP_VERSION,
-                    "git_sha": settings.GIT_SHA,
+                    # Same resolver the deep-health payload uses: native
+                    # systemd-run boots have no baked GIT_SHA and must report
+                    # the working-tree commit, never a bare "unknown" (F3).
+                    "git_sha": resolve_git_sha(),
                     "build_date": settings.BUILD_DATE,
                 }
             ),

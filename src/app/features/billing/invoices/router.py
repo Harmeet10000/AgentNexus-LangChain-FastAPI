@@ -10,7 +10,7 @@ from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse
 
 from .dependencies import InvoiceServiceDep
-from .dto import InvoiceResponse, VoidInvoiceDTO
+from .dto import InvoiceListResponse, InvoiceResponse, VoidInvoiceDTO
 
 # Invoice voids are rare corrective money movements; tight per-IP guard.
 limit_invoice_void = get_rate_limiter(burst=5, rate=5, period=300, scope="invoice-void")
@@ -27,7 +27,7 @@ async def list_invoices(  # noqa: PLR0917
     status_filter: Annotated[str | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> APIResponse[list[InvoiceResponse]]:
+) -> APIResponse[InvoiceListResponse]:
     result = await service.list_invoices(
         str(user.id),
         subscription_id=subscription_id,

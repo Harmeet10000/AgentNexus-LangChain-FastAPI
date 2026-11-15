@@ -21,7 +21,7 @@ from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
 from app.utils.storage import uri_to_location
 
-from .dto import InvoiceLineItemDTO, InvoiceResponse
+from .dto import InvoiceLineItemDTO, InvoiceListResponse, InvoiceResponse
 from .exceptions import (
     InvoiceCollaboratorError,
     InvoiceConflictError,
@@ -343,7 +343,7 @@ class InvoiceService:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> InvoiceResult[list[InvoiceResponse]]:
+    ) -> InvoiceResult[InvoiceListResponse]:
         result = await self.invoices.list_by_user(
             user_id,
             subscription_id=subscription_id,
@@ -353,13 +353,14 @@ class InvoiceService:
         )
         if isinstance(result, Failure):
             return result
+        items, total = result.unwrap()
         responses: list[InvoiceResponse] = []
-        for invoice in result.unwrap():
+        for invoice in items:
             response_result = await self._signed_invoice_response(invoice)
             if isinstance(response_result, Failure):
                 return response_result
             responses.append(response_result.unwrap())
-        return Success(responses)
+        return Success(InvoiceListResponse(items=responses, total=total, limit=limit, offset=offset))
 
     @trace_layer("service")
     async def get_invoice(

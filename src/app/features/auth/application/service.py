@@ -1633,12 +1633,19 @@ class AuthService:
         ).info("auth_security_event")
         if self._session_factory is None:
             return
-        result = await self._publish_outbox_event(
-            aggregate_type="auth_security",
-            aggregate_id=user_id,
-            event_type=event_type,
-            payload={"user_id": user_id, **payload},
-        )
+        try:
+            result = await self._publish_outbox_event(
+                aggregate_type="auth_security",
+                aggregate_id=user_id,
+                event_type=event_type,
+                payload={"user_id": user_id, **payload},
+            )
+        except Exception as exc:  # noqa: BLE001 — audit-only emit; auth result must not depend on it
+            exc.add_note(f"event_type={event_type}, user_id={user_id}")
+            logger.bind(event_type=event_type, user_id=user_id).exception(
+                "auth_security_event_emit_failed"
+            )
+            return
         if isinstance(result, Failure):
             logger.bind(event_type=event_type, user_id=user_id).error(
                 "auth_security_event_persistence_failed"

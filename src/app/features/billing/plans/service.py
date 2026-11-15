@@ -161,7 +161,6 @@ class PlanService:
                 return Failure(
                     PlanInfrastructureError(
                         message="Database error while listing plans",
-                        details={"error": str(exc)},
                         source="plan_service",
                         operation="list_plans",
                     )
@@ -562,7 +561,6 @@ class PlanService:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while recovering provider plan bindings",
-                    details={"error": str(exc)},
                     source="plan_service",
                     operation="recover_pending_provider_plans",
                 )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from returns.result import Failure, Success
 from sqlalchemy import select, update
@@ -16,12 +17,35 @@ from .exceptions import PlanConflictError, PlanInfrastructureError, PlanNotFound
 from .models import Plan
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
     from .exceptions import PlanResult
+
+
+def _coerce_plan_uuid(plan_id: str | UUID) -> UUID | None:
+    """Parse a caller-supplied plan id; ``None`` means it cannot address a row.
+
+    A non-UUID path parameter can never match the UUID primary key — feeding it
+    to Postgres only produces a driver cast error (a raw SQL/asyncpg disclosure
+    rendered as a 500). A malformed id is therefore "not found", decided here
+    before any statement is executed.
+    """
+    if isinstance(plan_id, UUID):
+        return plan_id
+    try:
+        return UUID(plan_id)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _not_found(plan_id: str | UUID) -> PlanNotFoundError:
+    return PlanNotFoundError(
+        message="Plan not found",
+        details={"plan_id": str(plan_id)},
+        source="plan_repository",
+        plan_id=str(plan_id),
+    )
 
 
 class PlanRepository:
@@ -45,7 +69,7 @@ class PlanRepository:
             return Failure(
                 PlanConflictError(
                     message="Plan creation failed due to a constraint violation",
-                    details={"name": plan.name, "error": str(exc)},
+                    details={"name": plan.name},
                     source="plan_repository",
                 )
             )
@@ -56,7 +80,6 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while creating plan",
-                    details={"error": str(exc)},
                     source="plan_repository",
                     operation="create",
                 )
@@ -64,6 +87,9 @@ class PlanRepository:
 
     @trace_layer("repository")
     async def find_by_id(self, plan_id: str | UUID) -> PlanResult[Plan | None]:
+        plan_uuid = _coerce_plan_uuid(plan_id)
+        if plan_uuid is None:
+            return Failure(_not_found(plan_id))
         try:
             statement: Select[tuple[Plan]] = select(Plan).where(Plan.id == plan_id)
             result = await self.session.execute(statement)
@@ -87,7 +113,7 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while fetching plan",
-                    details={"plan_id": str(plan_id), "error": str(exc)},
+                    details={"plan_id": str(plan_id)},
                     source="plan_repository",
                     operation="find_by_id",
                 )
@@ -111,7 +137,7 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while finding plan by name",
-                    details={"name": name, "error": str(exc)},
+                    details={"name": name},
                     source="plan_repository",
                     operation="find_by_name",
                 )
@@ -131,7 +157,7 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while finding plan operation",
-                    details={"operation_key": operation_key, "error": str(exc)},
+                    details={"operation_key": operation_key},
                     source="plan_repository",
                     operation="find_by_operation_key",
                 )
@@ -155,7 +181,7 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while finding plan idempotency binding",
-                    details={"scope": scope, "error": str(exc)},
+                    details={"scope": scope},
                     source="plan_repository",
                     operation="find_by_idempotency_scope",
                 )
@@ -180,7 +206,6 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while listing plans",
-                    details={"error": str(exc)},
                     source="plan_repository",
                     operation="list_active",
                 )
@@ -189,6 +214,9 @@ class PlanRepository:
     @trace_layer("repository")
     async def archive(self, plan_id: str | UUID) -> PlanResult[Plan | None]:
         """Soft-delete a plan. Existing subscriptions keep their plan version."""
+        plan_uuid = _coerce_plan_uuid(plan_id)
+        if plan_uuid is None:
+            return Failure(_not_found(plan_id))
         try:
             statement = (
                 update(Plan)
@@ -217,7 +245,7 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while archiving plan",
-                    details={"plan_id": str(plan_id), "error": str(exc)},
+                    details={"plan_id": str(plan_id)},
                     source="plan_repository",
                     operation="archive",
                 )
@@ -253,7 +281,7 @@ class PlanRepository:
             return Failure(
                 PlanConflictError(
                     message="Plan update failed due to a constraint violation",
-                    details={"plan_id": str(plan.id), "error": str(exc)},
+                    details={"plan_id": str(plan.id)},
                     source="plan_repository",
                 )
             )
@@ -266,7 +294,7 @@ class PlanRepository:
             return Failure(
                 PlanInfrastructureError(
                     message="Database error while updating plan",
-                    details={"plan_id": str(plan.id), "error": str(exc)},
+                    details={"plan_id": str(plan.id)},
                     source="plan_repository",
                     operation="update",
                 )
