@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from app.features.crawler.adapters.crawl4ai.config import CrawlerConfig
 from app.features.crawler.adapters.crawl4ai.crawler import CrawlResult, WebCrawler
 from app.features.crawler.api.http.dto import CrawlRequest
+from app.features.crawler.application.egress import BOUNDARY_DENIED_MESSAGE
 from app.features.crawler.application.processor import GeminiProcessor
 from app.features.crawler.application.service import CrawlerService
 from app.features.crawler.domain.chunker import (
@@ -222,6 +223,50 @@ async def test_recursive_crawl_preserves_partial_page_results(
 
     assert result.unwrap()[0].success is True
     assert result.unwrap()[1].success is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw_result",
+    [
+        SimpleNamespace(
+            success=False,
+            url="http://example.com/denied",
+            status_code=407,
+            response_headers={"X-Smokescreen-Error": "private address"},
+            error_message="proxy authentication required",
+        ),
+        SimpleNamespace(
+            success=False,
+            url="https://example.com/outage",
+            status_code=None,
+            response_headers=None,
+            error_message="net::ERR_PROXY_CONNECTION_FAILED",
+        ),
+    ],
+)
+async def test_recursive_crawl_returns_boundary_failures_before_caching(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_result: object,
+) -> None:
+    class _Browser:
+        async def arun_many(self, **_kwargs: object) -> list[object]:
+            return [raw_result]
+
+    async def allow_url(_url: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(
+        "app.features.crawler.adapters.crawl4ai.crawler.validate_url_for_fetch", allow_url
+    )
+    crawler = WebCrawler(config=CrawlerConfig(), browser=_Browser())  # type: ignore[arg-type]
+
+    failure = (await crawler.crawl_recursive(["https://example.com"])).failure()
+
+    assert failure.message in {
+        BOUNDARY_DENIED_MESSAGE,
+        "net::ERR_PROXY_CONNECTION_FAILED",
+    }
 
 
 @pytest.mark.asyncio

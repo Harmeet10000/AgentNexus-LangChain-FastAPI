@@ -11,7 +11,7 @@ from returns.result import Failure, Success
 
 from app.connections.tavily import TavilyValidationError, search
 from app.features.crawler.adapters.crawl4ai.crawler import CrawlResult, WebCrawler
-from app.features.crawler.api.http.dto import (
+from app.features.crawler.application.contracts import (
     CrawlRequest,
     CrawlResponse,
     SearchRequest,

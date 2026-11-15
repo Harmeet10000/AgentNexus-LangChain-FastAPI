@@ -13,6 +13,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.config import Settings
 from app.features.crawler.application.egress import (
+    CrawlerEgressConfigError,
     CrawlerRedisRelaySettings,
     build_egress_policy,
     relay_redis_url,
@@ -25,7 +26,7 @@ _BASE_SETTINGS: dict[str, object] = {
     "CRAWLER_EGRESS_PUBLIC_PROBE_URL": "https://example.com/",
     "CRAWLER_EGRESS_LOOPBACK_PROBE_URL": "http://127.0.0.1:9/",
     "CRAWLER_EGRESS_ALLOWED_SCHEME_PORTS": "http:80,https:443",
-    "CRAWLER_EGRESS_NO_PROXY": "rabbitmq,127.0.0.1",
+    "CRAWLER_EGRESS_NO_PROXY": "rabbitmq,crawler-redis-relay,127.0.0.1",
     "REDIS_URL": "redis://user:pass@managed.example.com:6379/2",
 }
 
@@ -86,14 +87,35 @@ async def test_worker_redis_client_uses_relay_mtls_and_preserves_database(
     await client.aclose(close_connection_pool=True)
 
 
+def test_external_redis_without_relay_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(crawler_job, "get_settings", _settings)
+    monkeypatch.setattr(
+        crawler_job,
+        "_resolve_egress_policy",
+        lambda: build_egress_policy(_settings()),
+    )
+
+    with pytest.raises(CrawlerEgressConfigError, match="requires the fixed-destination"):
+        crawler_job._create_worker_redis()
+
+
 @pytest.mark.asyncio
-async def test_worker_redis_client_without_relay_uses_managed_host(
+async def test_internal_redis_without_relay_remains_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(crawler_job, "get_settings", _settings)
+    settings = _settings(
+        REDIS_URL="redis://redis:6379/2",
+        CRAWLER_EGRESS_NO_PROXY="rabbitmq,redis,127.0.0.1",
+    )
+    monkeypatch.setattr(crawler_job, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        crawler_job,
+        "_resolve_egress_policy",
+        lambda: build_egress_policy(settings),
+    )
 
     client = crawler_job._create_worker_redis()
-    assert client.connection_pool.connection_kwargs["host"] == "managed.example.com"
+    assert client.connection_pool.connection_kwargs["host"] == "redis"
     assert client.connection_pool.connection_kwargs["port"] == 6379
     await client.aclose(close_connection_pool=True)
 

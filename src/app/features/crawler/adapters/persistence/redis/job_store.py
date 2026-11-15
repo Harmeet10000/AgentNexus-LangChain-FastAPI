@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
 
 from app.config import get_settings
-from app.features.crawler.api.http.dto import (
+from app.features.crawler.application.contracts import (
     CrawlJobChunk,
     CrawlJobPageList,
     CrawlJobSearchResponse,

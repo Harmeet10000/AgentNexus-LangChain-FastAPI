@@ -71,6 +71,8 @@ async def _probe_policy(
     try:
         public = await client.get(policy.public_probe_url)
     except httpx.HTTPError as exc:
+        exc.add_note("operation=crawler_egress_preflight, probe=public")
+        logger.bind(error_type=type(exc).__name__).exception("crawler_egress_public_probe_failed")
         return EgressPreflightResult(
             available=False,
             reason=f"the public probe could not reach the egress boundary: {type(exc).__name__}",
@@ -85,6 +87,8 @@ async def _probe_policy(
     try:
         denied = await client.get(policy.loopback_probe_url)
     except httpx.HTTPError as exc:
+        exc.add_note("operation=crawler_egress_preflight, probe=loopback")
+        logger.bind(error_type=type(exc).__name__).exception("crawler_egress_loopback_probe_failed")
         return EgressPreflightResult(
             available=False,
             reason=(f"the loopback probe did not receive a policy denial: {type(exc).__name__}"),

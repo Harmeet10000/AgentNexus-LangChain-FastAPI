@@ -131,10 +131,9 @@ class _FixtureHandler(http.server.BaseHTTPRequestHandler):
     """Serve the fixture's HTTP surface."""
 
     protocol_version = "HTTP/1.1"
-    role = "public"
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib naming
-        if self.role == "private":
+        if self.server.role == "private":  # type: ignore[attr-defined]
             _record_hit(self.path)
             self._respond(200, b"PRIVATE FIXTURE REACHED\n")
             return
@@ -146,9 +145,7 @@ class _FixtureHandler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/subresource-page":
             body = (
-                "<html><body>"
-                f'<img src="http://{PRIVATE_HOST}:{HTTP_PORT}/private">'
-                "</body></html>"
+                f'<html><body><img src="http://{PRIVATE_HOST}:{HTTP_PORT}/private"></body></html>'
             ).encode()
             self._respond(200, body)
             return

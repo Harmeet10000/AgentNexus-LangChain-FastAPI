@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from app.config import Settings
+from app.utils import ServiceUnavailableException
 from app.worker.capabilities.owner import CapabilityUsageError
 from app.worker.jobs import crawler as crawler_jobs
 
@@ -96,3 +98,32 @@ def test_a_running_owner_loop_refuses_the_sync_resource_accessor() -> None:
             capability.get_crawler_worker_resources()
 
     asyncio.run(_miswired())
+
+
+def test_terminal_preflight_failure_marks_the_job_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provisioning failure on the last retry must not strand PENDING state."""
+    settings = Settings(CELERY_RETRY_MAX_RETRIES=0)
+    recorded: list[tuple[str, str]] = []
+
+    def unavailable() -> None:
+        raise ServiceUnavailableException(detail="crawler egress unavailable")
+
+    monkeypatch.setattr(crawler_jobs, "get_settings", lambda: settings)
+    monkeypatch.setattr(crawler_jobs, "get_crawler_worker_resources", unavailable)
+    monkeypatch.setattr(
+        crawler_jobs,
+        "_mark_failed_sync",
+        lambda crawl_id, message: recorded.append((crawl_id, message)),
+    )
+
+    with pytest.raises(ServiceUnavailableException):
+        crawler_jobs.crawl_job._orig_run(
+            crawl_id="crawl-preflight-failure",
+            request_payload={"url": "https://example.com"},
+        )
+
+    assert len(recorded) == 1
+    assert recorded[0][0] == "crawl-preflight-failure"
+    assert "crawler egress unavailable" in recorded[0][1]

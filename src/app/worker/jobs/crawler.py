@@ -21,7 +21,7 @@ from app.config import get_settings
 from app.connections.redis import create_redis_client
 from app.features.crawler.adapters.crawl4ai.crawler import WebCrawler
 from app.features.crawler.adapters.persistence.redis.job_store import CrawlJobStore
-from app.features.crawler.api.http.dto import CrawlRequest
+from app.features.crawler.application.contracts import CrawlRequest
 from app.features.crawler.application.egress import (
     build_egress_policy,
     is_boundary_outage,
@@ -242,11 +242,12 @@ def crawl_job(
     """Execute one durable crawl in a worker-owned browser lifecycle."""
     settings = get_settings()
     final_attempt = self.request.retries >= settings.CELERY_RETRY_MAX_RETRIES
-    # Provision (or reuse) the browser at the task boundary — the loop is not
-    # running here — and hand the resource into the coroutine. Sync owner
-    # operations are illegal while the owner loop runs.
-    browser = get_crawler_worker_resources().browser
     try:
+        # Provision (or reuse) the browser at the task boundary — the loop is
+        # not running here — and hand the resource into the coroutine. Keep
+        # provisioning inside the terminal-state guard so a persistent policy
+        # outage cannot strand an accepted job in PENDING.
+        browser = get_crawler_worker_resources().browser
         run_on_crawler_worker_loop(
             lambda: _run_crawl_job(
                 crawl_id, request_payload, final_attempt=final_attempt, browser=browser

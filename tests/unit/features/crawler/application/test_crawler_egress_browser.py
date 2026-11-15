@@ -59,6 +59,7 @@ def test_browser_probe_target_is_not_denied() -> None:
     from app.features.crawler.adapters.crawl4ai.request_guard import evaluate_browser_target
 
     assert evaluate_browser_target("about:blank", _policy()) is True
+    assert evaluate_browser_target("about:srcdoc", _policy()) is False
 
 
 def test_malformed_url_is_denied() -> None:

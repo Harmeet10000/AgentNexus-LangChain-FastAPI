@@ -26,6 +26,7 @@ _VALID: dict[str, object] = {
     "CRAWLER_EGRESS_LOOPBACK_PROBE_URL": "http://127.0.0.1:9/",
     "CRAWLER_EGRESS_ALLOWED_SCHEME_PORTS": "http:80,https:443",
     "CRAWLER_EGRESS_NO_PROXY": "rabbitmq,crawler-redis-relay,localhost,127.0.0.1,::1",
+    "REDIS_URL": "redis://localhost:6379/0",
 }
 
 
@@ -117,6 +118,27 @@ def test_bypass_destination_parsing_accepts_only_internal_names() -> None:
 def test_declared_relay_requires_deployment_issued_mtls_material() -> None:
     with pytest.raises(CrawlerEgressConfigError):
         build_egress_policy(_settings(CRAWLER_REDIS_RELAY_HOST="crawler-redis-relay"))
+
+
+def test_external_redis_requires_the_fixed_destination_relay() -> None:
+    with pytest.raises(CrawlerEgressConfigError, match="requires the fixed-destination"):
+        build_egress_policy(
+            _settings(
+                REDIS_URL="rediss://managed.example.com:6379/0",
+                CRAWLER_EGRESS_NO_PROXY="rabbitmq,localhost,127.0.0.1,::1",
+            )
+        )
+
+
+def test_direct_redis_is_limited_to_an_explicit_internal_destination() -> None:
+    policy = build_egress_policy(
+        _settings(
+            REDIS_URL="redis://redis:6379/0",
+            CRAWLER_EGRESS_NO_PROXY="rabbitmq,redis,localhost,127.0.0.1,::1",
+        )
+    )
+
+    assert policy.redis_relay is None
 
 
 def test_declared_relay_resolves_its_endpoint_and_material() -> None:

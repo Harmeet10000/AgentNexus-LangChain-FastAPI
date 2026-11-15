@@ -16,6 +16,8 @@ import os
 import sys
 from urllib.parse import urlparse
 
+from playwright.sync_api import Request, Response, sync_playwright
+
 PROXY_HOST = os.environ.get("EGRESS_PROXY_HOST", "crawler-egress-proxy-test")
 PROXY_PORT = int(os.environ.get("EGRESS_PROXY_PORT", "4750"))
 HITS_LOG = os.environ.get("FIXTURE_HITS_LOG", "/tmp/fixture-hits.log")
@@ -96,18 +98,71 @@ def case_private_seed() -> None:
 
 def case_private_redirect() -> None:
     """A permitted page that redirects to a denied destination."""
-    status, headers, body, chain = _follow(
-        f"http://{PUBLIC_HOST}:{FIXTURE_PORT}/redirect-private"
-    )
+    status, headers, body, chain = _follow(f"http://{PUBLIC_HOST}:{FIXTURE_PORT}/redirect-private")
     if status != DENIAL_STATUS:
         raise EvidenceFailure(f"the private redirect was not denied: {chain}")
     if DENIAL_HEADER not in headers:
         raise EvidenceFailure("the private redirect was denied without the proxy error header")
 
 
+def _exercise_browser_subresource(page_url: str, private_url: str) -> None:
+    """Load a public page in Chromium and observe its denied private asset."""
+    attempted = False
+    denial_statuses: list[int] = []
+    request_failures: list[str] = []
+
+    def on_request(request: Request) -> None:
+        nonlocal attempted
+        if request.url == private_url:
+            attempted = True
+
+    def on_response(response: Response) -> None:
+        if response.url == private_url:
+            denial_statuses.append(response.status)
+
+    def on_request_failed(request: Request) -> None:
+        if request.url == private_url:
+            request_failures.append(request.failure or "browser request failed")
+
+    proxy_url = f"http://{PROXY_HOST}:{PROXY_PORT}"
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                headless=True,
+                proxy={"server": proxy_url},
+                args=["--no-sandbox"],
+            )
+            try:
+                page = browser.new_page()
+                page.on("request", on_request)
+                page.on("response", on_response)
+                page.on("requestfailed", on_request_failed)
+                navigation = page.goto(page_url, wait_until="networkidle", timeout=15_000)
+                if navigation is None or navigation.status != 200:
+                    status = navigation.status if navigation is not None else "no response"
+                    raise EvidenceFailure(
+                        f"the public subresource page was not permitted (status {status})"
+                    )
+            finally:
+                browser.close()
+    except EvidenceFailure:
+        raise
+    except Exception as exc:  # noqa: BLE001 - standalone evidence must fail with context
+        raise EvidenceFailure(f"browser subresource exercise failed: {exc}") from exc
+
+    if not attempted:
+        raise EvidenceFailure("the browser never attempted the private subresource")
+    if DENIAL_STATUS not in denial_statuses and not request_failures:
+        raise EvidenceFailure(
+            "the browser private subresource had no proxy-denial or request-failure evidence"
+        )
+
+
 def case_private_subresource() -> None:
     """A subresource of a permitted page that points at a denied destination."""
-    _require_denial(f"http://{PRIVATE_HOST}:{FIXTURE_PORT}/private")
+    page_url = f"http://{PUBLIC_HOST}:{FIXTURE_PORT}/subresource-page"
+    private_url = f"http://{PRIVATE_HOST}:{FIXTURE_PORT}/private"
+    _exercise_browser_subresource(page_url, private_url)
 
 
 def case_changing_dns() -> None:

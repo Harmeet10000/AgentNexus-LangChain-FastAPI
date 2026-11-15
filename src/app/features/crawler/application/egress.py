@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 #: connection-time address policy remains the security boundary.
 SUPPORTED_BROWSER_SCHEME_PORTS = frozenset({("http", 80), ("https", 443)})
 
-#: Schemes that never leave the browser process and therefore never reach the
-#: proxy. ``about:blank`` is the browser's own health-probe target.
-NON_NETWORK_SCHEMES = frozenset({"about"})
+#: Exact browser-internal URLs needed for browser bootstrap/health checks.
+#: No other ``about:`` URL is accepted by the request guard.
+NON_NETWORK_BROWSER_URLS = frozenset({"about:blank"})
 
 #: Host names a public probe may never address.
 BLOCKED_PROBE_HOSTS = frozenset(
@@ -282,6 +282,27 @@ def _build_redis_relay(settings: Settings) -> CrawlerRedisRelaySettings | None:
     )
 
 
+def _validate_redis_route(
+    redis_url: str,
+    bypass_destinations: tuple[str, ...],
+    relay: CrawlerRedisRelaySettings | None,
+) -> None:
+    """Require external Redis to use the declared fixed-destination relay."""
+    parsed = urlparse(redis_url)
+    if parsed.scheme not in {"redis", "rediss"} or parsed.hostname is None:
+        message = "REDIS_URL must be an absolute redis:// or rediss:// URL"
+        raise CrawlerEgressConfigError(message)
+    allowed_internal_hosts = {host.lower() for host in bypass_destinations}
+    if relay is not None:
+        if relay.host.lower() not in allowed_internal_hosts:
+            message = "the crawler Redis relay must be an explicit internal bypass destination"
+            raise CrawlerEgressConfigError(message)
+        return
+    if parsed.hostname.lower() not in allowed_internal_hosts:
+        message = "external crawler Redis requires the fixed-destination mTLS relay"
+        raise CrawlerEgressConfigError(message)
+
+
 def build_egress_policy(settings: Settings) -> CrawlerEgressPolicy:
     """Resolve the deployment's egress boundary, rejecting unsafe configuration.
 
@@ -308,6 +329,8 @@ def build_egress_policy(settings: Settings) -> CrawlerEgressPolicy:
 
     allowed_scheme_ports = parse_allowed_scheme_ports(settings.CRAWLER_EGRESS_ALLOWED_SCHEME_PORTS)
     bypass_destinations = parse_bypass_destinations(settings.CRAWLER_EGRESS_NO_PROXY)
+    redis_relay = _build_redis_relay(settings)
+    _validate_redis_route(settings.REDIS_URL, bypass_destinations, redis_relay)
 
     return CrawlerEgressPolicy(
         proxy_url=proxy_url,
@@ -316,7 +339,7 @@ def build_egress_policy(settings: Settings) -> CrawlerEgressPolicy:
         preflight_timeout_seconds=settings.CRAWLER_EGRESS_PREFLIGHT_TIMEOUT_SECONDS,
         allowed_scheme_ports=allowed_scheme_ports,
         bypass_destinations=bypass_destinations,
-        redis_relay=_build_redis_relay(settings),
+        redis_relay=redis_relay,
         external_processing_enabled=settings.CRAWLER_EXTERNAL_PROCESSING_ENABLED,
     )
 

@@ -15,7 +15,8 @@ def test_relay_has_one_fixed_backend_and_verified_tls_on_both_legs() -> None:
     assert config.count("server managed-redis ") == 1
     assert "bind :6379 ssl" in config
     assert "verify required" in config
-    assert "crawler_redis_relay_client_ca.pem" in config
+    assert "/run/secrets/crawler_redis_relay_server_pem" in config
+    assert "/run/secrets/crawler_redis_relay_client_ca" in config
     assert "ssl verify required" in config
     assert 'sni str("${CRAWLER_REDIS_UPSTREAM_HOST}")' in config
     assert 'verifyhost "${CRAWLER_REDIS_UPSTREAM_HOST}"' in config

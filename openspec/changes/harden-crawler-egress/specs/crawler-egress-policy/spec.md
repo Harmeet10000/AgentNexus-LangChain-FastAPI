@@ -28,7 +28,7 @@ The crawler egress boundary MUST resolve each requested destination, apply addre
 - **THEN** only an address independently classified as permitted can be selected and dialed
 
 ### Requirement: Unsupported browser destinations are denied before proxying
-The crawler MUST restrict browser network requests to HTTP on port 80 or HTTPS on port 443 before handing them to the egress boundary. This browser-level rule MUST NOT weaken or replace connection-time address enforcement.
+The crawler MUST restrict browser network requests to HTTP on port 80 or HTTPS on port 443 before handing them to the egress boundary. The exact browser-internal bootstrap URL `about:blank` MAY be allowed because it creates no network request; all other `about:` URLs remain denied. This browser-level rule MUST NOT weaken or replace connection-time address enforcement.
 
 #### Scenario: Browser requests an unsupported scheme
 - **WHEN** navigation or a subresource uses a scheme other than HTTP or HTTPS

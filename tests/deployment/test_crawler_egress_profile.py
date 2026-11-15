@@ -7,6 +7,9 @@ proxy under test is the only path out, and the permitted range exists only
 in the test policy.
 """
 
+import runpy
+import threading
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -141,3 +144,68 @@ def test_fixtures_are_pinned_and_carry_no_credentials(name: str) -> None:
     assert isinstance(image, str)
     assert "@sha256:" in image
     assert "environment" not in service
+
+
+def test_private_fixture_records_every_received_request(tmp_path: Path) -> None:
+    """Prove the zero-hit oracle changes when the private server is reached."""
+    namespace = runpy.run_path(str(ROOT / "docker/crawler-egress/fixtures/fixture_server.py"))
+    handler = namespace["_FixtureHandler"]
+    handler.do_GET.__globals__["HITS_LOG"] = str(tmp_path / "private-hits.log")
+    server = namespace["_FixtureServer"](("127.0.0.1", 0), handler)
+    server.role = "private"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{server.server_port}/private",
+            timeout=2,
+        ) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert (tmp_path / "private-hits.log").read_text(encoding="utf-8").strip() == "/private"
+
+
+def test_connection_policy_runner_installs_a_real_browser() -> None:
+    services = _compose(PROFILE)["services"]
+    assert isinstance(services, dict)
+    runner = services["crawler-egress-tests"]
+    assert isinstance(runner, dict)
+    build = runner["build"]
+    assert isinstance(build, dict)
+    assert build["dockerfile"] == "docker/crawler-egress/evidence.Dockerfile"
+
+    dockerfile = (ROOT / str(build["dockerfile"])).read_text(encoding="utf-8")
+    runner = (
+        ROOT / "docker" / "crawler-egress" / "fixtures" / "connection_policy_test.py"
+    ).read_text(encoding="utf-8")
+    assert "FROM python:3.12-slim@sha256:" in dockerfile
+    assert "uv sync --frozen" in dockerfile
+    assert "playwright install --with-deps chromium" in dockerfile
+    assert "with sync_playwright()" in runner
+    assert 'page.goto(page_url, wait_until="networkidle"' in runner
+
+
+def test_subresource_case_uses_browser_navigation() -> None:
+    """The subresource proof must use Chromium, not replay the asset with HTTP."""
+    namespace = runpy.run_path(
+        str(ROOT / "docker/crawler-egress/fixtures/connection_policy_test.py")
+    )
+    page_url = "http://public.fixture.internal:8080/subresource-page"
+    private_url = "http://private.fixture.internal:8080/private"
+    navigations: list[tuple[str, str]] = []
+
+    def exercise_browser(observed_page_url: str, observed_private_url: str) -> None:
+        navigations.append((observed_page_url, observed_private_url))
+
+    case = namespace["case_private_subresource"]
+    case.__globals__["_exercise_browser_subresource"] = exercise_browser
+    case.__globals__["_proxied_get"] = lambda *_args, **_kwargs: pytest.fail(
+        "the subresource case must not replay the asset with raw HTTP"
+    )
+    case()
+
+    assert navigations == [(page_url, private_url)]

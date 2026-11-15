@@ -42,7 +42,7 @@ See `proposal.md` for motivation and `specs/crawler-egress-policy/spec.md` for t
 **Alternatives rejected:** Probe cloud metadata (the probe could become the exploit), rely only on container health (does not prove policy), or silently continue after probe failure.
 
 ### D6: Keep browser request interception as defense in depth
-**Choose:** Install a browser request hook that permits only HTTP on port 80 and HTTPS on port 443 before proxying. Keep existing pre/post URL validation.
+**Choose:** Install a browser request hook that permits only HTTP on port 80 and HTTPS on port 443 before proxying. Permit only the exact browser-internal bootstrap target `about:blank`, which creates no network request, and deny every other `about:` URL. Keep existing pre/post URL validation.
 **Why:** This provides early, explainable denial for unsupported schemes and ports and covers browser subresources at the request layer. It does not select the socket address and therefore cannot replace Smokescreen plus network isolation.
 
 ### D7: Separate deterministic integration evidence from opt-in live smoke

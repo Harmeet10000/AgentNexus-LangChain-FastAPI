@@ -42,7 +42,7 @@ from app.features.billing.subscriptions.exceptions import (
     SubscriptionVersionConflictError,
     subscription_error_to_http_status,
 )
-from app.features.crawler.exceptions import (
+from app.features.crawler.domain.errors import (
     CrawlerSearchError,
     CrawlerValidationError,
     crawler_error_to_http_status,

@@ -29,7 +29,7 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.features.crawler.adapters.crawl4ai.config import get_crawler_config
-from app.features.crawler.application.egress import boundary_denial_message
+from app.features.crawler.application.egress import boundary_denial_message, is_boundary_outage
 from app.features.crawler.application.errors import CrawlerProviderError
 from app.features.crawler.domain.chunker import truncate_content
 from app.features.crawler.domain.validator import (
@@ -355,12 +355,9 @@ class WebCrawler:
         # A denied plain-HTTP request still arrives as a response, so the
         # boundary's refusal is recognised from the response itself. The
         # message stays bounded: no proxy reason, address, or internal detail.
-        boundary_denial = boundary_denial_message(
-            getattr(result, "status_code", None),
-            getattr(result, "response_headers", None),
-        )
-        if boundary_denial is not None:
-            return Failure(CrawlerProviderError(message=boundary_denial, url=url))
+        boundary_failure = self._boundary_failure(result, url)
+        if boundary_failure is not None:
+            return Failure(boundary_failure)
         final_url = sanitize_url(str(getattr(result, "url", url) or url))
         valid, validation_error = await validate_navigation_destination(
             final_url, phase="post-navigation"
@@ -396,7 +393,7 @@ class WebCrawler:
             )
         return Success(crawl_result)
 
-    async def crawl_recursive(  # noqa: PLR0912
+    async def crawl_recursive(  # noqa: PLR0912, PLR0914
         self,
         urls: list[str],
         max_depth: int = 1,
@@ -486,6 +483,10 @@ class WebCrawler:
 
         results: list[CrawlResult] = []
         for raw_result in cast("list[Any]", crawl_results):
+            result_url = sanitize_url(str(getattr(raw_result, "url", normalized_urls[0])))
+            boundary_failure = self._boundary_failure(raw_result, result_url)
+            if boundary_failure is not None:
+                return Failure(boundary_failure)
             result = self._bound_result(self._to_crawl_result(raw_result, start_time))
             results.append(await self._enforce_post_navigation_policy(raw_result, result))
         if self.config.url_patterns:
@@ -499,6 +500,20 @@ class WebCrawler:
                 if result.success:
                     await self._save_to_cache(result.url, result, use_proxy=use_proxy)
         return Success(results)
+
+    @staticmethod
+    def _boundary_failure(raw_result: Any, url: str) -> CrawlerProviderError | None:
+        """Classify proxy denials and outages before results can be cached."""
+        denial = boundary_denial_message(
+            getattr(raw_result, "status_code", None),
+            getattr(raw_result, "response_headers", None),
+        )
+        if denial is not None:
+            return CrawlerProviderError(message=denial, url=url)
+        error_message = str(getattr(raw_result, "error_message", "") or "")
+        if is_boundary_outage(error_message):
+            return CrawlerProviderError(message=error_message, url=url)
+        return None
 
     @staticmethod
     async def _enforce_post_navigation_policy(raw_result: Any, result: CrawlResult) -> CrawlResult:

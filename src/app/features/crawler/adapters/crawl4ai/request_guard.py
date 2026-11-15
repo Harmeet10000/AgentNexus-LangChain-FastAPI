@@ -12,7 +12,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from app.features.crawler.application.egress import NON_NETWORK_SCHEMES, CrawlerEgressConfigError
+from app.features.crawler.application.egress import (
+    NON_NETWORK_BROWSER_URLS,
+    CrawlerEgressConfigError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -25,14 +28,14 @@ if TYPE_CHECKING:
 
 def evaluate_browser_target(url: str, policy: CrawlerEgressPolicy) -> bool:
     """Return True when the crawler may request this URL."""
+    if url.strip().lower() in NON_NETWORK_BROWSER_URLS:
+        return True
     try:
         parsed = urlparse(url)
         scheme = parsed.scheme.lower()
         port = parsed.port or (443 if scheme == "https" else 80)
     except ValueError:
         return False
-    if scheme in NON_NETWORK_SCHEMES:
-        return True
     return policy.is_browser_target_allowed(scheme, port)
 
 

@@ -24,6 +24,7 @@ _BASE_SETTINGS: dict[str, object] = {
     "CRAWLER_EGRESS_ALLOWED_SCHEME_PORTS": "http:80,https:443",
     "CRAWLER_EGRESS_NO_PROXY": "rabbitmq,127.0.0.1",
     "CRAWLER_EXTERNAL_PROCESSING_ENABLED": False,
+    "REDIS_URL": "redis://127.0.0.1:6379/0",
 }
 
 
@@ -31,7 +32,7 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**{**_BASE_SETTINGS, **overrides})
 
 
-def test_proxy_environment_matches_policy_and_empty_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_proxy_environment_matches_policy_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
     policy = build_egress_policy(_settings(CRAWLER_EGRESS_NO_PROXY="rabbitmq,127.0.0.1"))
     names = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy")
     for name in names:
@@ -47,11 +48,6 @@ def test_proxy_environment_matches_policy_and_empty_bypass(monkeypatch: pytest.M
         assert os.environ[name] == policy.proxy_url
     assert os.environ["NO_PROXY"] == "rabbitmq,127.0.0.1"
     assert os.environ["no_proxy"] == "rabbitmq,127.0.0.1"
-
-    empty_policy = build_egress_policy(_settings(CRAWLER_EGRESS_NO_PROXY=""))
-    _apply_egress_environment(empty_policy)
-    assert os.environ["NO_PROXY"] == ""
-    assert os.environ["no_proxy"] == ""
 
 
 @pytest.mark.parametrize("bypass", ["example.com", "*"])
