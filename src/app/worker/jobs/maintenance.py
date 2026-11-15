@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 celery_app = get_worker_celery_app()
 
 
-@celery_app.task(name=DOCUMENTS_STUCK_SWEEP, base=ResilientTask)
+@celery_app.task(name=DOCUMENTS_STUCK_SWEEP, bind=True, base=ResilientTask)
 def sweep_stuck_documents(_self: ResilientTask) -> dict[str, object]:
     """C7: observe every non-terminal document past the stuck-age threshold.
 
