@@ -12,9 +12,9 @@ verdicts name the production import chain.
 
 - **Path today:** gone. `rg "ingestion_kb"` over `src/` and `tests/` returns
   zero code hits. Remaining mentions are historical prose only: the retired
-  plan (`PLAN-bulletproof-ingestion.md`), `docs/fresh-environment.md` and
-  `docs/performance-agent-prompts-2026-09-09.md` (frozen snapshots),
-  `tests/performance/todo.md` (a frozen checklist), and one stale line in the
+  plan (`PLAN-bulletproof-ingestion.md`), `docs/fresh-environment.md`, a deleted
+  historical performance-audit snapshot, `tests/performance/todo.md` (a frozen
+  checklist), and one stale line in the
   archived spec `openspec/specs/shared-infrastructure-errors/spec.md:252`
   (a historical-error-count table that still cites `ingestion_kb/nodes.py` as
   an `TransientExternalError` raiser — prose residue, not a code path).

@@ -46,9 +46,11 @@ adapter implements the same port and extends the accepted setting in its own cha
 
 ### Context
 
-This repository has a documented history of cache-authorization defects (cache keys omitting
-`user_id`, `docs/performance-agent-prompts-2026-09-09.md`), and the answered scoping decision
-is per-user matching. Vector similarity that ranks across authorization boundaries and filters
+This repository has a documented history of cache-authorization defects: an audit found that
+search and answer cache keys omitted `user_id`, allowing a shared-cache hit to return another
+owner's private result before SQL authorization ran. The audit snapshot was deleted; this decision
+record preserves the relevant finding. The answered scoping decision is per-user matching. Vector
+similarity that ranks across authorization boundaries and filters
 afterwards is exactly that defect class. The exact-match answer-cache key derivation is the
 reviewed, parity-pinned encoding of user, tenant, authorized scope, resolved document versions,
 and evidence policy.
