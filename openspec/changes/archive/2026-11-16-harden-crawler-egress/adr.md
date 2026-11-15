@@ -2,7 +2,7 @@
 
 ## ADR-001: Use Stripe Smokescreen as the crawler connection boundary
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-11-15
 - **Supersedes:** none
 
@@ -29,7 +29,7 @@ Build a minimal runtime image from Stripe's stable `v0.1.0` Linux release archiv
 
 ## ADR-002: Isolate crawler workers behind constrained dual-homed gateways
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-11-15
 - **Supersedes:** none
 
@@ -55,7 +55,7 @@ Run crawler workers on an internal-only control network. Smokescreen and a fixed
 
 ## ADR-003: Provision crawler capability only after positive and negative policy probes
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-11-15
 - **Supersedes:** none
 
@@ -81,7 +81,7 @@ Crawler capability provisioning requires a bounded proxy request to an operator-
 
 ## ADR-004: Preserve managed Redis through a mutually authenticated fixed-destination relay
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-11-15
 - **Supersedes:** none
 
