@@ -370,3 +370,40 @@ async def test_validation_failed_chunks_carry_no_heuristic_metadata() -> None:
     unstripped, _warnings = await segment_chunks(parsed=parsed, classified=_heuristic_classified())
     assert any("Heuristic Party" in str(chunk.metadata_) for chunk in unstripped)
     assert any("Heuristic Party" in chunk.preamble for chunk in unstripped)
+
+
+def test_context_pass_receives_the_stripped_classification_when_validation_failed() -> None:
+    """The contextual-preamble pass is subject to the same rejected-metadata
+    rule as segmentation and the status writes: on a terminal validation
+    failure the summaries are generated from the stripped classification, so a
+    rejected party/jurisdiction/contract_type cannot re-enter the searchable
+    preamble through a context sentence."""
+    from app.features.documents.application.commands.upload_document import (
+        _context_classified,
+    )
+
+    context_classified = _context_classified(
+        _heuristic_classified(), _preparation(None, failed=True)
+    )
+
+    assert context_classified.parties == []
+    assert context_classified.jurisdiction is None
+    assert context_classified.contract_type is None
+    # document_kind survives — it drives chunk typing and policy.
+    assert context_classified.document_kind == "legal_contract"
+
+
+def test_context_pass_keeps_the_classification_without_a_failed_extraction() -> None:
+    """A plain not-extracted (or validated) outcome keeps the classifier's
+    fields for the context pass — only a terminal failure scrubs them."""
+    from app.features.documents.application.commands.upload_document import (
+        _context_classified,
+    )
+
+    context_classified = _context_classified(
+        _heuristic_classified(), _preparation(None, failed=False)
+    )
+
+    assert context_classified.parties == ["Heuristic Party"]
+    assert context_classified.jurisdiction == "heuristic jurisdiction"
+    assert context_classified.contract_type == "heuristic contract"

@@ -108,3 +108,35 @@ async def test_deep_health_payload_carries_the_resolved_sha(
     data = body["data"]
     assert data["git_sha"] == "dd3abfe"
     assert data["status"] == "healthy"
+
+
+def test_root_route_uses_the_shared_resolver() -> None:
+    """F3 residual: GET / must not report git_sha "unknown" while /health knows.
+
+    The root route closure reuses the exact resolver the deep-health payload
+    uses (never the raw ``settings.GIT_SHA``), so provenance cannot disagree
+    between the two endpoints on a native boot. Executed as an AST assertion:
+    a full ``create_app()`` import costs minutes of heavy-model imports, and
+    the suite's error-envelope convention already inspects ``main.py`` this way.
+    """
+    import ast
+    from pathlib import Path
+
+    source = Path("src/app/main.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    root_body: list[ast.stmt] | None = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "root":
+            root_body = node.body
+    assert root_body is not None, "root route handler not found in main.py"
+
+    rendered = ast.unparse(ast.Module(body=root_body, type_ignores=[]))
+    assert "resolve_git_sha()" in rendered
+    assert "settings.GIT_SHA" not in rendered
+
+    # And the resolver is the shared build_info seam, not a local copy.
+    assert (
+        "from .features.health.build_info import resolve_git_sha" in source
+        or "from app.features.health.build_info import resolve_git_sha" in source
+    )

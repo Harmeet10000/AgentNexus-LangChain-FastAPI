@@ -120,6 +120,11 @@ class CanonicalDocumentChunk(BaseModel, frozen=True):
     locus: str | None = None
     clause_type: str | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
+    # Persisted quality warnings ride the run so ingestion readiness can report
+    # a warnings-completed document honestly (the disclosure reads this — a
+    # document that finished with warnings is not indistinguishable from a
+    # clean READY one).
+    quality_warnings: tuple[dict[str, object], ...] = ()
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -601,6 +606,11 @@ class PostgresDocumentContentSource:
                 locus=chunk.locus,
                 clause_type=chunk.clause_type,
                 metadata={**chunk.metadata_, **chunk.custom_metadata},
+                quality_warnings=tuple(
+                    cast("dict[str, object]", warning)
+                    for warning in chunk.quality_warnings
+                    if isinstance(warning, dict)
+                ),
             )
             for chunk in chunks
             if chunk.content.strip()

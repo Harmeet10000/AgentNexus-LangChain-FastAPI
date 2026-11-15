@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fakeredis.aioredis import FakeRedis
+from fastapi import Response
 from returns.result import Failure, Success
 
 from app.features.auth.adapters.persistence.mongodb.account_repository import (
@@ -35,7 +36,9 @@ from app.features.auth.domain.errors import (
     AuthCode,
     AuthRefreshReuseError,
 )
+from app.kernel.result import render_result
 from app.security.tokens import decode_token
+from app.shared.jobs.registry import UnregisteredTaskError
 
 from .provisioning_fakes import FakeTenantSQLStore
 
@@ -154,3 +157,82 @@ async def test_session_listing_survives_bytes_returning_redis_client() -> None:
     # The index is not destroyed by the read.
     remaining = await redis.smembers("auth:user_sessions:507f1f77bcf86cd799439011")
     assert remaining == {b"session-bytes-1"}
+
+
+class _ExplodingSessionFactory:
+    """Session-factory stand-in whose outbox seam raises the way production did.
+
+    G1 regression: the refresh-reuse security-event emit targeted an event name
+    absent from the job catalog, so the outbox publish raised
+    ``UnregisteredTaskError`` (a Celery error, not a SQLAlchemy error) after the
+    family had already been revoked — escaping the DB-error-only catch and
+    replacing the typed reuse failure with a 500.
+    """
+
+    def __call__(self) -> None:
+        message = "auth.refresh_token_reuse_detected"
+        raise UnregisteredTaskError(
+            message,
+            known_names=frozenset({"auth.send_verification_email"}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_reuse_failure_survives_exploding_security_event_emit() -> None:
+    """Reuse stays a typed 401 failure even when the audit emit raises (G1)."""
+    sql = FakeTenantSQLStore()
+    accounts = InMemoryAuthAccountStore()
+    redis = FakeRedis(decode_responses=True)
+    provisioner = PersonalTenantProvisioner(sql.factory, accounts)
+    service = AuthService(
+        accounts,
+        RefreshTokenRepository(redis),
+        session_factory=_ExplodingSessionFactory(),  # type: ignore[arg-type]
+        provisioner=provisioner,
+    )
+    tokens = await _login_verified_user(service, accounts)
+    first = await service.refresh(tokens.refresh_token)
+    assert isinstance(first, Success)
+
+    reuse = await service.refresh(tokens.refresh_token)
+    assert isinstance(reuse, Failure)
+    assert isinstance(reuse.failure(), AuthRefreshReuseError)
+    assert reuse.failure().code == AuthCode.REFRESH_TOKEN_REUSE
+
+    # The failure renders as the typed 401 wire contract, never a 500.
+    response = Response()
+    rendered = render_result(reuse, response, message="Token refreshed")
+    assert response.status_code == 401
+    assert rendered.error is not None
+    assert rendered.error.code == "REFRESH_TOKEN_REUSE"
+
+
+@pytest.mark.asyncio
+async def test_reuse_failure_survives_outbox_infrastructure_failure() -> None:
+    """A DB failure on the audit emit also leaves the typed reuse failure intact."""
+    from sqlalchemy.exc import OperationalError
+
+    class _FailingSessionFactory:
+        def __call__(self) -> None:
+            raise OperationalError(
+                statement="SELECT 1", params=None, orig=RuntimeError("connection lost")
+            )
+
+    sql = FakeTenantSQLStore()
+    accounts = InMemoryAuthAccountStore()
+    redis = FakeRedis(decode_responses=True)
+    provisioner = PersonalTenantProvisioner(sql.factory, accounts)
+    service = AuthService(
+        accounts,
+        RefreshTokenRepository(redis),
+        session_factory=_FailingSessionFactory(),  # type: ignore[arg-type]
+        provisioner=provisioner,
+    )
+    tokens = await _login_verified_user(service, accounts)
+    first = await service.refresh(tokens.refresh_token)
+    assert isinstance(first, Success)
+
+    reuse = await service.refresh(tokens.refresh_token)
+    assert isinstance(reuse, Failure)
+    assert isinstance(reuse.failure(), AuthRefreshReuseError)
+    assert reuse.failure().code == AuthCode.REFRESH_TOKEN_REUSE

@@ -224,3 +224,94 @@ def test_gate_outcome_reflects_failed_rows() -> None:
     )
     assert gate.verdict == "fail"
     assert gate.failed_case_ids == ["coverage_order-SRC-01"]
+
+
+# ---------------------------------------------------------------------------
+# Regressions: source normalization, empty expectations, sibling manifest, CLI.
+# ---------------------------------------------------------------------------
+
+
+def test_normalized_source_locates_chunks_the_raw_text_hides() -> None:
+    """Chunk contents are derived from the normalized page (R1-R7), so the
+    span search must run over the normalized source too: a recorded
+    ``payment\\u00a0terms`` is the intact ``payment terms`` chunk, not missing
+    content."""
+    from app.ai.evaluation.ingestion_fidelity import convention_chunks, reconstruct_markdown
+
+    page = {
+        "page_no": 1,
+        "text": "Intro paragraph.\n\npayment\u00a0terms are net thirty days from invoice.",
+    }
+    _markdown, offsets = reconstruct_markdown([page])
+    prepared = convention_chunks(source_id="UNIT", pages=[page], page_offsets=offsets)
+
+    assert any("payment terms" in chunk.content for _id, chunk in prepared)
+    located = [chunk for _id, chunk in prepared if chunk.source_start_char is not None]
+    assert located, "intact normalized content must keep its source span"
+
+
+def test_an_empty_expectation_cannot_pass_vacuously() -> None:
+    """A row that labels no evaluable dimension is a labeling mistake: the
+    previous ``bool(model_dump(exclude_none=True))`` guard was vacuous because
+    the default empty containers survive ``exclude_none``."""
+    vacuous = evaluate_row(_row({}), _measurement())
+    assert not vacuous.passed
+    assert vacuous.failures == []
+    assert vacuous.skipped == []
+
+
+def test_boundary_findings_read_the_supplied_sibling_manifest(tmp_path: Path) -> None:
+    """The boundary cross-check reads the gold set's own sibling manifest — a
+    custom gold set or ``--corpus-root`` run is never silently checked against
+    the default corpus manifest."""
+    from app.ai.evaluation.ingestion_fidelity import _corpus_findings
+
+    manifest = tmp_path / "custom.manifest.json"
+    manifest.write_text(
+        json.dumps({"per_artifact": [{"source_id": "UNIT", "contract_boundaries": [1, 2, 3]}]}),
+        encoding="utf-8",
+    )
+
+    measured = _measurement(boundary_count=1)
+    mismatched = _corpus_findings([measured], manifest_path=manifest)
+    assert any("contract_boundaries=3" in finding.finding for finding in mismatched)
+
+    missing = _corpus_findings([measured], manifest_path=tmp_path / "absent.manifest.json")
+    assert missing == []
+
+
+def test_cli_exits_nonzero_on_a_failed_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failed corpus gate is a failed evaluation run: the report is still
+    written, but the exit code must not read it as success."""
+    import sys as _sys
+
+    from app.ai.evaluation import ingestion_fidelity as fidelity_module
+    from app.ai.evaluation.ingestion_fidelity import GateOutcome, IngestionFidelityReport
+
+    report = IngestionFidelityReport(
+        generated_at_utc="2026-01-01T00:00:00+00:00",
+        golden_set_version="ingestion_fidelity_v1",
+        pipeline_note="unit fixture",
+        live_run={"status": "pending", "reason": "unit fixture"},
+        gate=GateOutcome(
+            verdict="fail",
+            basis="unit fixture",
+            rows_passed=0,
+            rows_failed=1,
+            failed_case_ids=["coverage_order-UNIT"],
+        ),
+    )
+    monkeypatch.setattr(fidelity_module, "evaluate_gold_set", lambda **_kwargs: report)
+    monkeypatch.setattr(
+        _sys, "argv", ["ingestion_fidelity", "gold.jsonl", "--output", str(tmp_path / "r.json")]
+    )
+
+    with pytest.raises(SystemExit) as caught:
+        fidelity_module.main()
+
+    assert caught.value.code == 1
+    assert (
+        json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))["gate"]["verdict"] == "fail"
+    )

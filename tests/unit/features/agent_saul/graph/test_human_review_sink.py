@@ -538,3 +538,85 @@ async def test_override_records_reason_identity_and_contract_identity() -> None:
     # from the resume payload.
     assert override.contract_index == 1
     assert resumed["self_reviewed"] is False
+
+
+async def test_reviewer_supplied_contract_index_never_wins() -> None:
+    """A resume payload naming a different contract than the checkpointed
+    evidence cannot mislabel the override: the checkpoint identity always
+    replaces the reviewer-supplied contract_index, so the identity that
+    survives into FinalReport.human_overrides is the contract the override
+    actually re-classifies."""
+    _sink, review_node = make_human_review_entry()
+    state = _review_state()
+
+    builder = StateGraph(LegalAgentState)
+    builder.add_node("review", review_node)
+    builder.add_edge(START, "review")
+    builder.add_edge("review", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-override-mismatch"}}
+
+    await graph.ainvoke(state, config)
+    resumed = await graph.ainvoke(
+        Command(
+            resume={
+                "action": "approve",
+                "reviewer_id": "reviewer-9",
+                "reviewer_role": "reviewer",
+                "overrides": [
+                    {
+                        # The checkpointed segment for this clause is contract 1;
+                        # the resume payload claims contract 0.
+                        "clause_id": "canonical:doc-a:v1:chunk:2",
+                        "original_label": "high",
+                        "override_label": "medium",
+                        "reason_code": "REVIEWER_JUDGEMENT",
+                        "contract_index": 0,
+                    }
+                ],
+            }
+        ),
+        config,
+    )
+
+    override = resumed["human_review"].overrides[0]
+    assert override.contract_index == 1
+
+
+async def test_contract_index_for_an_unattributed_clause_stays_none() -> None:
+    """The reviewer never supplies the contract identity: a clause the
+    checkpoint cannot attribute keeps ``contract_index=None`` even when the
+    resume payload names one."""
+    _sink, review_node = make_human_review_entry()
+    state = _review_state()
+
+    builder = StateGraph(LegalAgentState)
+    builder.add_node("review", review_node)
+    builder.add_edge(START, "review")
+    builder.add_edge("review", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-override-unknown"}}
+
+    await graph.ainvoke(state, config)
+    resumed = await graph.ainvoke(
+        Command(
+            resume={
+                "action": "approve",
+                "reviewer_id": "reviewer-9",
+                "reviewer_role": "reviewer",
+                "overrides": [
+                    {
+                        "clause_id": "canonical:doc-z:v1:chunk:99",
+                        "original_label": "high",
+                        "override_label": "medium",
+                        "reason_code": "REVIEWER_JUDGEMENT",
+                        "contract_index": 3,
+                    }
+                ],
+            }
+        ),
+        config,
+    )
+
+    override = resumed["human_review"].overrides[0]
+    assert override.contract_index is None

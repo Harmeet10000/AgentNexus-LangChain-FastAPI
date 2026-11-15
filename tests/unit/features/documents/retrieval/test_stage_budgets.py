@@ -24,6 +24,7 @@ from app.features.documents.retrieval.graph.budgets import (
     DEFAULT_STAGE_BUDGETS,
     STAGE_GENERATE,
     STAGE_GRADE,
+    STAGE_POST_PROCESS,
     StageBudget,
     StageBudgetTracker,
     build_stage_budget_tracker,
@@ -34,6 +35,7 @@ from app.features.documents.retrieval.graph.state import (
     GeneratedAnswer,
     QueryPlan,
     SourceCriteria,
+    StageUsage,
 )
 
 if TYPE_CHECKING:
@@ -513,3 +515,32 @@ async def test_generate_retry_performs_exactly_the_budgeted_calls(
     assert result["generated_answer"].answer == _FALLBACK
     budget_warnings = _budget_warnings(result)
     assert [(w.stage, w.severity) for w in budget_warnings] == [(STAGE_GENERATE, "warning")]
+
+
+async def test_over_budget_post_process_passes_fused_order_through_unspent() -> None:
+    """A7: the advertised post_process budget is now charged like every stage.
+
+    A refused charge must NOT silently trim context with no trace: the fused
+    order passes through untouched, the violation names the stage, and the
+    usage delta records the unspent zero.
+    """
+    tracker = _tracker(**{STAGE_POST_PROCESS: StageBudget(latency_ms=30_000, max_calls=0)})
+    graph = build_retrieval_graph()
+    result = await graph.ainvoke(
+        _input(),
+        context=RetrievalGraphContext(
+            llm=_ScriptedLLM(),  # ty: ignore[invalid-argument-type]
+            repo=_RecordingRepo(),  # ty: ignore[invalid-argument-type]
+            reranker=_PassThroughReranker(),
+            budgets=tracker,
+        ),
+    )
+
+    usage = [entry for entry in result["stage_usage"] if entry.stage == STAGE_POST_PROCESS]
+    assert usage == [StageUsage(stage=STAGE_POST_PROCESS, calls=0)]
+    budget_warnings = [
+        warning
+        for warning in result["quality_warnings"]
+        if warning.code == "STAGE_BUDGET_EXHAUSTED"
+    ]
+    assert any(w.stage == STAGE_POST_PROCESS for w in budget_warnings)

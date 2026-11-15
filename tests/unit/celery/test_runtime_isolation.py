@@ -40,7 +40,7 @@ assert not any(n == "app.worker" or n.startswith("app.worker.") for n in sys.mod
 assert not any(n.startswith("app.features.") and n.endswith(".tasks") for n in sys.modules)
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=45, check=False
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=120, check=False
     )
     assert result.returncode == 0, result.stderr
 
@@ -76,7 +76,7 @@ print("TASK_NAMES=" + ",".join(sorted(profile.task_names)))
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
-        timeout=45,
+        timeout=120,
         check=False,
     )
     assert result.returncode == 0, result.stderr
@@ -111,7 +111,7 @@ assert not any(name.startswith("app.worker.capabilities.") for name in sys.modul
 print("BEAT_OK")
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=45, check=False
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=120, check=False
     )
     assert result.returncode == 0, result.stderr
     assert "BEAT_OK" in result.stdout

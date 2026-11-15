@@ -39,6 +39,7 @@ from .budgets import (
     STAGE_GENERATE,
     STAGE_GRADE,
     STAGE_PLAN,
+    STAGE_POST_PROCESS,
     STAGE_RERANK,
     STAGE_RETRIEVE_FUSION,
     STAGE_SOURCE_IDENTIFIER,
@@ -1004,39 +1005,61 @@ def make_post_process_node() -> Callable[[RetrievalState, Any], Awaitable[dict[s
 
         max_tokens = context.post_process_max_tokens or DEFAULT_RAG_TOKEN_BUDGET
         count_tokens = context.count_tokens or default_count_tokens
-
-        chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
-        unique: dict[str, RetrievedChunk] = {}
-        for chunk in chunks:
-            unique.setdefault(chunk.chunk_id, chunk)
-        grouped: dict[str, list[RetrievedChunk]] = {}
-        for chunk in unique.values():
-            grouped.setdefault(chunk.parent_doc_id, []).append(chunk)
-        ordered: list[RetrievedChunk] = [
-            chunk
-            for document_chunks in grouped.values()
-            for chunk in sorted(document_chunks, key=lambda item: item.chunk_index)
-        ]
-        ranked = [
-            RankedChunk(chunk_id=chunk.chunk_id, score=chunk.score, rank=index)
-            for index, chunk in enumerate(ordered, start=1)
-        ]
-        lookup = {
-            chunk.chunk_id: SearchChunkRecord(
-                document_id=chunk.parent_doc_id,
-                title="",
-                content=chunk.chunk_text,
-                chunk_index=chunk.chunk_index,
-                chunk_metadata=dict(chunk.metadata_),
+        # A7: the stage budget is advertised in DEFAULT_STAGE_BUDGETS, so the
+        # stage must charge like every other node — a refusal degrades the
+        # same way (fused order passes through untrimmed context-assembly),
+        # and the latency span feeds the standing degradation alert.
+        document_class = _state_document_class(state)
+        refusals = _charge_stage(context, STAGE_POST_PROCESS, document_class)
+        if refusals:
+            return {
+                "reranked_chunks": state.get("reranked_chunks", []),
+                "assembled_context": [],
+                **_stage_usage(STAGE_POST_PROCESS, 0),
+                **_violation_state(refusals),
+            }
+        async with _stage_span(
+            STAGE_POST_PROCESS, context.budgets, document_class
+        ) as violations:
+            chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
+            unique: dict[str, RetrievedChunk] = {}
+            for chunk in chunks:
+                unique.setdefault(chunk.chunk_id, chunk)
+            grouped: dict[str, list[RetrievedChunk]] = {}
+            for chunk in unique.values():
+                grouped.setdefault(chunk.parent_doc_id, []).append(chunk)
+            ordered: list[RetrievedChunk] = [
+                chunk
+                for document_chunks in grouped.values()
+                for chunk in sorted(document_chunks, key=lambda item: item.chunk_index)
+            ]
+            ranked = [
+                RankedChunk(chunk_id=chunk.chunk_id, score=chunk.score, rank=index)
+                for index, chunk in enumerate(ordered, start=1)
+            ]
+            lookup = {
+                chunk.chunk_id: SearchChunkRecord(
+                    document_id=chunk.parent_doc_id,
+                    title="",
+                    content=chunk.chunk_text,
+                    chunk_index=chunk.chunk_index,
+                    chunk_metadata=dict(chunk.metadata_),
+                )
+                for chunk in ordered
+            }
+            sections = assemble_rag_context(
+                ranked, lookup, max_tokens=max_tokens, count_tokens=count_tokens
             )
-            for chunk in ordered
-        }
-        sections = assemble_rag_context(
-            ranked, lookup, max_tokens=max_tokens, count_tokens=count_tokens
-        )
-        included_chunk_ids = {chunk_id for section in sections for chunk_id in section.chunk_ids}
-        budgeted_chunks = [chunk for chunk in ordered if chunk.chunk_id in included_chunk_ids]
-        return {"reranked_chunks": budgeted_chunks, "assembled_context": sections}
+            included_chunk_ids = {
+                chunk_id for section in sections for chunk_id in section.chunk_ids
+            }
+            budgeted_chunks = [chunk for chunk in ordered if chunk.chunk_id in included_chunk_ids]
+            return {
+                "reranked_chunks": budgeted_chunks,
+                "assembled_context": sections,
+                **_stage_usage(STAGE_POST_PROCESS, 1),
+                **_violation_state(violations),
+            }
 
     return post_process_node
 

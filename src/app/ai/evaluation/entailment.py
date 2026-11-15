@@ -180,10 +180,16 @@ def judge_claim_deterministic(
     declared evidence chunk is recorded, the anchoring ratio is the fraction of
     content tokens anchored, and the graded support follows the floors. This is
     an anchoring PROXY for entailment — the report says so via the judge id.
+
+    Anchoring is whole-token: a claim token must appear as a token of the
+    evidence, never as a substring of a longer one. A claimed ``30 days``
+    anchored inside evidence saying ``130 days`` (or ``termination`` anchoring
+    the token ``termin``) would otherwise pass as entailed — number and word
+    boundaries are exactly where legal claims are graded.
     """
     tokens = _content_tokens(claim_text)
-    haystack = " ".join(evidence_texts.values()).lower()
-    unanchored = [token for token in tokens if token not in haystack]
+    haystack_tokens = set(_content_tokens(" ".join(evidence_texts.values())))
+    unanchored = [token for token in tokens if token not in haystack_tokens]
     ratio = 1.0 if not tokens else 1.0 - len(unanchored) / len(tokens)
     if ratio >= _ENTAILED_RATIO_FLOOR:
         judged = "entailed"
@@ -224,23 +230,31 @@ def evaluate_entailment(  # noqa: PLR0914 — one scoring pass keeps every claim
         evidence_ids = sorted({cid for claim in claims for cid in claim.evidence_chunk_ids})
         missing_evidence = [cid for cid in evidence_ids if cid not in chunk_texts]
         evidence_texts = {cid: chunk_texts[cid] for cid in evidence_ids if cid in chunk_texts}
-        judgements = [
-            judge_claim_deterministic(
-                claim.claim_id, claim.text, claim.expected_support, evidence_texts
+        judgements = []
+        for claim in claims:
+            # Each claim is anchored ONLY in the evidence chunks it declares:
+            # judging against the whole query's evidence pool lets sibling
+            # chunks supply anchoring words the claim's own evidence lacks.
+            claim_evidence_ids = sorted(dict.fromkeys(claim.evidence_chunk_ids))
+            claim_missing = [cid for cid in claim_evidence_ids if cid not in chunk_texts]
+            claim_evidence = {
+                cid: chunk_texts[cid] for cid in claim_evidence_ids if cid in chunk_texts
+            }
+            judgement = judge_claim_deterministic(
+                claim.claim_id, claim.text, claim.expected_support, claim_evidence
             )
-            for claim in claims
-        ]
-        claim_judgements.extend(judgements)
-        if missing_evidence:
-            judgements = [
-                judgement.model_copy(
+            if claim_missing:
+                # The missing-evidence verdict replaces the anchored grade
+                # BEFORE the judgement is collected, so the aggregates never
+                # aggregate a stale grade.
+                judgement = judgement.model_copy(
                     update={
                         "judged_support": "unsupported",
-                        "missing_evidence_chunk_ids": missing_evidence,
+                        "missing_evidence_chunk_ids": claim_missing,
                     }
                 )
-                for judgement in judgements
-            ]
+            judgements.append(judgement)
+        claim_judgements.extend(judgements)
         citation_failures = [
             f"evidence chunk {cid} is not in the canonical chunk universe"
             for cid in missing_evidence

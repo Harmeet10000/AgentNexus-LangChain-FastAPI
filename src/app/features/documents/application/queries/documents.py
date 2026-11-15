@@ -227,6 +227,35 @@ def fused_branches(graphiti: Graphiti | None = None) -> tuple[RetrievalBranchPol
     )
 
 
+def graphiti_branch_with_deadline(timeout_seconds: float) -> RetrievalBranchPolicy:
+    """The graphiti branch policy bounded by its own deadline (harden 5.2).
+
+    The deadline that wraps the whole fusion (``DOCUMENTS_RETRIEVAL_POSTGRES_TIMEOUT_SECONDS``)
+    cannot also bound the graph leg: a Graphiti hang would consume the entire
+    window and surface as a fused-search timeout, discarding healthy canonical
+    results before the canonical-only fallback could run. With the leg under
+    ``DOCUMENTS_RETRIEVAL_GRAPHITI_TIMEOUT_SECONDS``, a deadline miss is the
+    same typed, branch-attributed Failure a raised transport failure produces —
+    the caller's existing graphiti-failure routing handles it unchanged.
+    """
+
+    async def _run(
+        repo: DocumentRepository, args: _BranchInput
+    ) -> DocumentResult[list[dict[str, Any]]]:
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                return await _run_graphiti_branch(repo, args)
+        except TimeoutError:
+            return Failure(
+                DocumentDatabaseError(
+                    message=f"graphiti retrieval branch deadline ({timeout_seconds}s) expired",
+                    details={"branch": GRAPHITI_BRANCH_NAME, "error": "timeout"},
+                )
+            )
+
+    return RetrievalBranchPolicy(name=GRAPHITI_BRANCH_NAME, run=_run)
+
+
 # Derived, not authored: the i-th label names the i-th gathered result, and the
 # pairing tests pin this derivation rather than a hand-kept tuple.
 _SEARCH_BRANCHES = tuple(branch.name for branch in RETRIEVAL_BRANCHES)
@@ -293,6 +322,7 @@ async def retrieve_fused(
     document_versions: Sequence[tuple[str, int, str | None]] = (),
     document_contracts: Sequence[tuple[str, int, tuple[int | None, ...], bool]] = (),
     branch_diagnostics: dict[str, Any] | None = None,
+    graphiti_timeout_seconds: float | None = None,
 ) -> DocumentResult[tuple[list[RankedChunk], dict[str, dict[str, Any]]]]:
     """Run the branch legs over base chunks and fuse them in Python.
 
@@ -304,7 +334,10 @@ async def retrieve_fused(
     contributes an empty rank list and fusion proceeds. The optional
     relationship-graph leg (``graphiti``) joins the fusion through the branch
     registry — no second fusion implementation — and only when the caller
-    passes a client.
+    passes a client. When ``graphiti_timeout_seconds`` is set, the graph leg
+    runs under its own deadline instead of the caller's fused deadline, so a
+    slow graph degrades to the canonical-only fusion rather than expiring the
+    whole fused read.
     """
     branch_input = _BranchInput(
         user_id=user_id,
@@ -319,10 +352,13 @@ async def retrieve_fused(
         document_versions=document_versions,
         document_contracts=document_contracts,
     )
+    branches = fused_branches(graphiti)
+    if graphiti is not None and graphiti_timeout_seconds is not None:
+        branches = (*RETRIEVAL_BRANCHES, graphiti_branch_with_deadline(graphiti_timeout_seconds))
     results = await _run_branches(
         repo=repo,
         branch_input=branch_input,
-        branches=fused_branches(graphiti),
+        branches=branches,
         branch_diagnostics=branch_diagnostics,
     )
     if isinstance(results, Failure):
@@ -718,7 +754,9 @@ class DocumentQueryService:
         # adds ``max_tokens``. Dumping the RAG payload verbatim and re-validating it against the
         # strict search schema always failed on the inherited ``max_tokens`` default (F1) — every
         # /search/rag request 500'd. Drop the RAG-only field before the strict re-validation.
-        search_payload = UnifiedSearchRequest.model_validate(payload.model_dump(exclude={"max_tokens"}))
+        search_payload = UnifiedSearchRequest.model_validate(
+            payload.model_dump(exclude={"max_tokens"})
+        )
         search_result = await self.search(
             user_id=user_id,
             tenant_id=tenant_id,

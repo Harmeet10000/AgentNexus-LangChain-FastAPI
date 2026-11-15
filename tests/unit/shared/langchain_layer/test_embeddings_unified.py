@@ -125,6 +125,7 @@ def _settings_for(model: str) -> SimpleNamespace:
         GEMINI_EMBEDDING_MODEL=model,
         GEMINI_API_KEY=base.GEMINI_API_KEY,
         EMBEDDING_DIMENSION=base.EMBEDDING_DIMENSION,
+        DOCUMENTS_RETRIEVAL_REDIS_TIMEOUT_SECONDS=base.DOCUMENTS_RETRIEVAL_REDIS_TIMEOUT_SECONDS,
     )
 
 
@@ -474,6 +475,60 @@ async def test_a_provider_returning_the_wrong_count_raises_rather_than_misaligni
 async def test_an_empty_batch_never_reaches_the_provider(spy) -> None:
     assert await embed_texts([], task_type=EmbeddingTaskType.DOCUMENT) == []
     assert spy.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Cache failures are misses, never retrieval failures (harden 5.2)
+# ---------------------------------------------------------------------------
+
+
+class _BrokenReadClient(FakeRedis):
+    """A cache whose reads hang past the deadline or fail outright."""
+
+    def __init__(self, *, hang: bool = False, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._hang = hang
+
+    async def get(self, key):  # type: ignore[override]
+        if self._hang:
+            import asyncio
+
+            await asyncio.sleep(30)
+        message = "cache unavailable"
+        raise ConnectionError(message)
+
+
+class _BrokenWriteClient(FakeRedis):
+    async def setex(self, key, seconds, value):  # type: ignore[override]
+        message = "cache unavailable"
+        raise ConnectionError(message)
+
+
+async def test_a_failing_cache_read_is_a_miss_not_a_failure(spy, shared_store) -> None:
+    """A downed Redis costs a re-embed — the provider path stands and the
+    caller gets its vector, never the connection error."""
+    client = _BrokenReadClient(server=shared_store)
+    vector = await embed_text(_TEXT, task_type=EmbeddingTaskType.QUERY, redis=client)
+    assert vector == _vector()
+    assert spy.count() == 1
+
+
+async def test_a_hung_cache_read_hits_the_deadline_and_still_returns(spy, shared_store) -> None:
+    """A cache read that outlasts the configured Redis deadline is abandoned as
+    a miss rather than hanging the caller past the provider round-trip."""
+    client = _BrokenReadClient(server=shared_store, hang=True)
+    vector = await embed_text(_TEXT, task_type=EmbeddingTaskType.QUERY, redis=client)
+    assert vector == _vector()
+    assert spy.count() == 1
+
+
+async def test_a_failed_cache_write_never_discards_the_embedding(spy, shared_store) -> None:
+    """The write-back is best-effort: the produced vector returns even though
+    nothing landed in the cache."""
+    client = _BrokenWriteClient(server=shared_store)
+    vector = await embed_text(_TEXT, task_type=EmbeddingTaskType.QUERY, redis=client)
+    assert vector == _vector()
+    assert spy.count() == 1
 
 
 # ---------------------------------------------------------------------------

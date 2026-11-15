@@ -76,6 +76,121 @@ def test_missing_evidence_chunk_is_recorded_not_invented() -> None:
     assert judgement.anchoring_ratio == pytest.approx(0.0)
 
 
+def test_number_anchoring_is_whole_token_not_substring() -> None:
+    """A claimed ``30 days`` is not anchored by evidence saying ``130 days``:
+    whole-token matching keeps number boundaries exactly where legal claims
+    are graded. The same rule stops a word fragment anchoring a longer token."""
+    substring_number = judge_claim_deterministic(
+        "c1",
+        "payment is due within 30 days",
+        "entailed",
+        {"c": "the payment is due within 130 days of the invoice"},
+    )
+    assert "30" in substring_number.unanchored_tokens
+    assert substring_number.judged_support != "entailed"
+
+    exact_number = judge_claim_deterministic(
+        "c1",
+        "payment is due within 30 days",
+        "entailed",
+        {"c": "the payment is due within 30 days of the invoice"},
+    )
+    assert exact_number.judged_support == "entailed"
+
+    word_fragment = judge_claim_deterministic(
+        "c1",
+        "the termin clause applies",
+        "entailed",
+        {"c": "the termination clause applies on insolvency"},
+    )
+    assert "termin" in word_fragment.unanchored_tokens
+
+
+def test_claims_are_judged_only_against_their_own_evidence() -> None:
+    """A claim's sibling evidence chunk cannot supply its anchoring words: each
+    claim is anchored only in the chunks it declares."""
+    from app.ai.evaluation.schema import GoldenQuery
+
+    row = GoldenQuery.model_validate(
+        _golden_row(
+            "what governs the security and damages",
+            claims=[
+                {
+                    "claim_id": "sibling-anchored",
+                    "text": "the security period is five years",
+                    "expected_support": "entailed",
+                    # Declares only the damages chunk — the security wording
+                    # lives in the sibling chunk it does NOT declare.
+                    "evidence_chunk_ids": ["SRC-TST:p1:c02"],
+                    "gradability": "deterministic",
+                },
+                {
+                    "claim_id": "own-evidence",
+                    "text": "liquidated damages apply at 0.05 percent",
+                    "expected_support": "entailed",
+                    "evidence_chunk_ids": ["SRC-TST:p1:c02"],
+                    "gradability": "deterministic",
+                },
+            ],
+        )
+    )
+    evaluation = evaluate_entailment(
+        [row],
+        chunk_texts={
+            "SRC-TST:p1:c01": "the security period is five years",
+            "SRC-TST:p1:c02": "liquidated damages apply at 0.05 percent",
+        },
+    )
+
+    by_id = {claim.claim_id: claim for claim in evaluation.rows[0].claims}
+    assert by_id["sibling-anchored"].judged_support != "entailed"
+    assert "security" in by_id["sibling-anchored"].unanchored_tokens
+    assert by_id["own-evidence"].judged_support == "entailed"
+
+
+def test_missing_evidence_replaces_the_grade_before_aggregation() -> None:
+    """The aggregates never aggregate a stale grade: a claim whose declared
+    evidence is missing is unsupported in ``claim_judgements`` — not the
+    anchored grade its sibling chunks would have produced."""
+    from app.ai.evaluation.schema import GoldenQuery
+
+    row = GoldenQuery.model_validate(
+        _golden_row(
+            "what is the damages rate",
+            claims=[
+                {
+                    "claim_id": "present",
+                    "text": "liquidated damages apply at 0.05 percent",
+                    "expected_support": "entailed",
+                    "evidence_chunk_ids": ["SRC-TST:p1:c01"],
+                    "gradability": "deterministic",
+                },
+                {
+                    "claim_id": "missing-evidence",
+                    # Identical wording to the present chunk: the pre-fix path
+                    # anchored this claim against the query-level evidence pool
+                    # and extended the stale entailed grade into the aggregates.
+                    "text": "liquidated damages apply at 0.05 percent",
+                    "expected_support": "entailed",
+                    "evidence_chunk_ids": ["SRC-TST:missing:c01"],
+                    "gradability": "deterministic",
+                },
+            ],
+        )
+    )
+    evaluation = evaluate_entailment(
+        [row],
+        chunk_texts={"SRC-TST:p1:c01": "liquidated damages apply at 0.05 percent"},
+    )
+
+    claims = {claim.claim_id: claim for claim in evaluation.rows[0].claims}
+    assert claims["missing-evidence"].judged_support == "unsupported"
+    assert claims["missing-evidence"].missing_evidence_chunk_ids == ["SRC-TST:missing:c01"]
+    assert evaluation.aggregates.atomic_entailment_rate == pytest.approx(0.5)
+    assert evaluation.aggregates.unsupported_claim_rate == pytest.approx(0.5)
+    assert evaluation.aggregates.claims_judged == 2
+
+
 def _golden_row(
     query: str, *, claims: list[dict[str, object]], **extra: object
 ) -> dict[str, object]:

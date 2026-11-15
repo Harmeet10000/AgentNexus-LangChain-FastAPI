@@ -374,6 +374,11 @@ async def embed_text(
 
     Returns:
         The vector, at the configured width.
+
+    Cache reads and writes run under the configured Redis deadline and every
+    cache error is a miss, never a retrieval failure: an unreachable or hung
+    Redis costs a re-embed (or a skipped write-back), not the caller's request —
+    and a failed write never discards an already-produced embedding.
     """
     resolved: EmbeddingTaskType = _require_task_type(task_type)
     client: GoogleGenerativeAIEmbeddings = get_embedding_client()
@@ -388,7 +393,12 @@ async def embed_text(
     )
 
     if redis is not None:
-        cached: object = await redis.get(key)
+        try:
+            async with asyncio.timeout(settings.DOCUMENTS_RETRIEVAL_REDIS_TIMEOUT_SECONDS):
+                cached: object = await redis.get(key)
+        except Exception:  # noqa: BLE001 — degraded to a cache miss below, never surfaced
+            logger.bind(operation="embedding_cache_read").warning("embedding_cache_read_failed")
+            cached = None
         if cached:
             # Normalised on read as well as on write. The width is already right for any entry
             # this module wrote, so this is a no-op in the ordinary case — but it is not free
@@ -408,7 +418,11 @@ async def embed_text(
             )
         )
     if redis is not None:
-        await redis.setex(key, CACHE_TTL_SECONDS, to_float_list_str(vector))
+        try:
+            async with asyncio.timeout(settings.DOCUMENTS_RETRIEVAL_REDIS_TIMEOUT_SECONDS):
+                await redis.setex(key, CACHE_TTL_SECONDS, to_float_list_str(vector))
+        except Exception:  # noqa: BLE001 — the write is skipped; the vector still returns
+            logger.bind(operation="embedding_cache_write").warning("embedding_cache_write_failed")
     return vector
 
 

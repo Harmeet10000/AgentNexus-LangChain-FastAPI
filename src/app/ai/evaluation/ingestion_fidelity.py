@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure
 
-from app.ai.evaluation.deterministic import chunks_for_page
+from app.ai.evaluation.deterministic import chunks_for_page, normalize_page_text
 from app.ai.evaluation.schema import load_ingestion_fidelity_set
 from app.features.documents.domain.fidelity import (
     ChunkPlausibilityState,
@@ -219,10 +219,15 @@ def reconstruct_markdown(pages: list[dict[str, object]]) -> tuple[str, list[int]
     """Join recorded page texts into one source markdown with page offsets.
 
     Mirrors what the live pipeline sees as ``ParsedDocument.markdown``: the
-    parsed page texts in order.  Returns the markdown and each page's start
-    offset so convention chunks can carry absolute source spans.
+    parsed page texts in order, normalized under the corpus rules R1-R7
+    first.  Returns the markdown and each page's start offset so convention
+    chunks can carry absolute source spans.  Normalization happens **before**
+    the offsets are computed: the convention chunks are derived from
+    normalized text, so locating them in a raw page (``payment\\u00a0terms``
+    vs the normalized ``payment terms``) would mark intact content as
+    span-less and report honest content as missing.
     """
-    page_texts = [str(page.get("text", "")) for page in pages]
+    page_texts = [normalize_page_text(str(page.get("text", ""))) for page in pages]
     offsets: list[int] = []
     parts: list[str] = []
     offset = 0
@@ -250,7 +255,11 @@ def convention_chunks(
     for page, page_offset in zip(pages, page_offsets, strict=True):
         raw_page_no = page.get("page_no", 0) or 0
         page_no = int(str(raw_page_no)) if raw_page_no else 0
-        page_text = str(page.get("text", ""))
+        # The chunk contents come from the normalized page (R1-R7), so the
+        # span search runs over the normalized text too — and the page offsets
+        # from `reconstruct_markdown` are normalized-length offsets for exactly
+        # this reason.
+        page_text = normalize_page_text(str(page.get("text", "")))
         cursor = 0
         for ordinal, content in enumerate(chunks_for_page(page_text), start=1):
             start = page_text.find(content, cursor)
@@ -414,7 +423,7 @@ def measure_artifact_fidelity(  # noqa: PLR0914 — one measurement pass keeps e
     )
 
 
-def evaluate_row(  # noqa: PLR0912 — one branch per labeled expectation dimension
+def evaluate_row(  # noqa: PLR0912, PLR0915 — one branch per labeled expectation dimension
     row: IngestionFidelityRow,
     measurement: OfflineArtifactFidelity,
 ) -> RowOutcome:
@@ -422,16 +431,22 @@ def evaluate_row(  # noqa: PLR0912 — one branch per labeled expectation dimens
 
     Dimensions the offline path cannot evaluate (OCR confidence, live parsed
     tables) are recorded as skipped with the reason — never silently passed.
+    A row that labels no evaluable dimension at all cannot pass: an empty
+    expectation is a labeling mistake, and a vacuous pass would hide it.
     """
     expectation: IngestionFidelityExpectation = row.expectation
     failures: list[str] = []
     skipped: list[str] = []
+    checks_ran = 0
 
     def _check(condition: bool, message: str) -> None:
+        nonlocal checks_ran
+        checks_ran += 1
         if not condition:
             failures.append(message)
 
     if expectation.min_source_coverage is not None:
+        checks_ran += 1
         if measurement.source_coverage_ratio is None:
             failures.append("source coverage was not measurable")
         else:
@@ -441,6 +456,7 @@ def evaluate_row(  # noqa: PLR0912 — one branch per labeled expectation dimens
                 f"{expectation.min_source_coverage}",
             )
     if expectation.order_preserved is not None:
+        checks_ran += 1
         if measurement.source_order_preserved is None:
             failures.append("source order was not measurable")
         else:
@@ -470,6 +486,7 @@ def evaluate_row(  # noqa: PLR0912 — one branch per labeled expectation dimens
             f"last chunk id {measurement.last_chunk_id!r} != {expectation.last_chunk_id!r}",
         )
     if expectation.min_sections_preserved_ratio is not None:
+        checks_ran += 1
         if measurement.sections_total == 0:
             failures.append("no sections measured to satisfy the preservation floor")
         else:
@@ -480,24 +497,27 @@ def evaluate_row(  # noqa: PLR0912 — one branch per labeled expectation dimens
                 f"{expectation.min_sections_preserved_ratio}",
             )
     if expectation.min_tables_total is not None:
+        checks_ran += 1
         skipped.append(
             "parsed-table totals require the docling parse (offline measures the "
             "text-layer pipe tables only)"
         )
     if expectation.min_tables_preserved is not None:
+        checks_ran += 1
         skipped.append("table preservation requires the docling parse (see evals/ingestion gate)")
     for code in expectation.expected_warning_codes:
         _check(code in measurement.warning_codes, f"expected warning {code} did not fire")
     for code in expectation.forbidden_warning_codes:
         _check(code not in measurement.warning_codes, f"forbidden warning {code} fired")
-    if expectation.expected_ocr_status is not None and expectation.expected_ocr_status != (
-        measurement.ocr_status
-    ):
-        skipped.append(
-            "live OCR status comes from the docling conversion; offline it is "
-            "always explicitly unavailable"
-        )
+    if expectation.expected_ocr_status is not None:
+        checks_ran += 1
+        if expectation.expected_ocr_status != (measurement.ocr_status):
+            skipped.append(
+                "live OCR status comes from the docling conversion; offline it is "
+                "always explicitly unavailable"
+            )
     if expectation.max_ocr_confidence is not None:
+        checks_ran += 1
         skipped.append("OCR confidence is only measurable by the live docling parse")
     if expectation.exact_contract_boundaries is not None:
         _check(
@@ -527,7 +547,11 @@ def evaluate_row(  # noqa: PLR0912 — one branch per labeled expectation dimens
             measurement.clause_kind_counts.get(kind, 0) >= minimum,
             f"clause kind {kind!r} count {measurement.clause_kind_counts.get(kind, 0)} < {minimum}",
         )
-    passed = not failures and not skipped and bool(expectation.model_dump(exclude_none=True))
+    # A row passes only when at least one labeled check actually ran: the
+    # previous `bool(expectation.model_dump(exclude_none=True))` guard was
+    # vacuous — the default empty containers survive `exclude_none`, so an
+    # empty `{}` expectation was truthy and passed with zero checks.
+    passed = not failures and not skipped and checks_ran > 0
     return RowOutcome(
         case_id=row.case_id,
         document_id=row.document_id,
@@ -575,7 +599,7 @@ def evaluate_gold_set(
     by_id = {artifact.source_id: artifact for artifact in artifacts}
     rows = [evaluate_row(row, by_id[row.document_id]) for row in gold_set.rows]
 
-    findings = _corpus_findings(artifacts)
+    findings = _corpus_findings(artifacts, manifest_path=manifest_path)
     failed = [outcome for outcome in rows if not outcome.passed]
     gate = GateOutcome(
         verdict="fail" if failed else "pass",
@@ -606,15 +630,22 @@ def evaluate_gold_set(
     )
 
 
-def _corpus_findings(artifacts: list[OfflineArtifactFidelity]) -> list[ReportFinding]:
+def _corpus_findings(
+    artifacts: list[OfflineArtifactFidelity],
+    *,
+    manifest_path: Path,
+) -> list[ReportFinding]:
     """Record cross-checkable fidelity findings the coverage gate does not gate on.
 
     Boundary detection against the recorded human-verified manifest boundaries
     is a multi-contract-identity finding (measured again by 8.4/8.5), not a
-    coverage/order/warning outcome, so it is reported here.
+    coverage/order/warning outcome, so it is reported here. The manifest read
+    is the gold set's own sibling ``<stem>.manifest.json`` — a custom gold set
+    or ``--corpus-root`` run must not be silently cross-checked against the
+    default corpus manifest.
     """
     findings: list[ReportFinding] = []
-    manifest_boundaries = _manifest_boundary_counts()
+    manifest_boundaries = _manifest_boundary_counts(manifest_path)
     for artifact in artifacts:
         recorded = manifest_boundaries.get(artifact.source_id)
         if recorded is not None and recorded != artifact.boundary_count:
@@ -644,8 +675,7 @@ def _corpus_findings(artifacts: list[OfflineArtifactFidelity]) -> list[ReportFin
     return findings
 
 
-def _manifest_boundary_counts() -> dict[str, int]:
-    manifest_path = Path("evals/golden/legal_retrieval_v2.manifest.json")
+def _manifest_boundary_counts(manifest_path: Path) -> dict[str, int]:
     if not manifest_path.is_file():
         return {}
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -679,6 +709,11 @@ def main() -> None:
         f"({report.gate.rows_passed}/{report.gate.rows_passed + report.gate.rows_failed} rows, "
         f"{len(report.artifacts)} artifacts, {len(report.findings)} findings)\n"
     )
+    # A failed gate is a failed evaluation run: the report is still written, but
+    # a CI/cron consumer that only checks the exit code must not read a failed
+    # corpus gate as success.
+    if report.gate.verdict == "fail":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

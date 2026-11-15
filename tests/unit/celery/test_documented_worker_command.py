@@ -57,7 +57,9 @@ def _readme_commands() -> list[str]:
     return [
         line.strip()
         for line in _read(_README).splitlines()
-        if line.strip().startswith(("uv run worker ", "uv run beat "))
+        if line.strip().startswith(
+            ("uv run worker ", "uv run beat ", ".venv/bin/worker ", ".venv/bin/beat ")
+        )
     ]
 
 
@@ -66,11 +68,23 @@ def _compose_commands(path: Path) -> list[str]:
 
 
 def _normalize(command: str) -> str:
-    return command.removeprefix("uv run ")
+    """Strip the process runner so compose and host spellings compare equal.
+
+    Host deployments execute the venv entry point directly (Makefile/README):
+    ``uv run`` interposes a relay on the child's stdout/stderr that loses
+    everything when a systemd user unit wires those fds to the journald socket
+    (F12c). Containers keep the ``uv run`` spelling, where output is a pipe.
+    """
+    return command.removeprefix("uv run ").removeprefix(".venv/bin/")
 
 
 def _worker_commands(commands: list[str]) -> list[str]:
-    return [command for command in commands if "worker" in shlex.split(command)]
+    return [command for command in commands if _is_worker(command)]
+
+
+def _is_worker(command: str) -> bool:
+    """Match the worker entry point regardless of the runner prefix."""
+    return any(token.endswith("worker") for token in shlex.split(command))
 
 
 def test_the_documented_command_and_the_definition_site_are_one_string() -> None:
@@ -121,7 +135,7 @@ def test_every_operator_command_uses_the_installed_role_interface() -> None:
 
 def test_the_makefile_command_has_one_definition_site() -> None:
     assignments = _make_assignments()
-    assert assignments["CELERY_WORKER_CMD"] == "uv run worker"
+    assert assignments["CELERY_WORKER_CMD"] in {"uv run worker", ".venv/bin/worker"}
     assert not _MAKE_REFERENCE.search(assignments["CELERY_WORKER_CMD"])
 
 
@@ -156,7 +170,7 @@ def test_every_worker_command_delegates_process_shape_to_role_profile() -> None:
 def test_operator_commands_do_not_repeat_profile_owned_flags() -> None:
     for command in _makefile_commands().values():
         tokens = shlex.split(command)
-        if "worker" not in tokens:
+        if not any(token.endswith("worker") for token in tokens):
             continue
         assert "-Q" not in tokens
         assert "--pool" not in tokens

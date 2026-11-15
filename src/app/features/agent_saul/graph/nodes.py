@@ -475,13 +475,26 @@ def _ingestion_snapshot(
     *,
     error_code: str | None = None,
     retryable: bool = False,
+    warning_counts: Mapping[str, int] | None = None,
 ) -> list[IngestionDocumentState]:
-    """Build a complete, bounded readiness snapshot for an authorized scope."""
+    """Build a complete, bounded readiness snapshot for an authorized scope.
+
+    A document whose persisted chunks carry quality warnings reports the
+    WARNINGS status with its warning count: canonical ingestion completes every
+    fetched document as READY, so without carrying the chunk warnings into the
+    run the finalization disclosure would always show empty ingestion warnings
+    for a warnings-completed document.
+    """
 
     return [
         IngestionDocumentState(
             document_id=doc_id,
-            status=status,
+            status=(
+                IngestionDocumentStatus.WARNINGS
+                if warning_counts and warning_counts.get(doc_id)
+                else status
+            ),
+            warning_count=(warning_counts or {}).get(doc_id, 0),
             error_code=error_code,
             retryable=retryable,
         )
@@ -1441,6 +1454,15 @@ def make_ingestion_node() -> ConfiguredStateNode:
         # when a paused legacy checkpoint replays the ingestion node.
         existing_ids = {segment.clause_id for segment in state.get("segments", [])}
         new_segments = [segment for segment in segments if segment.clause_id not in existing_ids]
+        # Carry the persisted quality warnings into the run (task 6.8
+        # disclosure input): a document that finished ingestion with warnings
+        # must reach finalization as WARNINGS, never as a clean READY.
+        chunk_warning_counts: dict[str, int] = {}
+        for chunk in chunks:
+            if chunk.quality_warnings:
+                chunk_warning_counts[chunk.document_id] = chunk_warning_counts.get(
+                    chunk.document_id, 0
+                ) + len(chunk.quality_warnings)
         log.info("canonical_ingestion_completed", segment_count=len(segments))
         return {
             "canonical_segments": list(segments),
@@ -1453,6 +1475,7 @@ def make_ingestion_node() -> ConfiguredStateNode:
             "ingestion_state": _ingestion_snapshot(
                 allowed_doc_ids,
                 IngestionDocumentStatus.READY,
+                warning_counts=chunk_warning_counts,
             ),
             "status": WorkflowStatus.NORMALIZING,
         }
@@ -2860,10 +2883,16 @@ def make_human_review_node(
         overrides: list[ReviewOverride] = []
         for raw in raw_overrides:
             override = ReviewOverride.model_validate(raw)
-            if override.contract_index is None and override.clause_id in contract_by_clause:
-                override = override.model_copy(
-                    update={"contract_index": contract_by_clause[override.clause_id]}
-                )
+            # The checkpoint identity always wins, not just when the override
+            # arrived with contract_index unset: a reviewer-supplied index could
+            # otherwise name a different contract than the evidence the override
+            # re-classifies, and that mislabelled identity survives into
+            # FinalReport.human_overrides. A clause the checkpoint cannot
+            # attribute (or attributes as multi-contract-unknown) stamps None —
+            # the reviewer never supplies the identity.
+            override = override.model_copy(
+                update={"contract_index": contract_by_clause.get(override.clause_id)}
+            )
             overrides.append(override)
 
         review_output = HumanReviewOutput(

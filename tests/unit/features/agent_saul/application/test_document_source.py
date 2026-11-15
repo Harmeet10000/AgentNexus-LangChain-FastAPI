@@ -36,7 +36,7 @@ from app.features.agent_saul.domain.errors import (
     AgentSaulInfrastructureError,
     AgentSaulValidationError,
 )
-from app.features.agent_saul.domain.state import WorkflowStatus
+from app.features.agent_saul.domain.state import IngestionDocumentStatus, WorkflowStatus
 from app.features.agent_saul.graph.nodes import make_ingestion_node
 from app.features.documents.domain.errors import DocumentDatabaseError, DocumentNotFoundError
 
@@ -281,6 +281,63 @@ async def test_node_success_feeds_canonical_segments_with_no_errors() -> None:
     assert output["canonical_structure_ready"] is True
     assert output["segments"][0].chunk_id == f"{_DOC_ID}-chunk-0"
     assert "errors" not in output
+
+
+async def test_node_warns_a_document_whose_chunks_carry_quality_warnings() -> None:
+    """A warnings-completed document reaches the run as WARNINGS, never READY.
+
+    Canonical ingestion completes every fetched document; the persisted chunk
+    quality warnings are the only signal that ingestion finished with
+    warnings, and the finalization disclosure reads the readiness snapshot.
+    """
+    node = make_ingestion_node()
+    clean = CanonicalDocumentChunk(
+        chunk_id=f"{_DOC_ID}-chunk-0",
+        document_id=_DOC_ID,
+        document_version=1,
+        chunk_index=0,
+        content="MASTER SERVICES AGREEMENT",
+    )
+    warned = CanonicalDocumentChunk(
+        chunk_id=f"{_DOC_ID}-chunk-1",
+        document_id=_DOC_ID,
+        document_version=1,
+        chunk_index=1,
+        content="Termination for convenience.",
+        quality_warnings=(
+            {
+                "stage": "context_summary",
+                "code": "CONTEXT_FAILED",
+                "message": "m",
+                "severity": "warning",
+            },
+        ),
+    )
+    source = _StaticSource(Success((clean, warned)))
+
+    output = await node(_state(), _node_config(source))  # type: ignore[arg-type]
+
+    readiness = {item.document_id: item for item in output["ingestion_state"]}
+    assert readiness[_DOC_ID].status == IngestionDocumentStatus.WARNINGS
+    assert readiness[_DOC_ID].warning_count == 1
+
+
+async def test_node_keeps_a_clean_document_ready() -> None:
+    node = make_ingestion_node()
+    chunk = CanonicalDocumentChunk(
+        chunk_id=f"{_DOC_ID}-chunk-0",
+        document_id=_DOC_ID,
+        document_version=1,
+        chunk_index=0,
+        content="MASTER SERVICES AGREEMENT",
+    )
+    source = _StaticSource(Success((chunk,)))
+
+    output = await node(_state(), _node_config(source))  # type: ignore[arg-type]
+
+    readiness = output["ingestion_state"][0]
+    assert readiness.status == IngestionDocumentStatus.READY
+    assert readiness.warning_count == 0
 
 
 @pytest.mark.parametrize(

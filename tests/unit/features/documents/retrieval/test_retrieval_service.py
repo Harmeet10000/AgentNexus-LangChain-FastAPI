@@ -338,3 +338,239 @@ async def test_unfiltered_search_keeps_the_graph_only_match() -> None:
     result = await retrieve(_context(), "query", _filters(), 5, None)
     assert result.status == "ok"
     assert [row["chunk_id"] for row in result.rows] == [_FUSED[0].chunk_id, _GRAPH_ONLY_CHUNK]
+
+
+# --- chunk_ids forwarding (harden 5.1 filters) -------------------------------
+
+
+@pytest.mark.usefixtures("_patched_fusion")
+async def test_chunk_ids_filter_is_forwarded_to_the_fused_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`RetrievalFilters.chunk_ids` reaches the SQL legs: the caller's chunk
+    allowlist narrows the search instead of being silently dropped."""
+    captured: dict[str, Any] = {}
+
+    async def _fused(**kwargs: Any) -> Any:
+        captured["filter_params"] = kwargs["filter_params"]
+        return Success((list(_FUSED), {row["chunk_id"]: dict(row) for row in _ROWS}))
+
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _fused)
+    result = await retrieve(_context(), "query", _filters(chunk_ids=(_FUSED[0].chunk_id,)), 5, None)
+    assert result.status == "ok"
+    assert captured["filter_params"]["chunk_ids"] == [_FUSED[0].chunk_id]
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_graph_only_match")
+async def test_chunk_allowlist_excludes_matches_outside_it() -> None:
+    """A fused match outside the requested chunk allowlist earns no row — the
+    same predicate the SQL legs enforce, re-run over the fusion output."""
+    result = await retrieve(_context(), "query", _filters(chunk_ids=(_FUSED[0].chunk_id,)), 5, None)
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == [_FUSED[0].chunk_id]
+
+
+# --- Graphiti warning honesty ------------------------------------------------
+
+
+@pytest.mark.usefixtures("_patched_fusion")
+async def test_no_graphiti_warning_when_fusion_is_disabled() -> None:
+    """A healthy canonical-only search (fusion flag off, the default) is not
+    degraded: the GRAPHITI_UNAVAILABLE warning fires only when a graph read was
+    attempted and failed — never on every successful disabled-mode search."""
+    result = await retrieve(_context(), "query", _filters(), 5, None)
+    assert result.status == "ok"
+    assert result.warnings == []
+    assert result.graph_available is False
+
+
+@pytest.mark.usefixtures("_patched_embed_only", "_fusion_flag_on")
+async def test_graphiti_warning_survives_when_an_attempted_read_fails() -> None:
+    result = await retrieve(
+        _context(
+            graphiti=_OutagedGraphiti(),
+            document_versions=((_DOC, 1, None),),
+            document_contracts=((_DOC, 1, (None,), True),),
+        ),
+        "query",
+        _filters(),
+        5,
+        None,
+    )
+    assert result.status == "ok"
+    assert [warning.code for warning in result.warnings] == ["GRAPHITI_UNAVAILABLE"]
+
+
+# --- fusion weights ----------------------------------------------------------
+
+
+@pytest.mark.usefixtures("_patched_embed_only", "_fusion_flag_on")
+async def test_graphiti_leg_fuses_with_the_measured_weight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the graph branch registered, the fused call carries one weight per
+    leg: the canonical legs keep their unweighted 1.0 and the graph leg carries
+    the measured RRF_WEIGHT_GRAPHITI — never the 1.0 a None-weights fusion
+    would hand it (ten times its measured contribution)."""
+    from app.features.documents.domain.constants import RRF_WEIGHT_GRAPHITI
+
+    captured: dict[str, Any] = {}
+
+    async def _fused(**kwargs: Any) -> Any:
+        captured["weights"] = kwargs["weights"]
+        return Success((list(_FUSED), {row["chunk_id"]: dict(row) for row in _ROWS}))
+
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _fused)
+    result = await retrieve(_context(graphiti=_OutagedGraphiti()), "query", _filters(), 5, None)
+    assert result.status == "ok"
+    assert captured["weights"] == [1.0, 1.0, RRF_WEIGHT_GRAPHITI]
+
+
+@pytest.mark.usefixtures("_patched_fusion")
+async def test_canonical_only_fusion_keeps_the_unweighted_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fused(**kwargs: Any) -> Any:
+        captured["weights"] = kwargs["weights"]
+        return Success((list(_FUSED), {row["chunk_id"]: dict(row) for row in _ROWS}))
+
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _fused)
+    result = await retrieve(_context(), "query", _filters(), 5, None)
+    assert result.status == "ok"
+    assert captured["weights"] is None
+
+
+# --- rerank over the candidate set (harden 5.1 ordering) ---------------------
+
+
+_CANDIDATE_IDS = tuple(f"00000000-0000-0000-0000-0000000000{index:02d}" for index in range(1, 7))
+
+
+class _PromotingReranker:
+    """Records its input and promotes the last candidate to the top."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def rerank(self, _query: str, chunks: list[Any], *, limit: int) -> list[Any]:
+        self.seen = [chunk.chunk_id for chunk in chunks]
+        reordered = list(chunks)
+        reordered.insert(0, reordered.pop())
+        return reordered[:limit]
+
+
+@pytest.fixture
+def _patched_fusion_with_six_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fused order ranks six candidates; only the last one is relevant."""
+    rows = [
+        {**_ROWS[0], "chunk_id": chunk_id, "chunk_metadata": {"pipeline_version": "p1"}}
+        for chunk_id in _CANDIDATE_IDS
+    ]
+    fused = [
+        RankedChunk(chunk_id=chunk_id, score=1.0 - index * 0.1, rank=index + 1)
+        for index, chunk_id in enumerate(_CANDIDATE_IDS)
+    ]
+
+    async def _embed(*_args: Any, **_kwargs: Any) -> list[float]:
+        return [0.0]
+
+    async def _retrieve_fused(**_kwargs: Any) -> Any:
+        return Success((fused, {row["chunk_id"]: dict(row) for row in rows}))
+
+    monkeypatch.setattr(retrieval_service, "embed_text", _embed)
+    monkeypatch.setattr(queries_documents, "retrieve_fused", _retrieve_fused)
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_six_candidates")
+async def test_reranker_sees_the_candidate_set_before_k_is_applied() -> None:
+    """The reranker ranks the whole filtered candidate set, then k and the
+    token budget apply — a better candidate just past the k-cut can be
+    promoted (the served graph's reranker node over the same candidates)."""
+    reranker = _PromotingReranker()
+    result = await retrieve(_context(reranker=reranker), "query", _filters(), 2, None)
+    assert reranker.seen == list(_CANDIDATE_IDS)
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == [
+        _CANDIDATE_IDS[-1],
+        _CANDIDATE_IDS[0],
+    ]
+
+
+@pytest.mark.usefixtures("_patched_fusion_with_six_candidates")
+async def test_rerank_fallback_keeps_fused_order_truncated_to_k() -> None:
+    """Without a working reranker the fused order stands, truncated to k."""
+    result = await retrieve(_context(), "query", _filters(), 2, None)
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == list(_CANDIDATE_IDS[:2])
+
+
+# --- the graph leg's own deadline -------------------------------------------
+
+
+class _HangingGraphiti:
+    async def search(self, **_kwargs: Any) -> list[Any]:
+        await asyncio.sleep(0.5)
+        return []
+
+
+async def test_graphiti_leg_deadline_is_a_branch_attributed_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`retrieve_fused(graphiti_timeout_seconds=...)` bounds the graph leg on
+    its own: a hang past the leg deadline is the same typed, branch-attributed
+    Failure a transport failure produces — not a fused-search timeout."""
+    from app.features.documents.adapters.persistence.postgres.document_repository import (
+        build_search_filter_params,
+    )
+    from app.features.documents.application.queries.documents import retrieve_fused
+
+    fused_result = await retrieve_fused(
+        repo=_Repo(),
+        user_id="alice",
+        tenant_id="tenant-a",
+        query_text="query",
+        query_embedding=[0.0],
+        candidate_limit=10,
+        limit=10,
+        filter_params=build_search_filter_params(metadata_filter={"document_ids": [_DOC]}),
+        graphiti=_HangingGraphiti(),
+        document_versions=((_DOC, 1, None),),
+        document_contracts=((_DOC, 1, (None,), True),),
+        graphiti_timeout_seconds=0.05,
+    )
+    assert isinstance(fused_result, Failure)
+    error = fused_result.failure()
+    assert error.details.get("branch") == "graphiti"
+    assert "deadline" in error.message
+
+
+@pytest.mark.usefixtures("_patched_embed_only", "_fusion_flag_on")
+async def test_slow_graphiti_misses_its_own_deadline_and_canonical_chunks_stand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The legal-path outage contract, for the slow case: a Graphiti leg that
+    misses its own deadline degrades to the canonical-only fusion — healthy
+    canonical results are returned, never a fused-search timeout."""
+    monkeypatch.setenv("DOCUMENTS_RETRIEVAL_POSTGRES_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("DOCUMENTS_RETRIEVAL_GRAPHITI_TIMEOUT_SECONDS", "0.05")
+    get_settings.cache_clear()
+    try:
+        result = await retrieve(
+            _context(
+                graphiti=_HangingGraphiti(),
+                document_versions=((_DOC, 1, None),),
+                document_contracts=((_DOC, 1, (None,), True),),
+            ),
+            "query",
+            _filters(),
+            5,
+            None,
+        )
+    finally:
+        get_settings.cache_clear()
+    assert result.status == "ok"
+    assert [row["chunk_id"] for row in result.rows] == [_FUSED[0].chunk_id]
+    assert result.graph_available is False
+    assert [warning.code for warning in result.warnings] == ["GRAPHITI_UNAVAILABLE"]

@@ -33,6 +33,7 @@ from app.features.documents.adapters.persistence.postgres.document_repository im
     build_search_filter_params,
 )
 from app.features.documents.api.http.dto import EvidenceCoverage
+from app.features.documents.domain.constants import RRF_WEIGHT_GRAPHITI
 from app.features.documents.retrieval import row_hydration
 from app.features.documents.retrieval.graph.state import StageWarning
 from app.observability.degradation import (
@@ -62,6 +63,14 @@ _DEFAULT_RESULT_TOKEN_BUDGET = 4_000
 
 # Branch attribution key written by `_run_branches` on any branch failure.
 _GRAPHITI_BRANCH = "graphiti"
+
+# The graphiti leg joins the fusion with the measured constant
+# (RRF_WEIGHT_GRAPHITI, domain constants citing the wave-4 weight sweep); the
+# two canonical legs keep the unweighted default (1.0) this service has always
+# fused with — only the graph leg's weight is prescribed. Without this, a
+# `weights=None` call over three legs hands the graph branch 1.0 — ten times
+# its measured contribution.
+_CANONICAL_LEG_WEIGHTS = (1.0, 1.0)
 
 
 @dataclass(frozen=True)
@@ -194,6 +203,10 @@ async def retrieve(  # noqa: PLR0912, PLR0914 — one readable typed-status pipe
             "contract_index": filters.contract_index,
             "clause_type": filters.clause_type,
             "require_graphiti_verified": filters.require_graphiti_verified,
+            # Accepted-but-dropped before: the SQL legs never saw the caller's
+            # chunk allowlist, so a narrowed request still searched every
+            # eligible chunk. `_FILTER_SQL` treats an empty list as no filter.
+            "chunk_ids": list(filters.chunk_ids),
         }
     )
     graphiti_branch = ctx.graphiti if settings.DOCUMENTS_GRAPHITI_FUSION_ENABLED else None
@@ -241,16 +254,16 @@ async def retrieve(  # noqa: PLR0912, PLR0914 — one readable typed-status pipe
             message="No evidence was found in the authorized documents.",
             coverage=EvidenceCoverage(documents_requested=len(narrowed)),
         )
-    rows = rows[:k]
-    chunks = [row_hydration.row_to_chunk(row) for row in rows]
-    chunks = _apply_token_budget(
-        chunks, filters.max_result_tokens, count_tokens=default_count_tokens
-    )
-    rows = rows[: len(chunks)]
 
     rank_by_chunk_id = {item.chunk_id: item.rank for item in fused}
     score_by_chunk_id = {item.chunk_id: item.score for item in fused}
 
+    # The reranker sees the whole filtered candidate set before k and the token
+    # budget are applied (the served graph's reranker node does the same over
+    # the retrieved candidates): cutting to k first means a better candidate
+    # just past the cut could never be promoted, and an early token-budget
+    # trim shrank the rerank input further.
+    chunks = [row_hydration.row_to_chunk(row) for row in rows]
     if ctx.reranker is not None and chunks:
         reranked = await _rerank_with_fallback(ctx.reranker, query, chunks, limit=k)
         if reranked is None:
@@ -258,13 +271,19 @@ async def retrieve(  # noqa: PLR0912, PLR0914 — one readable typed-status pipe
         else:
             chunks = reranked
             rows = _reorder_rows(rows, chunks)
+    chunks = chunks[:k]
+    chunks = _apply_token_budget(
+        chunks, filters.max_result_tokens, count_tokens=default_count_tokens
+    )
+    rows = rows[: len(chunks)]
+
     graph_document_ids = {
         str(row["document_id"]) for row in rows if row_hydration.graph_indexed(row)
     }
     result_document_ids = {str(row["document_id"]) for row in rows}
     warnings = (
         []
-        if graph_available
+        if graphiti_branch is None or graph_available
         else [
             StageWarning(
                 stage="retrieve_fusion",
@@ -306,18 +325,31 @@ async def _fused_search(
     """One fused search under the explicit Postgres deadline (harden 5.2).
 
     Returns ``(fused, lookup, graph_available)`` on success, or a typed
-    `RetrievalResult` degraded outcome. A Graphiti-attributed branch failure
-    degrades to the canonical-only fusion (chunks preserved, coverage
-    signal down); every other failure and the deadline itself surface as
-    typed statuses.
+    `RetrievalResult` degraded outcome. A Graphiti-attributed branch failure —
+    including a miss of the graph leg's own
+    ``DOCUMENTS_RETRIEVAL_GRAPHITI_TIMEOUT_SECONDS`` deadline — degrades to the
+    canonical-only fusion (chunks preserved, coverage signal down); every other
+    failure and the deadline itself surface as typed statuses.
     """
     from app.features.documents.application.queries.documents import (  # noqa: PLC0415 — see retrieve()
         retrieve_fused,
     )
 
     settings = get_settings()
+    # The graph leg runs under its own deadline, so the fused deadline must be
+    # able to outlive a graph-leg miss: otherwise a slow Graphiti would expire
+    # the whole fused read as a typed timeout before the canonical-only
+    # fallback could run, discarding healthy canonical results.
+    graphiti_timeout = (
+        settings.DOCUMENTS_RETRIEVAL_GRAPHITI_TIMEOUT_SECONDS
+        if graphiti_branch is not None
+        else None
+    )
+    fused_deadline = settings.DOCUMENTS_RETRIEVAL_POSTGRES_TIMEOUT_SECONDS + (
+        graphiti_timeout if graphiti_timeout is not None else 0.0
+    )
     try:
-        async with asyncio.timeout(settings.DOCUMENTS_RETRIEVAL_POSTGRES_TIMEOUT_SECONDS):
+        async with asyncio.timeout(fused_deadline):
             fused_result = await retrieve_fused(
                 repo=ctx.repo,
                 user_id=ctx.principal_id,
@@ -327,10 +359,15 @@ async def _fused_search(
                 candidate_limit=candidate_limit,
                 limit=candidate_limit,
                 filter_params=filter_params,
-                weights=None,
+                weights=(
+                    [*_CANONICAL_LEG_WEIGHTS, RRF_WEIGHT_GRAPHITI]
+                    if graphiti_branch is not None
+                    else None
+                ),
                 graphiti=graphiti_branch,
                 document_versions=ctx.document_versions,
                 document_contracts=ctx.document_contracts,
+                graphiti_timeout_seconds=graphiti_timeout,
             )
     except TimeoutError:
         return RetrievalResult(
@@ -373,13 +410,16 @@ def _matches_active_filters(row: dict[str, Any], filter_params: Mapping[str, Any
     """The SQL branches' filter predicate, re-checked against one hydrated row.
 
     Mirrors the active branches of ``_FILTER_SQL`` (document kind, jurisdiction,
-    contract type/index, clause type, graph-indexed requirement) in Python so a
-    Graphiti-derived match is held to the same bar the BM25/vector legs
-    enforce. Every comparison is skipped when the filter is unset, so an
-    unfiltered search is a no-op.
+    contract type/index, clause type, chunk allowlist, graph-indexed
+    requirement) in Python so a Graphiti-derived match is held to the same bar
+    the BM25/vector legs enforce. Every comparison is skipped when the filter is
+    unset, so an unfiltered search is a no-op.
     """
     metadata = row.get("metadata_")
     metadata_map = metadata if isinstance(metadata, Mapping) else {}
+    chunk_ids = filter_params.get("chunk_ids") or ()
+    if chunk_ids and row.get("chunk_id") not in chunk_ids:
+        return False
     document_kind = filter_params.get("document_kind")
     if document_kind is not None and row.get("chunk_kind") != document_kind:
         return False

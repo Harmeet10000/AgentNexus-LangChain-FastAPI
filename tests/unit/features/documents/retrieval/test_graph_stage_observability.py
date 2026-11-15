@@ -40,6 +40,7 @@ _STAGE_USAGE_STAGE_NAMES = {
     "source_identifier",
     "retrieve_fusion",
     "rerank",
+    "post_process",
     "grade",
     "generate",
     "edge_grounding",
@@ -203,6 +204,7 @@ async def test_two_iteration_run_reports_stage_usage_spans_and_decision_events()
         "source_identifier": 2,
         "retrieve_fusion": 2,
         "rerank": 2,
+        "post_process": 2,
         "grade": 2,
         "edge_grounding": 2,
         "generate": 1,
@@ -215,6 +217,7 @@ async def test_two_iteration_run_reports_stage_usage_spans_and_decision_events()
         "source_identifier": 1,
         "retrieve_fusion": 2,
         "rerank": 2,
+        "post_process": 2,
         "grade": 2,
         "edge_grounding": 0,
         "generate": 0,
@@ -231,6 +234,7 @@ async def test_two_iteration_run_reports_stage_usage_spans_and_decision_events()
         "source_identifier": 2,
         "retrieve_fusion": 2,
         "rerank": 2,
+        "post_process": 2,
         "grade": 2,
     }
 
