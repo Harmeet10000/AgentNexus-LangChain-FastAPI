@@ -135,17 +135,91 @@ Annotations: `evals/annotations/` (wave-3 + answer-golden annotator a/b).
 - **Staging environment** (Phase 9's blocker) — second Timescale/Neo4j + deployment target.
 - **ag-ui-copilotkit-console** — excluded by instruction; G7 waits on it.
 
-### Next-session code work (in priority order)
-1. **Rerank stratum → served-path decision** (the report exists; the harness stratum could
-   formalize it — small).
-2. **D-3**: quota-aware embedding backoff with a typed `quota_exhausted` state (the one DoS
-   residual still owed code).
-3. **D-1**: LISTEN-loop resilience was verified sound (the relay reconnects); the API shutdown
-   was the oomd kill — resolved by D-2. Verify once on the next long run.
-4. **Phase 7 activation** when the user says the delete command surface is wanted.
-5. **Hygiene**: the `pyproject.toml` name for the reports dir (`live_*` files are gitignored?
-   verify); `scripts/live_measurement/*` lint conformance (scripts are outside the src/ ruff
-   gate by design).
+### Next-session code work (in priority order) — STATUS UPDATE 2026-11-15
+1. ✅ **DONE** — Rerank stratum → served-path decision: `DOCUMENTS_RERANK_ENABLED` (default ON,
+   cites the report) + decision recorded as deferred-retrieval-roadmap §7.1.
+2. ✅ **DONE** — D-3: `EmbeddingQuotaExhaustedError` at the embedding choke point (probe-then-
+   classify), non-terminal `DocumentStatus.QUOTA_EXHAUSTED` park, search twin typed; STRIDE
+   residual marked FIXED; validated live by the quota incident itself.
+3. ✅ **DONE/VERIFIED** — D-1: root-caused as oomd (not a listener bug); the worker survived
+   55+ min across the expanded sweep; D-2's memory fix holds.
+4. ⏳ **Phase 7 activation** — awaiting the owner's go (delete surface not built).
+5. ◑ **Hygiene** — HALF-DONE: reports-dir/gitignore verified (live_* reports tracked by
+   design); scripts lint conformance NOT worked (72 findings, out-of-gate by design).
+
+---
+
+# ADDENDUM 3 — SESSION RETROSPECTIVE (2026-11-15, origin/main @ b7c68c58)
+
+## Remaining / forgotten after three fix waves + the expanded sweep
+
+| Item | Status |
+|---|---|
+| **Quota-window corpus work** (§4 — the program's actual goal) | ❌ Not touched: 7 SRC PDFs → vector scoring → G2/G5/G4 flag decisions → roadmap 2.2/4.3 ticks. Needs a Gemini quota window + the machine mostly alone |
+| **Third Greptile wave** (~45 remaining P2s) | ❌ Not started — mostly `scripts/live_measurement` (8), plus eval-harness edges and misc |
+| **F8/G2 crawler** | ❌ Still broken: crawl4ai `_make_config_signature` geolocation dict bug — needs a crawl4ai version/config decision |
+| **F7 full closure** | ⏳ Needs a verified Resend sending domain (owner DNS) — test-mode delivers only to the account email |
+| **G5 subscription step** | ⏳ Plans sync; subscription create needs one re-probe now that the Razorpay product state is confirmed and the total_count fix is live |
+| **CodeRabbit full review** | ⏸️ Left aside per owner — needs interactive `coderabbit auth login` |
+| **Admin credit repro** | ⏳ One live request with the admin JWT to see why the ADMIN whitelist didn't fire |
+| **Two test-pollution flakes** | 📝 Documented, unfixed (`test_qna_engine` registry leak, crawler-boundary ordering) |
+| **Stale billing rows** | 📝 Two `permanent_failure` subscriptions + one `pending` recorded for reconciliation |
+| **Scripts lint conformance** (72 findings, out-of-gate by design) | 📝 Noted, not worked |
+
+## Greptile review stage
+
+**Review: 100% complete** — all 18 commits reviewed across 7 chunks (zero irrecoverable; the
+41k-insertion monolith handled via worktree diff-shaping). **Remediation: ~30 of 76 findings
+fixed** across two waves — including all 5 top P1s, all 3 security flags, and both cross-cutting
+patterns. The remaining ~45 are lower-severity P2s concentrated in measurement scripts and eval
+edges. Findings summary: /tmp/greptile_findings_summary.md (session-local).
+
+## Handoff completion status (§6 above + §4)
+
+- ✅ §6.1 rerank decision, §6.2 D-3, §6.3 D-1, §6.5 hygiene-half, §7 deletable files,
+  §8 collision management (the branch-poisoning incident hardened the process)
+- ❌ §4 quota-window work — the only §1-9 item still fully open
+- ⏳ §6.4 Phase 7 activation (owner go), §9 staging + 7.3 (owner-gated)
+
+## Next priority (recommendation)
+
+**The Gemini quota-window session** (§4 + §9's paste-able prompt) — the only item that advances
+the product program rather than hardening: corpus completion → vector-leg scoring → the three
+G-flag decisions → roadmap ticks. Second: the F8 crawler fix (one version decision). Third: the
+Greptile third wave.
+
+---
+
+**THE CHOSEN ONES — session-level lessons (2026-11-15):**
+
+1. **The defect ledger compounds downward**: round-1 found 12 defects, round-2 found 4 *new*
+   ones in code that had just been fixed, round-3 found 4 more — each round's fixes were real,
+   but fixing shifts the failure surface to the next layer. A program that measures after every
+   fix will always find more; the number going 12→4→4 *at ~88 probes with zero cross-tenant
+   exposure* is what convergence actually looks like — don't be discouraged by nonzero, read
+   the trend.
+
+2. **The two best root causes of the session (F5's pickle-signature death, F12c's uv fd relay)
+   were invisible until the observability was fixed first** — the journal sink repair cost 30
+   minutes and unlocked both diagnoses. When debugging stalls, spend the first effort on making
+   the system *say more*, not on thinking harder.
+
+3. **Every "needs owner decision" that sat on the board got resolved in one line of user input**
+   ("yes", "make it yourself", "use the JSON") — the actual bottleneck was never the decision's
+   difficulty, it was the question not being asked crisply enough. Frame decisions as one-word
+   answers and they stop being blockers.
+
+4. **State machines fail at their boundaries, and the failure renders at someone else's door**:
+   F5 died in the pool parent (the exception's birthplace never saw it), G9's rows persisted
+   while the client saw 500s, the money-path blocked at a *customer* sub-step while everyone
+   stared at the subscription endpoint. When a flow fails, trace the whole chain — the broken
+   hop is rarely the one with the user-visible symptom.
+
+5. **Audit by probe, not by pattern**: the crawler "needed a limiter" until a second seam
+   (`RateLimiter.acquire(CRAWL)`) proved it already had one; Redis "needed 98 clients" until
+   `INFO clients` showed the plan caps at 30. Two hours of correct-looking work was deleted by
+   one live query each. The live system is the specification — grep the code second, ask the
+   runtime first.
 
 ---
 
