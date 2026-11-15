@@ -283,3 +283,31 @@ gets a measurement or a test.
   bug class). Probe-then-classify beats string-matching provider errors. A settings-level env
   override is an operational decision — tests assert configured values; code defaults are pinned
   separately at the settings layer.
+
+## ADDENDUM 2 — 2026-11-15 late evening (final session state, origin/main @ bf33ae98)
+
+**Fix waves landed this session (all pushed):** `6488dfc` docs retirement → hardening batch
+(`0703ed5..ef28bec`, 19 commits) → `cf5e0f7`/`cbb3e85`/`831a783`/`c923804`/`e9eae0f`/`ddeece7`
+(first fix wave: smoke F1-F12 + Greptile wave-1 P1s + rate-limit fleet + quota-park contract +
+credential rotation) → `00df578`/`e03b3fe` (second wave: Greptile P2s + F5 ROOT CAUSE — poisoned
+pre-catalog ETA message + billiard pickle signature → graceful worker death; G1/G3/F12c/F3/F10/F11)
+→ `5954b5c`/`fa22725`/`a48e85bb` (docs) → `8850391` (G-batch: broker DLQ, plan PATCH brick,
+Redis pool budgets, task-time logging, session 404) → `47b7432d` (C7 sweep + money-path
+total_count fix) → `bf33ae98` (CatalogValidatingBeat F1 twin).
+
+**Defect ledger at session end:** F1-F12 (round-1) — all fixed except F7 (owner-side Resend
+domain) and F8/G2 (crawl4ai geolocation bug — needs a version/config decision). G1-G9 — all
+fixed except G5's subscription step (provider 4xx — re-probe after the owner confirms the
+Razorpay Subscriptions product; plans DO sync). Three smoke rounds: 45 → 61 → ~88 rows probed.
+
+**Still owed (unchanged or newly queued):** quota-window corpus work (§4 above — driver runs
+ALONE); third Greptile wave (~45 remaining P2s, mostly scripts/live_measurement + eval edges);
+C7-adjacent: none (built and live on beat); CodeRabbit fresh review (owner: coderabbit auth
+login); admin cross-user credit repro; the two known test-pollution flakes (test_qna_engine
+registry leak, crawler-boundary ordering).
+
+**Operational notes:** Redis Cloud plan cap is maxclients=30 (verified live) — pool budgets are
+env-sized (12 API / 5 per worker) in .env.development; beat is now RUNNING (first time —
+CatalogValidatingBeat had the F1 twin app-binding bug, fixed `bf33ae98`); the C7 sweep observes
+every 15 min (observation-only — re-drive stays with the resume driver); DLQ topology declared
+live at worker boot; admin principal + rotated testing principal live in .testing-credentials.json.
