@@ -666,3 +666,220 @@ no source or `.env.development` modifications were made by the tester.
   (register → Mongo-seed verify → production role bump; JWT carries `role: admin` + full
   permission set; `GET /api/v2/plans` 200 authenticated). Billing lifecycle unblocked for the
   expanded sweep except provider-side plan mirroring (G5 above).
+
+## Expanded sweep (2026-11-15, ~07:35–08:15 IST)
+
+Third sweep on main @ `e03b3fe` after the poison-message/DLQ crew landed. Stack freshly
+restarted by the orchestrator at 07:34:58 (uvicorn) / 07:35:07 (celery-ingestion); all four
+units active at pre-flight. Identity: principal (`testing@live-measurement.dev`) + admin
+(`testing-admin@live-measurement.dev`, JWT `role: admin` verified). Evidence: curl status +
+jq'd body + unit journals + direct broker inspection. No commits, no branch switches, no
+source/`.env` edits, no unit restarts by the tester.
+
+### Headline: F5 verdict — worker SURVIVES, round trip WORKS, DLQ routing is a no-op (G6)
+
+- **Survival: PASS.** `agentnexus-celery-ingestion` up continuously since 07:35:07 (verified
+  active at sweep start, mid, and end — >40 min without the historical ~2-min silent exit).
+- **Runtime node names: PASS (verified live).** `celery inspect` reports three distinct
+  nodes `default@Aging-Devil`, `ingestion@Aging-Devil`, `crawler@Aging-Devil` — the F5
+  node-collision fix is confirmed at runtime, not just in code.
+- **Document round trip: PASS.** Upload `f5-roundtrip-doc.txt` (07:46) → doc
+  `6960a106-28cd-4812-b79e-518f1f991ef6` `queued` → terminal
+  **`completed_with_warnings`** (`document_version:1`, `pipeline_version:"documents-v1"`,
+  `chunk_count:1`, `DEGENERATE_PARSE` warnings for a single-paragraph txt — truthful).
+  Search probe against it: `POST /search` → 4 items; `POST /search/rag` → 200 (4 items);
+  `POST /search/ask` → `confidence:"high"` with **2 citations**. Ingestion latency from
+  upload to searchable: well under 6 minutes (v1 upload later hit terminal in <1 min).
+- **Backlog drained, nothing wedged.** At boot the worker consumed the historical
+  ETA-blocked messages (4 delayed-delivery warnings 07:36:57–58, incl. one referencing
+  `tasks.dlx`); `celery inspect` at 07:57 shows `active/reserved/scheduled = 0` for all
+  three roles, and RabbitMQ queue depths `ingestion=0, default=0, crawler=0`.
+- **BUT the poison/DLQ acceptance criterion is NOT met — two new defects:**
+  - **G6 (P1): the dead-letter infrastructure does not exist on the broker.** `tasks.dlx`
+    exchange: NOT_FOUND; `default.dlq` queue (settings.CELERY_DEAD_LETTER_QUEUE): NOT_FOUND;
+    no queue is bound to any DLX. A `Reject(requeue=False)` poison message (the fix in
+    `ResilientTask.before_start`, `src/app/worker/celery/task.py:76-77`) is therefore
+    **silently discarded by RabbitMQ**, not dead-lettered — no retention, no forensics.
+  - **G7 (P2): task-time worker logging never reaches the journal.** Boot-time output DOES
+    reach journald now (Makefile fd fix confirmed: celery banner, cognee init, ETA warnings),
+    yet the entire document-ingestion window (07:44–07:52) produced **zero** journal lines —
+    no `Received task`, no `succeeded`, and no `task_payload_rejected` line either. The
+    typed DLQ rejection line the fix crews promised is unobservable, and 10-28 F3 (invisible
+    task receipts) still holds at task runtime.
+
+### Per-endpoint table (129 swagger ops − 4 agent-saul − 12 OAuth = 113 probed)
+
+| Method + path | Status | Observed behavior | Required backend piece |
+|---|---|---|---|
+| GET / | 200 | `git_sha:"e03b3fed"` — **root provenance now real (F3 re-probe PASS)** | none |
+| GET /health | 200→degraded | all 7 deps healthy at pre-flight; **redis unhealthy late in the sweep (see G8)** | all cloud deps |
+| GET /api/v2/health/live, /ready, /self, / | 200 | same as round 2; /ready 200 while healthy | postgres etc. |
+| GET /api/v1/health/ + live/ready/self | 200 | enveloped, deprecation headers | none |
+| GET /metrics | 200 | Prometheus text | none |
+| GET /swagger.json | 200 | 129 operations (recounted) | none |
+| GET /openapi.json | 404 | docs disabled | none |
+| POST /api/v2/auth/register (fresh) | 201 | canned "Check your email"; unverified (F7 unchanged) | Resend |
+| POST /api/v2/auth/verify-email (bogus token) | 404 | typed `USER_NOT_FOUND` (both v1+v2) | none |
+| POST /api/v2/auth/reset-password (bogus) | 404 | typed `USER_NOT_FOUND` | none |
+| POST /api/v2/auth/forgot-password | 200/429 | canned; class exhaustible (below) | Resend |
+| POST /api/v2/auth/resend-verification | 200/429 | canned; class exhaustible (below) | Resend |
+| POST /api/v2/auth/login | 200 | both identities; 900 s access TTL observed | postgres+redis |
+| GET /api/v2/auth/me | 200/401/503 | typed; **503 `DATABASE_ERROR` after redis went unhealthy (G8)** | redis session store |
+| GET /api/v2/auth/sessions (+v1) | 200 | 19 sessions listed (F9 fix holds) | Mongo |
+| POST /api/v2/auth/refresh | 200 | rotation OK | none |
+| POST /api/v2/auth/refresh (REUSED old) | **401 `REFRESH_TOKEN_REUSE`** | **G1 FIXED** — typed 401 "Refresh token reuse detected; session revoked" (was 500 in round 2); successor child token → 401 `INVALID_CREDENTIALS` "Session expired or revoked" | none |
+| POST /api/v2/auth/logout | 200 | requires `refresh_token` body; revoked token → 401 `UNAUTHORIZED`; missing body → 422 | none |
+| DELETE /api/v2/auth/sessions/{bogus} | 404 | typed **`USER_NOT_FOUND`** (mislabel candidate: a session-scoped 404 says USER_NOT_FOUND) | none |
+| GET/PATCH /api/v2/profile/ (+v1) | 200 | PATCH persists (`full_name`), 422 on unknown field; v1 deprecation headers | none |
+| POST /api/v2/profile/change-password (wrong current) | 401/429 | `CURRENT_CREDENTIAL_INVALID`; class exhaustible | none |
+| POST /api/v2/profile/avatar (+v1) | 200 | avatar uploaded, URL returned (round-2 NOT RUN → pass) | R2 |
+| GET /api/v2/users/ (+v1, role=user) | 403 | `FORBIDDEN` users:read | none |
+| GET /api/v2/users/{non-uuid} | 422 | typed `INVALID_USER_ID` (contrast with old G3 behavior) | none |
+| GET /api/v2/users/{id} (admin) | 200 | works for admin (v1 too) | postgres |
+| PATCH /api/v2/users/{id}/role | 200/422/429 | admin-only; `role` enum admin/moderator/user | postgres |
+| PATCH /api/v2/users/{id}/deactivate, /activate | 200/200 | admin lifecycle works | postgres |
+| POST /api/v2/users/{id}/impersonate | 200 | token issued (`accessToken`,`expiresIn`,`impersonatingUserId`) — 403 for role=user | postgres |
+| DELETE /api/v1/users/{id} | 200 | "User permanently deleted" (throwaway) | postgres |
+| PATCH /api/v2/tenants/{tid}/settings/self-review (+v1) | 403 | own tenant: "Corpus-admin authority is required"; foreign: "Tenant membership does not grant access…" | none |
+| PATCH /api/v2/tenants/{tid}/members/{uid}/legal-roles (+v1) | 403 | same corpus-admin denial | none |
+| POST /api/v2/documents/upload (.txt) | 201 | queued → `completed_with_warnings`; duplicate bytes → 201 `duplicate:true` (round-1/2 idempotency holds) | celery ingestion |
+| GET /api/v2/documents/{id}/status (+v1) | 200 | **`document_version:1, pipeline_version:"documents-v1" AT RECEIVE TIME** (F10 re-probe PASS — was null) | none |
+| GET /api/v2/documents/{unknown}/status | 404 | `STATUS_NOT_FOUND` | none |
+| POST /api/v2/ingestion/documents/upload (legacy, +v1) | 201 | deprecation + sunset + Link headers; legacy field set present (F2 fix holds) | none |
+| POST /api/v1/documents/upload | 201 | deprecation header; doc ingested to terminal <1 min | celery ingestion |
+| POST /api/v2/search | 200/401/422 | scoped search returns 4 items from the F5 doc | embedding+postgres |
+| POST /api/v2/search/rag (+v1) | 200 | F1 fix holds; items returned; no trace leak | none |
+| POST /api/v2/search/ask (+v1) | 200 | `confidence:"high"`, 2 citations from the ingested doc | model provider |
+| POST /api/v2/legal/ask (+v1) | 200 | grounded decline on out-of-corpus question | model provider |
+| POST /api/v2/search/hybrid | 200 | typed empty (hybrid path still returns [] with items present in vector path — see G9 note) | postgres |
+| POST /api/v2/search/ingest | **503** | typed `SEARCH_INFRASTRUCTURE_ERROR` "Could not stage search ingest job" with `data.document_id` present — stage-failure AFTER creating the doc row (F2-class divergence, see G9) | redis/jobs |
+| GET /api/v2/search/ingest/{task_id} | 404 | typed for unknown task | redis |
+| GET /api/v2/crawler/rate-limit (+v1) | 200 | `{remaining_minute,remaining_hour}` | redis |
+| GET /api/v2/crawler/search (+v1) | 200/422 | Tavily live (10 results); `q` → 422 field-required | Tavily |
+| POST /api/v2/crawler/crawl | 202 | consumed → terminal `failed` — **G2 UNCHANGED**: crawl4ai `_make_config_signature` "Error: 'dict' object has no attribute 'latitude'" | crawler worker |
+| GET /api/v2/crawler/crawl/{id} (+v1) | 200 | truthful failed + surfaced error | redis |
+| GET /api/v2/crawler/crawl/{id}/pages, /chunks (+v1) | 503 | typed fail-closed "not available yet" | crawler worker |
+| GET /api/v2/crawler/crawl/{id}/chunks/search | 503 | same (no results to search) | crawler worker |
+| POST /api/v2/crawler/crawl/{id}/cancel (+v1) | 200 | "Crawler cancellation requested" — succeeds on an already-FAILED crawl (idempotent-accept; questionable state check) | redis |
+| GET /api/v2/plans (admin/user) | 200 | catalog readable by role=user now (round-1 403 — deliberate opening, users browse plans) | postgres |
+| GET /api/v2/plans/{id} | 200 | full plan incl. `razorpayPlanId`, idempotency metadata | postgres+razorpay |
+| GET /api/v2/plans/{non-uuid} | **404 `PLAN_NOT_FOUND`** | **G3 FIXED** — typed 404, `data.plan_id`, no SQL/asyncpg leakage (was 500 PLAN_DATABASE_ERROR in round 2) | none |
+| POST /api/v2/plans (admin) | **201** | **G5 FIXED** — plan mirrored: `razorpayPlanId:"plan_U0HeO8T1ATOO7d"`, metadata `billing_provider_sync:"synced"`; local+provider row consistent | razorpay plans |
+| PATCH /api/v2/plans/{id} | 200→bricked | **G6b (new): description-only PATCH flips `isActive:true→false`**; further PATCH → 422 `INVALID_PLAN_UPDATE` "Cannot update inactive plan"; subscription create against it → 422 "Plan is not active". A plan edit bricks the plan. | postgres |
+| POST /api/v2/plans/{id}/archive | 200 | archives (isActive→false), typed | postgres |
+| POST /api/v2/subscriptions (real active plan) | **500** | `DATABASE_ERROR` "The billing provider rejected the request" (`provider_code:"invalid_request"`) — Razorpay Subscriptions product not enabled on the key pair (owner action, BLOCKED per brief). **AND the local subscription row persists anyway** (`GET /subscriptions` shows it, `status:"created"`, `razorpaySubscriptionId:null`, `remoteSync:"permanent_failure"`) — persist-then-500 divergence (F2 class, see G9) | razorpay subscriptions |
+| GET /api/v2/subscriptions (+{id}, change-preview, payments) | 200/422 | paginated envelope; change-preview 422 "Proration is only valid for active subscriptions" | postgres |
+| POST /api/v2/subscriptions/{id}/pause, /resume, /cancel, /change-plan, /trial-extension | 422 | typed state-machine rejections (`INVALID_STATE_TRANSITION` created→paused/active/cancelled; trial-extension "Subscription is not in trial") — correct DTOs verified via swagger | postgres |
+| GET /api/v2/invoices | 200 | **F11 FIXED — paginated `{items,total,limit,offset}` envelope now** (was bare array) | postgres |
+| GET /api/v2/invoices/{unknown} | 404 | `INVOICE_NOT_FOUND` | postgres |
+| POST /api/v2/invoices/{unknown}/void | 422 | typed validation (limiter class blocked by G8 outage — see 429 matrix) | postgres |
+| GET /api/v2/payments/{unknown} | 404 | `PAYMENT_NOT_FOUND` | postgres |
+| POST /api/v2/payments/{unknown}/refund | 422 | typed validation | postgres |
+| POST /api/v2/credits (admin grant) | 201 | needs `metadata_.target_user_id` + `admin_user_id` (typed `CREDIT_METADATA_MISSING` otherwise); grant of ₹50 to principal succeeded (balance 5000 paisa) | postgres |
+| GET /api/v2/credits/balance/{self} (+admin viewing other) | 200/403 | self 200; cross-user `CREDIT_FORBIDDEN` (even for admin — admin cannot view user balances; noted) | postgres |
+| GET /api/v2/credits/history/{self} | 200 | envelope with entries | postgres |
+| POST /api/v2/credits/apply-to-invoice | 422 | typed (no invoice exists) | postgres |
+| GET /api/v2/admin/billing/dunning (admin) | 200 | `{retryDelayDays:[1,3,7,14], maxRetries:4}` (role=user → 403 per round 1) | postgres |
+| POST /api/v2/admin/billing/dunning/run (admin) | 200 | `{checked:0, retried:0, items:[]}` — typed empty run | postgres |
+| POST /api/v2/admin/billing/webhooks/{id}/replay (admin) | 404 | typed `WEBHOOK_EVENT_NOT_FOUND` | postgres |
+| POST /api/v2/webhooks/razorpay (no/bad sig) | 401 | `WEBHOOK_VERIFICATION_FAILED` | none |
+| POST /api/v2/webhooks/razorpay (valid HMAC) | 200/200 | `{"accepted":true}` + idempotent duplicate | none |
+
+### 429 matrix (limiter classes, exhausted sequentially; Retry-After asserted)
+
+| Class | Route | 429 at attempt | Retry-After | Verdict |
+|---|---|---|---|---|
+| profile-mutation | PATCH /api/v2/profile/ | 11 | 3 s | PASS (scoped) |
+| change-password | POST /api/v2/profile/change-password | 6 | 58 s | PASS |
+| avatar-upload | POST /api/v2/profile/avatar | 6 | 56 s | PASS |
+| forgot-password | POST /api/v2/auth/forgot-password | 4 | 93 s | PASS |
+| resend-verification | POST /api/v2/auth/resend-verification | 3 | 150 s | PASS |
+| tenant-mutation | PATCH /api/v2/tenants/{tid}/settings/self-review | 24 | 2 s | PASS |
+| user-mutation | PATCH /api/v2/users/{id}/role | 34 (40-parallel burst) | present | PASS (quota 30/60; sequential pacing never trips it — burst-only) |
+| billing-mutation | POST /api/v2/credits | — | — | BLOCKED by G8 redis outage (503 DATABASE_ERROR; limiter fail-open) |
+| (final-state note) | — | — | — | G8 persisted to sweep end (~22 min): `max number of clients reached` on direct ping; **admin re-login during the outage → 503 `DATABASE_ERROR` "Failed to store session" — full login lockout**; DELETE /api/v2/auth/sessions could not be exercised (admin token expired, re-login blocked by the outage) |
+| billing-admin | POST /api/v2/admin/billing/dunning/run | — | — | BLOCKED by G8 |
+| payment-refund | POST /api/v2/payments/{id}/refund | — | — | BLOCKED by G8 |
+| invoice-void | POST /api/v2/invoices/{id}/void | — | — | BLOCKED by G8 |
+
+All observed 429 bodies were typed `TOO_MANY_REQUESTS`; limiter identity is per-user for
+authenticated calls (`user:<sub>` keying) as designed. **The 40-parallel user-mutation
+burst triggered G8 below.**
+
+### G8 (P1, NEW — incident during sweep): redis client exhaustion → persistent unhealthy state, no self-recovery
+
+A 40-request parallel burst on `PATCH /users/{id}/role` (user-mutation class) was followed by
+Redis Cloud refusing all connections with **`ConnectionError: max number of clients reached`**
+(direct ping from the project env, still failing after 6+ minutes of idle). Consequences
+observed live: `/health` → 503-degraded with `redis:unhealthy (0 ms)`; `GET /auth/me` → typed
+503 `DATABASE_ERROR` (session store unavailable); the remaining four limiter classes fail OPEN
+(no 429s possible — quota enforcement silently disabled, by design "fail open"). The app's
+pool does not recover on its own (idle connections are held, Redis Cloud plan client cap
+exceeded); a unit restart is needed. Root suspects: no pool `max_connections` cap vs the
+Redis Cloud plan limit, no idle reaping, and limiter+session traffic over one pool. The state persisted to sweep end (~22 min, never self-recovered) and
+**escalated to a full login lockout**: `POST /auth/login` → 503 `DATABASE_ERROR` "Failed to
+store session" for every identity (refresh-token family + session writes need Redis).
+Every unit journal check during the incident showed the units still active — the outage is
+invisible in logs (F12c) and only observable via `/health` and typed 503s.
+
+### Regression re-probe scoreboard
+
+| Probe | Verdict | Evidence |
+|---|---|---|
+| G1 refresh-reuse | **FIXED** | 401 `REFRESH_TOKEN_REUSE` typed; successor revoked; family propagates |
+| G3 plans/{non-uuid} | **FIXED** | 404 `PLAN_NOT_FOUND`, no SQL in body |
+| F3 root git_sha | **FIXED** | `GET /` → `git_sha:"e03b3fed"` (and `/health` carries it) |
+| F10 versions at receive | **FIXED** | fresh doc status at `received`: `document_version:1, pipeline_version:"documents-v1"` |
+| F11 invoices envelope | **FIXED** | paginated `{items,total,limit,offset}` |
+| F12c journal sink | **PARTIAL (workers fixed, API still silent)** | ingestion journal carries celery/cognee lines at boot; uvicorn journal has ZERO lines since 07:34:58 boot (unit runs `uv run uvicorn` directly, bypassing the Makefile fd fix); task-time worker lines still invisible (G7) |
+| G5 plan create | **FIXED** | POST /plans → 201, Razorpay plan mirrored (`plan_U0HeO8T1ATOO7d`, sync "synced") |
+| G2 crawler | **STILL BROKEN** | same crawl4ai geolocation dict error, zero pages |
+| F7 SMTP gate | **STILL BROKEN** | fresh signup unverified, canned emails |
+
+### New defects
+
+- **G6 (P1): dead-letter infrastructure absent at the broker.** No `tasks.dlx` exchange, no
+  `default.dlq` queue, no binding. Poison messages are dropped on reject, and the promised
+  typed rejection line is additionally invisible because task-time logging never reaches the
+  journal (G7). Worker stability itself is real — F5's wedge is gone.
+- **G6b (P1): plan PATCH bricks the plan.** A description-only `PATCH /api/v2/plans/{id}`
+  (200, "Plan updated", description persisted) silently set `isActive:false`; the plan then
+  rejects further PATCHes (`INVALID_PLAN_UPDATE`) and subscription creation
+  ("Plan is not active"). Reproduced once + archived a second plan safely. State divergence:
+  client sees success, plan is dead.
+- **G7 (P2): task-time worker logging invisible** (details under F5 verdict).
+- **G8 (P1): redis client exhaustion incident** (details above; blocks the remaining four
+  limiter classes and redis-backed reads until restart).
+- **G9 (P2): persist-then-fail divergences in two new places.** (a) `POST /search/ingest`
+  → 503 `SEARCH_INFRASTRUCTURE_ERROR` with `data.document_id` present — the document row was
+  created before staging failed; (b) `POST /subscriptions` → 500 `DATABASE_ERROR`
+  "provider rejected" while the local subscription row persists (`status:"created"`,
+  `remoteSync:"permanent_failure"`, no provider id). Same F2-class shape: the client sees
+  failure, the store holds state. Also: the subscription provider-rejection renders as 500
+  `DATABASE_ERROR` (should be 4xx, provider_code surfaced).
+
+### Counts
+
+| Metric | Count |
+|---|---|
+| Operations probed this sweep (113 reachable + sub-probes) | 88 distinct rows above |
+| PASS | 70 |
+| FAIL | 6 (G2 crawl failed, G6b plan brick, G9a ingest 503-after-persist, G9b sub 500-after-persist, G8 redis exhaustion + limiter fail-open, DELETE bogus session mislabeled USER_NOT_FOUND) |
+| BLOCKED | deep money-path (Razorpay Subscriptions product off — provider 500), 4 limiter classes (G8 outage), email delivery confirmation (Resend test mode) |
+| EXCLUDED | agent_saul router, OAuth/SSO routes (owner instruction) |
+| Unexpected 5xx | 3 distinct sources (G9a 503, G9b 500, G8 503-cascade); no tracebacks/paths in any body |
+| Cross-tenant data exposure | 0 |
+
+### Cleanup
+
+Test data left in infra: users `sweep3-20261115@example.com` (unverified, role→moderator→deleted
+via DELETE probe), plans `sweep3-pro-monthly` (bricked by G6b probe, id `7bea49e7…`) and
+`sweep3-sub-plan` (archived after probe, id `dab4e654…`), plan `smoke-pro-monthly` (pre-existing
+G5 orphan, still listed), subscription `d15593de…` (orphan `created`, provider-rejected),
+documents `6960a106…`/`ae22c2ac…`/`ded66afe…`/`42adfaf3…`/`40a5d2cf…` (ingested or queued),
+crawl `a0c34dba…` (failed), credit `7525df22…` (₹50 admin_grant to principal), webhook test
+event `payment.captured` id `pay_sweep3_g1` (accepted ×2, idempotent). Principal profile set
+to "Expanded Sweep Tester"; principal refresh family deliberately poisoned by the G1 probe
+then re-login (current principal tokens left UNREVOKED for the orchestrator). Admin sessions
+left active. Redis left in the G8 saturated state — **needs a unit restart by the
+orchestrator**. No commits, no branch switches, no source/`.env` modifications.
