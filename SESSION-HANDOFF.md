@@ -385,3 +385,49 @@ env-sized (12 API / 5 per worker) in .env.development; beat is now RUNNING (firs
 CatalogValidatingBeat had the F1 twin app-binding bug, fixed `bf33ae98`); the C7 sweep observes
 every 15 min (observation-only — re-drive stays with the resume driver); DLQ topology declared
 live at worker boot; admin principal + rotated testing principal live in .testing-credentials.json.
+
+## ADDENDUM 4 — COMPLETENESS SWEEP (2026-11-15, origin/main @ 58014625)
+
+A final audit of the session's own work caught one more live bug and consolidated the leftover list.
+
+### The last-minute catch
+
+**The C7 sweep failed on its first two production ticks** — `TypeError: sweep_stuck_documents()
+missing 1 required positional argument`: the task takes `_self` positionally but was declared
+without `bind=True` (the auth reconcile task it mirrors declares it). The unit tests exercised
+the scan helper and the schedule wiring, not the dispatch contract — found live in the journal
+on the first schedule tick, fixed (`bind=True`), worker recreated, committed `58014625`. Its
+first clean pass will observe the `quota_exhausted` corpus documents — correct behavior (they
+are genuinely non-terminal and old; re-drive is the quota-window resume).
+
+### Complete leftover list (session end)
+
+**Owed by the codebase (queued, no owner action):**
+| Item | Note |
+|---|---|
+| Quota-window corpus work | §4 above — needs a quiet machine hour + Gemini quota |
+| Greptile wave 3 (~45 P2s) | Mostly `scripts/live_measurement` + eval edges |
+| F8/G2 crawler fix | crawl4ai version/config decision |
+| Stale billing rows | 2 `permanent_failure` + 1 `pending` subscription — reconcile when the money-path is fully proven |
+| Test-pollution flakes ×2 | `test_qna_engine` registry leak, crawler-boundary ordering — documented |
+| Docs drift | `docs-site/openapi.json` stale; manual-testing-plan says 138 ops vs 129 live — cosmetic |
+
+**Owed by the owner (one-liners):**
+| Item | Action |
+|---|---|
+| Razorpay re-probe | Confirm the Subscriptions product state; one command verifies the full chain (plan syncs already; `total_count` fix live) |
+| Resend sending domain | Verify a domain → give the from-address → disposable test users receive mail |
+| CodeRabbit | `coderabbit auth login` → full review of the fix batch reruns |
+| Admin-credit repro | One request with the admin JWT to see why the ADMIN whitelist didn't fire |
+
+**Accepted / documented (no action):**
+- Rate-limit **fail-open** during a Redis outage — deliberate policy, documented at the throttle
+- Redis **code defaults** (50/16) assume a paid tier; this plan's 30-client cap is env-sized
+  (12 API / 5 per worker) with the rationale in `.env.development`
+- Sweep test tokens left unrevoked + `/tmp` plaintext secret — test-env hygiene, local-only
+- Sourcery not run this session (not requested)
+
+**Session scoreboard:** full suite 2651/0; three smoke rounds reconciled (45 → 61 → ~88 rows);
+Greptile 76 findings dispositioned (review complete, remediation ~30/76 across two waves);
+~30 conventional commits pushed; F5 dead for good; the journal talks; the DLQ exists; beat
+runs; the money-path reaches business rules.
