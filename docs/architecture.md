@@ -82,7 +82,63 @@ branch if you want proof the contract still bites).
 | `auth` | hexagonal | `api/{http,websocket}`, `application/` (incl. `revocation/`), `domain/`, `adapters/persistence/mongodb` |
 | `documents` | hexagonal + legacy shim folded | `application/commands|queries|tools|evidence`, `adapters/persistence/postgres`; legacy ingest lives under `ingestion/` behind `api/http/legacy_ingest_router.py` (deprecation path) |
 | `agent_saul` | hexagonal, graph at feature root | `graph/` beside the four layers (see above); transcript persistence under `application/transcript/` + `adapters/persistence/` |
+| `crawler` | hexagonal + dedicated worker capability | `api/http`, `application/{ports,tools}`, `domain`, `adapters/{crawl4ai,proxy,persistence/redis}`; browser and egress resources are worker-process-owned |
 | `billing` | subdomain-layered **by design** | not converted — see below |
+
+## Crawler execution and security boundary
+
+The crawler is one feature with two separately specified capabilities:
+
+- [crawler-worker-execution](../openspec/specs/crawler-worker-execution/spec.md)
+  defines durable asynchronous jobs, process-local browser ownership, bounded
+  persisted results, pagination, cancellation, and truthful terminal states.
+- [crawler-egress-policy](../openspec/specs/crawler-egress-policy/spec.md)
+  defines connection-time public-address authorization, supported schemes and
+  ports, a non-bypass worker network, fixed-destination Redis access, and
+  fail-closed capability preflight.
+
+The split is architectural, not a second crawler implementation. The runtime
+path is:
+
+1. The HTTP layer validates ownership, idempotency, quotas, and the crawl
+   request. `POST /api/v2/crawler/crawl` creates Redis job metadata, publishes
+   a command to the dedicated `crawler` queue, and returns `202` with a
+   `crawl_id`; the API process never starts Chromium.
+2. A crawler worker child lazily creates one persistent event loop and one
+   Crawl4AI browser capability inside that process. The browser is reused by
+   sequential jobs in that child and is never shared across a fork or process
+   boundary.
+3. Capability provisioning succeeds only after the configured HTTP(S) boundary
+   permits an operator-controlled public probe and explicitly denies a safe
+   loopback probe. Unsupported schemes and ports are rejected before proxy I/O.
+4. The worker writes bounded pages, chunks, status, cancellation state, and
+   terminal errors to the authoritative Redis job store. The Celery result
+   backend is not the crawler result store.
+5. Clients retrieve data through status, paginated pages, paginated chunks,
+   bounded chunk search, and cooperative cancellation endpoints. Raw page
+   bodies are never returned from the creation response.
+
+The deployment security invariant is stronger than “set `HTTP_PROXY`”. The
+worker namespace MUST have no general public route. Its only control-plane
+destinations are the message broker and a mutually authenticated,
+fixed-destination Redis relay; public HTTP(S) leaves through the policy proxy.
+The proxy and relay may be dual-homed, but neither is a generic router.
+
+Railway private networking encrypts and isolates service-to-service traffic,
+but it does not by itself remove ordinary service outbound internet access.
+Consequently, the hardened crawler worker belongs on compute that can prove
+deny-by-default egress (for example a network-policy-capable cluster or an
+isolated VM/container network) unless Railway adds an equivalent control and
+the acceptance tests prove it. The FastAPI API and other workers may still run
+on Railway and communicate with the crawler cell through authenticated managed
+RabbitMQ and Redis interfaces.
+
+Capacity follows the worker process model. Each Celery crawler child owns a
+browser process tree, so crawler concurrency is a memory multiplier rather than
+a cheap coroutine count. Keep the default concurrency at two, size from
+measured per-child peak RSS, and add replicas before raising child concurrency.
+The production sizing envelope and scaling signals live in
+[the Railway deployment plan](code-maintainability/railway-deployment-plan.md).
 
 ### Why billing stays subdomain-layered
 

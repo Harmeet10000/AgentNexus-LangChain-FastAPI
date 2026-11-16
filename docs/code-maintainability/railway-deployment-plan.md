@@ -2,8 +2,9 @@
 
 ## Agent Saul + OpenClaw + Frontend + Docs
 
-**Primary platform:** Railway  
-**Secondary platforms:** Dokploy and Coolify as future alternatives / migration tracks  
+**Primary platform:** Railway for the public application plane
+**Security cell:** egress-enforcing compute for crawler workers, proxy, and Redis relay
+**Secondary platforms:** Dokploy and Coolify as future alternatives / migration tracks
 **Target profile:** medium scale, premium budget, any region, Keycloak as IdP
 
 ---
@@ -14,13 +15,17 @@ The right deployment model for this project is **Railway for the application pla
 
 That means:
 
-- Use **Railway** for the public frontend, FastAPI backend, OpenClaw runtime, Celery workers, internal docs frontend, and telemetry collector.
-- Use **managed external services** for the databases that matter most operationally:
-  - **Timescale / Postgres:** TigerData / Timescale Cloud
-  - **Neo4j:** Neo4j Aura
-  - **MongoDB:** MongoDB Atlas
-  - **RabbitMQ:** CloudAMQP
-- Use **Railway Redis** only if you want simplicity and low-latency internal access, or use **Redis Cloud / Upstash** if you want stronger operational separation.
+- Use **Railway** for the public frontend, FastAPI backend, OpenClaw runtime,
+  non-crawler Celery workers, scheduler, internal docs frontend, and telemetry
+  collector.
+- Run the **crawler worker, HTTP(S) policy proxy, and fixed-destination Redis
+  relay as one security cell** on compute that can remove the worker's direct
+  internet route. Railway private networking alone does not provide that
+  egress invariant.
+- Use **managed external services** for durable data and cross-platform control
+  traffic: TigerData / Timescale Cloud, Neo4j Aura, MongoDB Atlas, Redis Cloud,
+  and S3-compatible object storage. Keep RabbitMQ on, or privately tunneled
+  into, the crawler control plane so the worker reaches an internal broker.
 - Use **Grafana Cloud** for observability and **PostHog Cloud** for product analytics, session replay, and feature flags.
 - Use **self-hosted Keycloak on Railway**, backed by a dedicated external Postgres database.
 - Use **Mintlify headless mode** for docs, but host the docs frontend yourself on Railway under `docs.yourdomain.com`.
@@ -41,7 +46,7 @@ Railway is the right primary platform for this project because it gives you:
 - Built-in private networking between services in the same environment
 - Good enough built-in observability for first-level diagnosis
 - Easy service-per-repo or service-per-Dockerfile workflow
-- Strong fit for app services, workers, proxies, and internal tooling
+- Strong fit for app services, ordinary workers, and internal tooling
 
 Current Railway docs confirm:
 
@@ -52,7 +57,11 @@ Current Railway docs confirm:
   - replicas cannot be used with volumes
   - services with attached volumes experience small redeploy downtime
 
-That last point is exactly why Railway should be your **app plane**, not your universal platform for every stateful dependency.
+Railway also documents private networking as an encrypted environment-scoped
+service mesh, while its outbound-networking controls cover static egress IPs
+and optional IPv6 rather than a deny-by-default per-service firewall. That is
+why Railway should be your **app plane**, not the crawler's non-bypass security
+boundary or a universal platform for every stateful dependency.
 
 ---
 
@@ -69,13 +78,18 @@ Stateless or horizontally replaceable services:
 - frontend
 - backend API
 - OpenClaw runtime
-- Celery workers
+- non-crawler Celery workers
 - background schedulers
 - docs frontend
 - telemetry collector
 - internal admin tools
 
 These belong on Railway.
+
+The crawler worker is the deliberate exception. It executes hostile web
+content in Chromium and therefore belongs in a third plane: a constrained
+security cell whose worker namespace can reach only its broker, the Redis
+relay, and the policy proxy.
 
 ### 2. Data Plane
 
@@ -115,8 +129,8 @@ flowchart TB
     FE --> PH[PostHog Cloud]
 
     API --> OCL[OpenClaw Runtime\nPrivate Railway Service]
-    API --> REDIS[Redis\nRailway Template]
-    API --> RMQ[RabbitMQ\nRailway Template]
+    API --> REDIS[(Redis Cloud\nJob State)]
+    API --> RMQ[(RabbitMQ\nCrawler control plane)]
     API --> PG[(Timescale / Postgres)]
     API --> NEO[(Neo4j Aura)]
     API --> MONGO[(MongoDB Atlas)]
@@ -135,6 +149,18 @@ flowchart TB
     WORK2[Celery Worker LLM\nRailway] --> RMQ
     WORK2 --> REDIS
     WORK2 --> OCL
+
+    subgraph CRAWL_CELL[Crawler Security Cell - egress-enforcing compute]
+        CWORK[Crawler Worker\n2 prefork children]
+        PROXY[HTTP(S) Policy Proxy]
+        RRELAY[Fixed Redis Relay\nmTLS listener]
+        CWORK --> PROXY
+        CWORK --> RRELAY
+    end
+
+    RMQ --> CWORK
+    RRELAY --> REDIS
+    PROXY --> WEB[Public HTTP(S) destinations]
 
     SCHED[Scheduler\nRailway] --> RMQ
     SCHED --> REDIS
@@ -175,14 +201,13 @@ flowchart TB
 - `openclaw-runtime`
 - `celery-worker-default`
 - `celery-worker-llm`
+- `celery-worker-ingestion`
 - `scheduler`
 - `docs-frontend`
 - `otel-collector` or `grafana-alloy`
 - `keycloak`
 - `backstage`
 - `jenkins`
-- `redis`
-- `rabbitmq`
 - optional `admin-portal`
 
 ### Managed external services
@@ -190,6 +215,7 @@ flowchart TB
 - `timescale-cloud`
 - `neo4j-aura`
 - `mongodb-atlas`
+- `redis-cloud`
 - `s3-compatible-object-storage`
 - `grafana-cloud`
 - `posthog-cloud`
@@ -200,6 +226,7 @@ The following should never be public by default:
 
 - `openclaw-runtime`
 - Celery workers
+- crawler worker, policy proxy, and Redis relay
 - scheduler
 - collector
 - Flower
@@ -324,15 +351,17 @@ Agent runtimes should be treated as **controlled high-trust compute**, not unres
 
 ---
 
-## 4. Celery Workers And Scheduler
+## 4. Celery Workers, Crawler Security Cell, And Scheduler
 
-**Platform:** Railway  
+**Platform:** Railway for ordinary workers; egress-enforcing compute for crawler
 **Ingress:** private only
 
 ### Services
 
 - `celery-worker-default`
 - `celery-worker-llm`
+- `celery-worker-ingestion`
+- `celery-worker-crawler` plus its policy proxy and fixed Redis relay
 - `scheduler`
 - optional `flower`
 
@@ -358,12 +387,111 @@ Without queue separation:
 
 ### RabbitMQ recommendation
 
-Use the **Railway RabbitMQ template** as your primary queue deployment path.
+Run RabbitMQ on the crawler control plane, or connect that plane to the broker
+through a private tunnel that presents an internal `rabbitmq` destination to
+the worker. Railway producers and ordinary workers should reach the same broker
+through a TLS listener restricted to Railway Pro static outbound IPs or through
+an authenticated private tunnel. Require least-privilege broker credentials,
+publisher confirms, quorum queues where appropriate, explicit queue limits,
+and dead-letter policy.
 
-This matches your stated preference and is viable at your scale, but there are operational caveats:
+Do not point the crawler worker directly at CloudAMQP or a public Railway TCP
+proxy under the current implementation. That would add a public control-plane
+route outside the implemented proxy/relay boundary. CloudAMQP becomes viable
+only after a separately specified fixed-destination AMQP relay or equivalent
+private connectivity is implemented and accepted.
+
+### Crawler execution and egress
+
+The crawler is implemented as two completed capabilities:
+
+- `crawler-worker-execution`: durable asynchronous jobs, process-local browser
+  ownership, bounded Redis results, pagination, idempotency, cancellation, and
+  truthful terminal outcomes.
+- `crawler-egress-policy`: connection-time public-address authorization,
+  browser scheme/port guards, positive and negative preflight probes, no direct
+  worker internet route, and fixed-destination Redis relay access.
+
+`POST /api/v2/crawler/crawl` remains a Railway-hosted API operation. It writes
+job metadata to Redis, publishes to the `crawler` queue, and returns `202`; the
+browser never runs in the API service. The crawler cell consumes the command,
+uses its worker-owned browser, and writes bounded pages and chunks back through
+the Redis relay.
+
+Do not deploy the hardened crawler as an ordinary Railway service merely with
+`HTTP_PROXY` and a private hostname. Railway private networking prevents public
+inbound exposure and isolates environments, but the documented outbound
+controls do not prove that a worker lacks direct IPv4 internet access. Until an
+equivalent deny-by-default egress control exists and passes the crawler
+acceptance suite, use one of these topologies:
+
+| Topology | Pros | Cons |
+|---|---|---|
+| Isolated VM or Docker host with an internal-only worker bridge | Matches the repository's Compose model; simple route evidence | Host patching and high availability are operator responsibilities |
+| Kubernetes with enforced egress NetworkPolicy and a supporting CNI | Strong policy-as-code and horizontal scaling | Highest control-plane and operational complexity |
+| Managed container platform with explicit security-group/firewall egress | Lower operational burden than Kubernetes | Must prove the platform restricts the worker to the proxy, broker, and relay—not just hides inbound ports |
+
+### Starting hardware envelope
+
+These are initial production ceilings, not promises of throughput. Railway
+bills measured use rather than a fixed instance size; set limits only after a
+representative load test and keep 1.5–2× observed peak memory headroom, as
+Railway's current right-sizing guidance recommends.
+
+| Service | Starting ceiling per replica | Initial concurrency | Why |
+|---|---:|---:|---|
+| FastAPI backend | 2 vCPU, 2–4 GiB RAM | 2–4 ASGI workers after measurement | Request validation and orchestration only; crawl work is off-path |
+| Default Celery worker | 2 vCPU, 2–4 GiB RAM | 2–4 prefork children | Short operational jobs |
+| Ingestion worker | 4 vCPU, 8–16 GiB RAM | 1–2 children | Parsers, chunking, and document transforms are bursty and memory-heavy |
+| LLM/agent worker | 2–4 vCPU, 4–8 GiB RAM | 1–2 children | Mostly remote-I/O latency with potentially large graph state |
+| Crawler worker | **4 vCPU, 8 GiB RAM** | **2 prefork children** | Each child owns a Chromium process tree and persistent event loop |
+| HTTP(S) policy proxy | 0.5–1 vCPU, 512 MiB–1 GiB RAM | connection-limited | DNS classification and CONNECT forwarding; scale on connections and latency |
+| Fixed Redis relay | 0.25–0.5 vCPU, 256–512 MiB RAM | connection-limited | Static TCP forwarding with TLS on both legs |
+| RabbitMQ | 1–2 vCPU, 2–4 GiB RAM plus durable disk | queue-limited | Shared command broker; size disk from ingress rate, retention, DLQ, and outage window |
+| Scheduler | 0.25 vCPU, 256–512 MiB RAM | 1 process | Scheduling only; never execute jobs here |
+| Telemetry collector | 0.5–1 vCPU, 512 MiB–1 GiB RAM | 1 process | Batch and export telemetry with bounded queues |
+
+For local development with managed databases, budget **8 CPU cores and 16 GiB
+RAM minimum**. **12–16 cores and 32 GiB RAM** is the practical workstation
+target when running two Chromium children, ingestion, the API, broker, Redis,
+and observability together. Browser-heavy pages, PDFs, or concurrent ingestion
+can exceed the minimum quickly.
+
+The crawler sizing formula is measurement-driven:
+
+```text
+crawler replicas = ceil(target simultaneous crawls / 2)
+memory limit      = 1.5 GiB worker overhead
+                    + (2 × measured p95 child+browser peak RSS × 1.3)
+```
+
+Scale crawler replicas before increasing the prefork count. Add capacity when
+queue-wait p95 exceeds the product SLO, service RSS exceeds 70% of its limit,
+Chromium OOM/restart events appear, or sustained CPU exceeds 70%. Scale the
+proxy independently when CONNECT latency or active connections rise; never
+increase worker concurrency merely because the proxy is idle.
+
+### Crawler acceptance ladder
+
+1. Run unit/API contract tests for ownership, idempotency, status, pagination,
+   chunk search, cancellation, and bounded errors.
+2. Run worker integration tests with real Crawl4AI run-configuration
+   construction and persisted page/terminal outcomes.
+3. Run fail-closed proxy and relay integration tests.
+4. In the target namespace, prove direct browser and raw HTTP egress fail while
+   the broker, proxy, and fixed Redis relay remain reachable.
+5. Run the opt-in deployed smoke against an operator-controlled public URL and
+   verify an explicit loopback policy denial. Do not substitute a metadata
+   endpoint or arbitrary private service for the safe negative probe.
+
+The first three levels prove application behavior. Levels four and five prove
+the deployment boundary; without them, the crawler is implemented but the
+production network claim is not accepted.
+
+### Managed queue caveats
 
 - treat RabbitMQ as a single-service stateful component, not an infinitely disposable container
-- attach a Railway volume and monitor disk growth aggressively
+- monitor disk and queue growth aggressively
 - keep queue TTL, DLQ, and max-length policies explicit
 - avoid using RabbitMQ as a long-term task-result store
 - test restart behavior before production cutover
@@ -433,17 +561,23 @@ Do not put everything into one giant shared schema because “it is one Postgres
 
 ## Redis
 
-**Recommendation:** Railway Redis template
+**Recommendation:** Redis Cloud
 
-This is the simplest fit with your platform choice and service topology.
+The API, Railway workers, and the external crawler security cell all need the
+same authoritative crawler job state. A managed external Redis endpoint avoids
+splitting that state or publicly exposing a Railway-internal template service.
+The crawler worker reaches it only through the mutually authenticated,
+fixed-destination relay; other application services connect directly over TLS
+with least-privilege credentials.
 
-### Railway template guidance
+### Managed Redis guidance
 
-- deploy Redis as a dedicated Railway template service
 - do not share Redis across unrelated environments
 - use it for cache, rate limiting, idempotency, ephemeral coordination, and short-lived worker state
 - define memory eviction policy intentionally
 - monitor memory fragmentation and key cardinality from the beginning
+- keep crawler credentials and database selection end-to-end in the Redis protocol, not in relay configuration
+- require CA, SNI, and hostname verification on the relay-to-Redis TLS leg
 
 ### Rule
 
@@ -894,8 +1028,8 @@ Do not let staging share auth callbacks or OAuth app configuration with producti
 ## Phase 1: Foundation
 
 - Set up Railway project and environments
-- Deploy frontend, backend, OpenClaw, Redis, and RabbitMQ skeleton services
-- Provision managed Postgres, Neo4j, and MongoDB
+- Deploy frontend, backend, and OpenClaw skeleton services
+- Provision managed Postgres, Neo4j, MongoDB, and Redis; deploy RabbitMQ on the crawler control plane
 - Configure private networking and baseline env vars
 - Put Cloudflare in front of public domains
 
@@ -909,8 +1043,9 @@ Do not let staging share auth callbacks or OAuth app configuration with producti
 
 ## Phase 3: Background And Agent Workloads
 
-- Deploy Celery workers and scheduler
-- Wire Railway RabbitMQ and Redis templates
+- Deploy ordinary Celery workers and scheduler on Railway
+- Deploy the crawler worker, policy proxy, and Redis relay on egress-enforcing compute
+- Wire Railway producers to the RabbitMQ TLS/private endpoint and Redis Cloud over TLS
 - Route long-running operations off the API path
 - Introduce Flower behind access control if needed
 
@@ -942,6 +1077,7 @@ Do not let staging share auth callbacks or OAuth app configuration with producti
 - queue failure injection
 - LLM timeout and retry policy validation
 - load tests for ingestion and agent workflows
+- crawler namespace direct-egress denial and deployed preflight evidence
 
 ---
 
@@ -989,8 +1125,9 @@ That keeps platform migration survivable.
 
 For this project, the most defensible production setup is:
 
-- **Railway** for compute and service deployment
-- **Railway templates** for Redis and RabbitMQ
+- **Railway** for public application services and non-crawler workers
+- **egress-enforcing compute** for the crawler worker, policy proxy, and Redis relay
+- **RabbitMQ on the crawler control plane** plus **Redis Cloud** for shared command and crawler job state
 - **managed external data services** for the heaviest critical state
 - **Keycloak on Railway** with dedicated Postgres
 - **Backstage on Railway** behind Keycloak as the internal developer portal
@@ -1006,6 +1143,15 @@ This gives you:
 - good internal networking
 - lower operational drag
 - better failure isolation
+- an enforceable crawler egress boundary rather than proxy configuration alone
 - a clean path to evolve toward Dokploy or Coolify later if you decide Railway is no longer the right control plane
 
 ---
+
+## Railway sources checked 2026-11-16
+
+- [Pricing plans and plan ceilings](https://docs.railway.com/pricing/plans)
+- [Right-size CPU and memory from real metrics](https://docs.railway.com/guides/right-size-cpu-memory)
+- [Private networking](https://docs.railway.com/networking/private-networking)
+- [Outbound networking](https://docs.railway.com/networking/outbound-networking)
+- [Cost control and replica limits](https://docs.railway.com/pricing/cost-control)
