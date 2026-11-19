@@ -247,7 +247,8 @@ async def test_enqueue_options_no_longer_admit_a_countdown() -> None:
 
     with pytest.raises(ValidationError):
         await JobBus(AcceptingSpy(), AcceptingSpy()).enqueue(
-            job, EnqueueOptions(countdown=2)  # ty: ignore[unknown-argument]
+            job,
+            EnqueueOptions(countdown=2),  # ty: ignore[unknown-argument]
         )
 
 

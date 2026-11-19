@@ -57,7 +57,9 @@ def test_role_profile_owns_process_shape(role: str) -> None:
         ("CELERY_CRAWLER_CONCURRENCY", 2),
     ],
 )
-def test_role_concurrency_code_defaults_are_pinned(setting_name: str, default_concurrency: int) -> None:
+def test_role_concurrency_code_defaults_are_pinned(
+    setting_name: str, default_concurrency: int
+) -> None:
     """The shipped code defaults are a decision, not an accident: deployment
     env files may override them (profile_for_role follows the configured
     values — see test_role_profile_owns_process_shape), but a change to the
@@ -110,8 +112,10 @@ def test_role_command_gives_a_distinct_node_name_per_role(role: str) -> None:
 
 
 def test_role_node_names_are_mutually_distinct() -> None:
-    names = [build_worker_argv(role)[build_worker_argv(role).index("-n") + 1] for role in
-             ("default", "ingestion", "crawler")]
+    names = [
+        build_worker_argv(role)[build_worker_argv(role).index("-n") + 1]
+        for role in ("default", "ingestion", "crawler")
+    ]
     assert len(set(names)) == 3
 
 

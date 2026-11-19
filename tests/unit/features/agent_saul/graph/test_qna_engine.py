@@ -290,6 +290,25 @@ async def test_engine_transport_failure_fails_closed() -> None:
 # --------------------------------------------------------------------------
 
 
+@pytest.fixture
+def _isolated_tool_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Snapshot the global tool-registry singleton and restore it afterward.
+
+    This module drives ``build_agent_registry`` with an evidence service,
+    which registers the deep-research tools into the process-global
+    registry. Without the restore, every later test that pins the default
+    registration set (the task-1.1 authority tripwire) sees two phantom
+    entries and fails — the ordering pollution the full-suite runs flagged.
+    """
+    from app.ai.tools import registry as tool_registry_module
+
+    original = tool_registry_module._registry
+    monkeypatch.setattr(tool_registry_module, "_registry", None)
+    yield
+    monkeypatch.setattr(tool_registry_module, "_registry", original)
+
+
+@pytest.mark.usefixtures("_isolated_tool_registry")
 def test_no_toolset_gains_a_retrieval_engine_surface(monkeypatch: pytest.MonkeyPatch) -> None:
     """The engine is a node-internal subgraph: absent from every role's
     toolset and from the registry, with role toolsets byte-identical to their
