@@ -143,11 +143,36 @@ def _invalid_status_error(status: str, *, operation: str) -> DocumentValidationE
     )
 
 
+def _has_content(value: object) -> bool:
+    """True when a metadata value could actually carry a readable reason.
+
+    A key with an empty payload (``None``, ``{}``, ``""``, ``[]``) names a
+    reason slot but says nothing — treating it as present would let an
+    ``extraction_incomplete=True`` write through with no usable diagnosis.
+    """
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return len(value) > 0
+    if isinstance(value, (list, tuple, set)):
+        return len(value) > 0
+    return value is not None
+
+
 def _metadata_has_failure_reason(metadata: dict[str, object] | None) -> bool:
-    """True when a write already carries a typed ingestion/extraction reason."""
+    """True when a write already carries a typed ingestion/extraction reason.
+
+    Greptile wave-3 finding: the check used to test only key existence, so
+    ``{"knowledge_extraction_failure": None}`` or ``{"ingestion_error": {}}``
+    bypassed the guard while providing no usable reason — the row was written
+    ``extraction_incomplete=True`` with nothing to diagnose it by.
+    """
     if not isinstance(metadata, dict):
         return False
-    return any(key in metadata for key in FAILURE_REASON_METADATA_KEYS)
+    return any(
+        key in metadata and _has_content(metadata[key])
+        for key in FAILURE_REASON_METADATA_KEYS
+    )
 
 
 def _phrase_like_pattern(phrase: str) -> str:
@@ -782,8 +807,8 @@ class DocumentRepository:  # noqa: PLR0904 — one method per lifecycle operatio
                     await self.session.execute(
                         select(
                             UnifiedDocument.id,
-                            UnifiedDocument.tenant_id,
                             UnifiedDocument.status,
+                            UnifiedDocument.updated_at,
                         )
                         .where(
                             UnifiedDocument.status.not_in(TERMINAL_DOCUMENT_STATUSES),
