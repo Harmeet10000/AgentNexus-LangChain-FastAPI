@@ -254,7 +254,9 @@ def test_a_forced_500_still_logs_the_traceback(client: TestClient) -> None:
     also removing the log record would trade an internal-path disclosure for a blind 500.
     """
     records: list[Any] = []
-    sink_id = logger.add(lambda message: records.append(message.record), level="ERROR", serialize=False)
+    sink_id = logger.add(
+        lambda message: records.append(message.record), level="ERROR", serialize=False
+    )
 
     try:
         client.get("/branch-4-unexpected")

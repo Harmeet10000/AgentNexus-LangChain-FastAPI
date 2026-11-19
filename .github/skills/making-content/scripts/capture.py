@@ -13,7 +13,7 @@ moving, and saves a screenshot plus the phrase's rectangles (in screenshot pixel
 Writes <out>/index.json: {"key|phrase": {"file": "...png", "rects": [[x, y, w, h], ...]}}
 """
 
-import argparse, base64, json, os, sys
+import argparse, base64, hashlib, json, os, re, sys
 from playwright.sync_api import sync_playwright
 
 VIEW_W, VIEW_H = (
@@ -58,6 +58,19 @@ def jobs_from(script, sources):
                 sys.exit(f"sources.json has no url for key {sh['key']!r}")
             jobs[f"{sh['key']}|{sh['phrase']}"] = (sources[sh["key"]], sh["phrase"])
     return jobs
+
+
+def _capture_filename(key):
+    """A stable filename derived from the capture key, never the job position.
+
+    ``index.json`` retains entries from earlier runs; a position-derived name
+    (``00.png``) let a re-shot job overwrite another entry's file after a
+    reorder, so the compositor showed one page for another capture. A hash of
+    the key is stable across runs, orderings, and subsets.
+    """
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:10]
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", key)[:64].strip("_") or "capture"
+    return f"{stem}-{digest}.png"
 
 
 def shoot(ctx, url, phrase, path, dsf):
@@ -123,10 +136,10 @@ def main():
             has_touch=True,
             user_agent=UA,
         )
-        for i, (k, (url, phrase)) in enumerate(jobs.items()):
+        for k, (url, phrase) in jobs.items():
             if a.only and k not in a.only:
                 continue
-            path = os.path.join(a.out, f"{i:02d}.png")
+            path = os.path.join(a.out, _capture_filename(k))
             try:
                 index[k] = {"file": path, "rects": shoot(ctx, url, phrase, path, a.dsf)}
                 print("ok  ", k)

@@ -163,16 +163,30 @@ def test_budget_events_carry_only_stage_and_class_attribution() -> None:
 
     emitted = {event["event"] for event in events}
     assert "stage_budget_degradation" in emitted
+    # The tracker echoes document_class verbatim into the event, so the marker
+    # cannot ride THAT input (the no-content rule lives at the callers); the
+    # masked seam — a content-bearing exception message — is covered by the
+    # retry test below. The marker check here still guards the values the
+    # tracker itself synthesizes (stage names, counts, windows).
     _assert_safe_keys(events)
     _assert_no_markers(events)
 
 
 def test_retry_events_carry_only_attempt_outcome() -> None:
+    """A content-bearing exception message must not reach the retry event.
+
+    Greptile wave-3 finding: the planted TimeoutError used to be EMPTY, so
+    switching the logger to include ``str(exception)`` would still pass this
+    test. The message now carries both markers — realistic, since provider
+    errors embed request context — and the event must still name only the
+    exception TYPE.
+    """
     events, stack = _captured_events()
     with stack:
 
         def _timeout() -> TimeoutError:
-            return TimeoutError()
+            message = f"{_API_KEY}: upstream quota exceeded while reading {_LEGAL_TEXT}"
+            return TimeoutError(message)
 
         _before_sleep_log(
             SimpleNamespace(
@@ -183,6 +197,9 @@ def test_retry_events_carry_only_attempt_outcome() -> None:
         )
 
     assert [event["event"] for event in events] == ["retry_scheduled"]
+    assert events[0]["outcome"] == "TimeoutError", (
+        "the retry event must attribute the exception by type only"
+    )
     _assert_safe_keys(events)
     _assert_no_markers(events)
 

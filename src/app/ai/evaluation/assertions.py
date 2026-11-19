@@ -28,6 +28,7 @@ import json
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import aiofiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -107,6 +108,27 @@ class AssertionThresholds(BaseModel):
     unauthorized_reads: int | None = Field(default=None, ge=0)
 
 
+def _absorb_zero_tolerance_counters(
+    source: Mapping[Any, object], metrics: dict[str, float]
+) -> None:
+    """Copy observed zero-tolerance security counters, defaulting the rest to 0.
+
+    Every supported report input runs through this: an aggregate that carries
+    ``poisoning_events`` (or any other zero-tolerance counter) must reach
+    ``evaluate_assertions`` — dropping the observed value would let the
+    advertised zero-tolerance gate pass a poisoned run. Absence of a counter
+    defaults to 0 only because the red-team suites assert the same guarantees
+    independently (fail-build step in CI); an observed value always wins over
+    the default, whichever report family carries it.
+    """
+    for name in sorted(ZERO_TOLERANCE_METRICS):
+        value = source.get(name)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            metrics[name] = float(value)
+        else:
+            metrics.setdefault(name, 0.0)
+
+
 def collect_metrics(  # noqa: PLR0912 — one flattening pass keeps every report family together
     *,
     retrieval_report: Mapping[str, object] | None = None,
@@ -123,6 +145,7 @@ def collect_metrics(  # noqa: PLR0912 — one flattening pass keeps every report
                 value = aggregates.get(name)
                 if isinstance(value, (int, float)):
                     metrics[name] = float(value)
+            _absorb_zero_tolerance_counters(aggregates, metrics)
         rows = retrieval_report.get("rows")
         if isinstance(rows, list):
             metrics["retrieval_rows"] = float(len(rows))
@@ -133,17 +156,13 @@ def collect_metrics(  # noqa: PLR0912 — one flattening pass keeps every report
                 value = aggregates.get(name)
                 if isinstance(value, (int, float)):
                     metrics[name] = float(value)
-            # Zero-tolerance security metrics default to 0 when a report
-            # carries no such counter — absence of evidence of a violation is
-            # only acceptable because the red-team suites assert the same
-            # guarantees independently (fail-build step in CI).
-            for name in ("scope_violations", "unauthorized_reads"):
-                metrics.setdefault(name, 0.0)
+            _absorb_zero_tolerance_counters(aggregates, metrics)
     if process_report is not None:
         for name in PROCESS_REPORT_METRICS:
             value = process_report.get(name)
             if isinstance(value, (int, float)):
                 metrics[name] = float(value)
+        _absorb_zero_tolerance_counters(process_report, metrics)
     if ingestion_report is not None:
         gate = ingestion_report.get("gate")
         if isinstance(gate, Mapping):

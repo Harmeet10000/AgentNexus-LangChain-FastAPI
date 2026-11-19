@@ -74,14 +74,21 @@ class _QuotaSpyClient:
         self.calls += 1
         return self.script.pop(0)
 
-    async def aembed_query(self, _text: str, *, task_type: object = None, **_kw: object) -> list[float]:
+    async def aembed_query(
+        self, _text: str, *, task_type: object = None, **_kw: object
+    ) -> list[float]:
         result = self._next()
         if isinstance(result, Exception):
             raise result
         return result
 
     async def aembed_documents(
-        self, _texts: list[str], *, task_type: object = None, batch_size: object = None, **_kw: object
+        self,
+        _texts: list[str],
+        *,
+        task_type: object = None,
+        batch_size: object = None,
+        **_kw: object,
     ) -> list[list[float]]:
         result = self._next()
         if isinstance(result, Exception):
@@ -125,14 +132,10 @@ def _install(monkeypatch: pytest.MonkeyPatch, client: _QuotaSpyClient) -> None:
 async def test_transient_rate_limit_clears_within_the_probe_window(
     monkeypatch: pytest.MonkeyPatch, fast_probes: list[float]
 ) -> None:
-    client = _QuotaSpyClient(
-        [_RateLimit429Error(), [_vector(0.1), _vector(0.2)]]
-    )
+    client = _QuotaSpyClient([_RateLimit429Error(), [_vector(0.1), _vector(0.2)]])
     _install(monkeypatch, client)
 
-    vectors = await embed_texts(
-        ["a", "b"], task_type=EmbeddingTaskType.DOCUMENT
-    )
+    vectors = await embed_texts(["a", "b"], task_type=EmbeddingTaskType.DOCUMENT)
 
     assert vectors == [_vector(0.1), _vector(0.2)]
     assert client.calls == 2

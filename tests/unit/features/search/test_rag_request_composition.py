@@ -91,7 +91,9 @@ def test_rag_defaults_compose_with_a_client_supplied_max_tokens() -> None:
 
 async def test_rag_service_accepts_a_request_carrying_max_tokens() -> None:
     """Service-level regression: `rag()` with the inherited default must not 500."""
-    service, captured = _service_with_search(Success(UnifiedSearchResponse(items=[], cache_hit=False)))
+    service, captured = _service_with_search(
+        Success(UnifiedSearchResponse(items=[], cache_hit=False))
+    )
 
     result = await service.rag(
         user_id="user-1", payload=UnifiedRagRequest(query="termination notice")
@@ -103,7 +105,9 @@ async def test_rag_service_accepts_a_request_carrying_max_tokens() -> None:
     assert rag_response.context == []
     assert rag_response.cache_hit is False
     # The narrowed payload reached the search path clean of the RAG-only field.
-    assert captured[-1].model_dump() == UnifiedSearchRequest(query="termination notice").model_dump()
+    assert (
+        captured[-1].model_dump() == UnifiedSearchRequest(query="termination notice").model_dump()
+    )
 
 
 async def test_rag_service_passes_max_tokens_to_context_assembly() -> None:

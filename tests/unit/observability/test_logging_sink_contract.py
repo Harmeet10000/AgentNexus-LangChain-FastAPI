@@ -65,9 +65,7 @@ def test_runtime_commands_do_not_route_through_uv_run() -> None:
     makefile = _MAKEFILE.read_text(encoding="utf-8")
     for variable in ("BACKEND_CMD", "CELERY_WORKER_CMD", "CELERY_BEAT_CMD"):
         definition = next(
-            line
-            for line in makefile.splitlines()
-            if line.startswith(f"{variable} :=")
+            line for line in makefile.splitlines() if line.startswith(f"{variable} :=")
         )
         assert "uv run " not in definition, f"{variable} must not execute through `uv run`"
         assert ".venv/bin/" in definition, f"{variable} must execute the venv entry point directly"

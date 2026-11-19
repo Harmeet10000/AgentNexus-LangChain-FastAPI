@@ -24,7 +24,7 @@ from app.features.search.application.ingestion import (
 if TYPE_CHECKING:
     from typing import Any
 
-_CONTENT = ("Clause text for the search chunking pipeline. " * 40)
+_CONTENT = "Clause text for the search chunking pipeline. " * 40
 
 
 class _UnusedRepo:
@@ -37,9 +37,7 @@ async def test_quota_failure_raises_typed_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _quota_boom(*_args: Any, **_kwargs: Any) -> list[list[float]]:
-        quota_detail = (
-            "Embedding provider daily quota exhausted for model gemini-embedding-001"
-        )
+        quota_detail = "Embedding provider daily quota exhausted for model gemini-embedding-001"
         raise EmbeddingQuotaExhaustedError(
             quota_detail,
             model="gemini-embedding-001",

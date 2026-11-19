@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 import threading
 from io import BytesIO
 from pathlib import Path
@@ -227,6 +228,105 @@ def _is_plain_text(filename: str, content_type: str) -> bool:
     return content_type.casefold() in _TEXT_CONTENT_TYPES
 
 
+_ATX_HEADING_RE = re.compile(r"^(#{1,6})\s+")
+
+
+def _decode_text(raw_bytes: bytes) -> str:
+    """Decode uploaded text without ever substituting a replacement character.
+
+    Greptile wave-3 finding: ``errors="replace"`` silently rewrote characters
+    a ``utf-8`` mismatched codec could not map — a Windows-1252 ``.txt`` lost
+    ``\u00a3``/``\u00a7`` before any downstream fidelity check could see them,
+    so accepted legal evidence changed without trace. The chain decodes
+    strictly: UTF-8 first (the dominant format), then Windows-1252 (the
+    classic Office/legacy Windows default), then Latin-1 — which maps all 256
+    bytes, so decoding is total and lossless at the byte level. No accepted
+    upload is ever rejected that was previously accepted, and no accepted
+    upload is silently rewritten.
+    """
+    for codec in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return raw_bytes.decode(codec)
+        except UnicodeDecodeError:
+            continue
+    return raw_bytes.decode("latin-1")  # unreachable: Latin-1 maps every byte
+
+
+def _plain_text_tree(text: str, title: str) -> dict[str, object]:
+    """Build a Docling-compatible structural tree for plain text and Markdown.
+
+    Greptile wave-3 finding: the plain-text path left ``structural_tree``
+    empty, ingestion persisted that empty tree, and
+    ``fetch_structural_trees`` excludes empty trees — so
+    ``navigate_structure`` and section hydration had no structure at all for
+    these documents. This builder produces the shape the structural navigator
+    and the hydration walker consume (``label``/``text``/``level``/nested
+    ``children``, ``self_ref`` for cycle-safe traversal) while skipping OCR:
+    Markdown ATX headings become section headers that contain their section's
+    paragraphs; plain text without headings becomes a flat paragraph list.
+    """
+    body_children: list[dict[str, object]] = []
+    ordinal = 0
+
+    def _next_ref() -> str:
+        nonlocal ordinal
+        ordinal += 1
+        return f"#/texts/{ordinal}"
+
+    def _text_node(paragraphs: list[str]) -> dict[str, object]:
+        return {
+            "label": "text",
+            "self_ref": _next_ref(),
+            "text": "\n\n".join(paragraphs),
+            "children": [],
+        }
+
+    open_heading: dict[str, object] | None = None
+    # The open heading's children list is kept as a typed alias: the dict value
+    # goes through `object`, which defeats the append type check.
+    open_children: list[dict[str, object]] = []
+    open_paragraphs: list[str] = []
+
+    def _flush_open_heading() -> None:
+        nonlocal open_heading, open_children, open_paragraphs
+        if open_heading is not None:
+            if open_paragraphs:
+                open_children.append(_text_node(open_paragraphs))
+            body_children.append(open_heading)
+        open_heading = None
+        open_children = []
+        open_paragraphs = []
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        match = _ATX_HEADING_RE.match(stripped)
+        if match:
+            _flush_open_heading()
+            open_children = []
+            open_heading = {
+                "label": "section_header",
+                "self_ref": _next_ref(),
+                "text": stripped[len(match.group(1)) :].strip(),
+                "level": len(match.group(1)),
+                "children": open_children,
+            }
+        elif open_heading is not None:
+            open_paragraphs.append(stripped)
+        else:
+            body_children.append(_text_node([stripped]))
+    _flush_open_heading()
+    return {
+        "name": title,
+        "body": {
+            "self_ref": "#/body",
+            "label": "body",
+            "children": body_children,
+        },
+    }
+
+
 def _parse_plain_text(
     *,
     raw_bytes: bytes,
@@ -237,7 +337,7 @@ def _parse_plain_text(
     """Parse plain text (txt/md) directly — no OCR, no tables, no converter."""
     if not raw_bytes:
         return ParsedDocument(title=filename or "uploaded-document", markdown="", page_count=0)
-    text = raw_bytes.decode("utf-8", errors="replace")
+    text = _decode_text(raw_bytes)
     # Form feeds are the only page signal plain text carries.
     page_count = text.count("\f") + 1
     if page_count > max_pages:
@@ -249,10 +349,12 @@ def _parse_plain_text(
         raise DocumentExtractionBudgetError(message)
     # ocr_confidence/coverage stay None: ParsedDocument's contract documents
     # None as "the parser could not measure the signal (non-PDF formats)".
+    title = _extract_title(text, filename)
     return ParsedDocument(
-        title=_extract_title(text, filename),
+        title=title,
         markdown=text,
         page_count=page_count,
+        structural_tree=_plain_text_tree(text, title),
     )
 
 

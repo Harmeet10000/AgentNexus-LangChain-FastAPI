@@ -28,7 +28,11 @@ from app.features.billing.webhooks.models import WebhookEventStatus, WebhookEven
 from app.features.billing.webhooks.service import WebhookService
 
 _TRANSITIONS: dict[SubscriptionStatus, set[SubscriptionStatus]] = {
-    SubscriptionStatus.CREATED: {SubscriptionStatus.AUTHENTICATED},
+    # G10: CREATED -> CANCELLED is the dead-create local finalization — the
+    # service gates it on remote_sync == permanent_failure (a pending create
+    # must reconcile, never terminalize blind). The repository table carries
+    # the edge; the gate lives in the service.
+    SubscriptionStatus.CREATED: {SubscriptionStatus.AUTHENTICATED, SubscriptionStatus.CANCELLED},
     SubscriptionStatus.AUTHENTICATED: {SubscriptionStatus.ACTIVE},
     SubscriptionStatus.ACTIVE: {
         SubscriptionStatus.PAST_DUE,

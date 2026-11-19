@@ -306,8 +306,14 @@ artifacts:
       and whose final column is the outcome (e.g. hold active/released/
       expired/converted, invoice unpaid/paid/void). Every table row is a test
       case and MUST be covered.
+    # Discovery gates specs: the proposal instruction requires completing it
+    # before specs for M/L changes (an S change writes the one-line skip), so
+    # the workflow must not be able to reach tasks/apply without it. This is
+    # the specs block's only effective `requires` key — YAML keeps the last
+    # duplicate, so the gate must live here.
     requires:
       - proposal
+      - discovery
   - id: design
     generates: design.md
     description: Technical design document with implementation details

@@ -126,9 +126,7 @@ def test_catalog_registers_the_sweep_on_the_default_queue() -> None:
         (DocumentStatus.COMPLETED.value, False),
     ],
 )
-async def test_terminal_statuses_are_never_stuck(
-    status: str, expected_stuck: bool
-) -> None:
+async def test_terminal_statuses_are_never_stuck(status: str, expected_stuck: bool) -> None:
     rows = _rows(status, age_hours=72) if expected_stuck else []
     repo = _repo(rows)
 

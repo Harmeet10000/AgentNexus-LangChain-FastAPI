@@ -749,6 +749,18 @@ async def load_ingestion_fidelity_set(path: Path) -> IngestionFidelityLoadResult
             row_index=1,
             message=(f"expected version {INGESTION_FIDELITY_SET_VERSION!r}, found {version!r}"),
         )
+    # Same provenance-schema gate the retrieval loader enforces (fail closed on
+    # a missing or unknown schema version): the ingestion labels must name the
+    # provenance contract they were reviewed under, or the set is not loadable.
+    if provenance_schema_version != GOLDEN_PROVENANCE_SCHEMA_VERSION:
+        return _malformed(
+            row_index=1,
+            message=(
+                f"ingestion fidelity gold set is missing "
+                f"provenance_schema_version={GOLDEN_PROVENANCE_SCHEMA_VERSION!r} "
+                f"(found {provenance_schema_version!r})"
+            ),
+        )
     raw_rows: list[object] = []
     for row_index, line in enumerate(lines[1:], start=2):
         try:
@@ -801,7 +813,7 @@ async def load_ingestion_fidelity_set(path: Path) -> IngestionFidelityLoadResult
                 f"row {row_index}: document_id {row.document_id!r} is not declared in the "
                 "manifest per_artifact"
             )
-        issues.extend(_row_provenance_issues(row_index, row))
+        issues.extend(_row_provenance_issues(row_index, row, manifest))
     if manifest.per_artifact:
         artifact_root = _artifact_root(manifest, manifest_path.parent)
         for entry in manifest.per_artifact:
@@ -817,9 +829,28 @@ async def load_ingestion_fidelity_set(path: Path) -> IngestionFidelityLoadResult
     )
 
 
-def _row_provenance_issues(row_index: int, row: IngestionFidelityRow) -> list[str]:
-    """Reuse the retrieval provenance rules for ingestion rows."""
-    provenance = row.provenance
+def _row_provenance_issues(
+    row_index: int, row: IngestionFidelityRow, manifest: GoldenProvenanceManifest
+) -> list[str]:
+    """Reuse the shared retrieval provenance rules for ingestion rows.
+
+    Greptile wave-3 finding: this loader used to check only the permission
+    pair, so a row marked ``quality_tier="release"`` with pending human review
+    and no adjudication validated here even though the retrieval validator
+    rejects it. Every shared condition now runs through
+    :func:`_shared_provenance_issues`; only the retrieval-only rule (no-evidence
+    cases must not declare expected chunks) stays in the retrieval validator,
+    because ingestion rows carry no query.
+    """
+    return _shared_provenance_issues(row_index, row.provenance, manifest)
+
+
+def _shared_provenance_issues(
+    row_index: int,
+    provenance: GoldenItemProvenance,
+    manifest: GoldenProvenanceManifest | None,
+) -> list[str]:
+    """Row-level provenance conditions shared by every set kind and version."""
     issues: list[str] = []
     if provenance.permission_status not in {
         "public_terms_verified",
@@ -827,8 +858,50 @@ def _row_provenance_issues(row_index: int, row: IngestionFidelityRow) -> list[st
         "written_permission",
     }:
         issues.append(f"row {row_index}: permission status is not admissible")
+    if provenance.license_terms_status == "pending":
+        issues.append(f"row {row_index}: license/terms review is pending")
     if provenance.source_type == "client" and provenance.permission_status != "written_permission":
         issues.append(f"row {row_index}: client material lacks written permission")
+    if (
+        provenance.human_review_status == "sme_reviewed"
+        and provenance.annotators.legal_sme_entailment in {"", "pending"}
+    ):
+        issues.append(f"row {row_index}: SME-reviewed item has no legal SME annotator")
+    # Condition 6: an SME approval claim needs a named human adjudication record.
+    if provenance.human_review_status == "adjudicated" and (
+        provenance.adjudication is None or provenance.adjudication.status != "adjudicated"
+    ):
+        issues.append(
+            f"row {row_index}: adjudicated review status requires a matching adjudication record"
+        )
+    if (
+        provenance.quality_tier == "release"
+        and provenance.adjudication is not None
+        and provenance.adjudication.status == "adjudicated"
+    ):
+        named_adjudicator = (
+            manifest.sme_requirements.named_adjudicator
+            if manifest is not None and manifest.sme_requirements is not None
+            else None
+        )
+        # A blank or whitespace-only name is as good as no name at all.
+        if not (named_adjudicator or "").strip():
+            issues.append(
+                f"row {row_index}: release-tier adjudication requires a named adjudicator "
+                "in the manifest sme_requirements"
+            )
+    # Condition 9: release-quality cases must have completed human accountability.
+    if provenance.quality_tier == "release":
+        if (
+            provenance.adjudication is None
+            or provenance.adjudication.status not in _COMPLETABLE_ADJUDICATION_STATUSES
+        ):
+            issues.append(
+                f"row {row_index}: release-quality case requires adjudication status of "
+                "adjudicated, not_required, or waived_with_reason"
+            )
+        if provenance.human_review_status == "pending":
+            issues.append(f"row {row_index}: release-quality case requires completed human review")
     return issues
 
 
@@ -941,59 +1014,17 @@ def _validate_row_provenance(
     manifest: GoldenProvenanceManifest | None,
     issues: list[str],
 ) -> None:
-    """Row-level provenance conditions shared by every set version."""
-    if provenance.permission_status not in {
-        "public_terms_verified",
-        "synthetic_owned",
-        "written_permission",
-    }:
-        issues.append(f"row {row_index}: permission status is not admissible")
-    if provenance.license_terms_status == "pending":
-        issues.append(f"row {row_index}: license/terms review is pending")
-    if provenance.source_type == "client" and provenance.permission_status != "written_permission":
-        issues.append(f"row {row_index}: client material lacks written permission")
-    if (
-        provenance.human_review_status == "sme_reviewed"
-        and provenance.annotators.legal_sme_entailment in {"", "pending"}
-    ):
-        issues.append(f"row {row_index}: SME-reviewed item has no legal SME annotator")
+    """Row-level provenance conditions for retrieval sets.
+
+    The shared accountability conditions live in
+    :func:`_shared_provenance_issues` (the ingestion-fidelity loader runs the
+    same checks); this wrapper adds the retrieval-only rule, which needs the
+    query's case type. A missing manifest cannot satisfy the named-adjudicator
+    condition, so the shared helper fails closed on release-tier adjudications.
+    """
+    issues.extend(_shared_provenance_issues(row_index, provenance, manifest))
     if query.case_type in NO_EVIDENCE_CASE_TYPES and query.expected_chunk_ids:
         issues.append(f"row {row_index}: no-evidence case has expected chunks")
-    # Condition 6: an SME approval claim needs a named human adjudication record.
-    if provenance.human_review_status == "adjudicated" and (
-        provenance.adjudication is None or provenance.adjudication.status != "adjudicated"
-    ):
-        issues.append(
-            f"row {row_index}: adjudicated review status requires a matching adjudication record"
-        )
-    if (
-        provenance.quality_tier == "release"
-        and provenance.adjudication is not None
-        and provenance.adjudication.status == "adjudicated"
-    ):
-        named_adjudicator = (
-            manifest.sme_requirements.named_adjudicator
-            if manifest is not None and manifest.sme_requirements is not None
-            else None
-        )
-        # A blank or whitespace-only name is as good as no name at all.
-        if not (named_adjudicator or "").strip():
-            issues.append(
-                f"row {row_index}: release-tier adjudication requires a named adjudicator "
-                "in the manifest sme_requirements"
-            )
-    # Condition 9: release-quality cases must have completed human accountability.
-    if provenance.quality_tier == "release":
-        if (
-            provenance.adjudication is None
-            or provenance.adjudication.status not in _COMPLETABLE_ADJUDICATION_STATUSES
-        ):
-            issues.append(
-                f"row {row_index}: release-quality case requires adjudication status of "
-                "adjudicated, not_required, or waived_with_reason"
-            )
-        if provenance.human_review_status == "pending":
-            issues.append(f"row {row_index}: release-quality case requires completed human review")
 
 
 def _validate_v2_case(row_index: int, query: GoldenQuery, issues: list[str]) -> None:

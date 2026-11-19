@@ -104,12 +104,18 @@ async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards()
     async with factory() as session:
         await session.execute(sa_text("SET search_path TO scratch_13, public"))
         user_id = f"phrase-probe-{uuid4().hex}"
+        # One explicit tenant for the fixture: the rows used to insert with the
+        # model's empty-string tenant_id default while the fetch probed an
+        # unrelated tenant, so the mandatory tenant predicate could never match
+        # the inserted chunk (Greptile wave-3 finding).
+        tenant_id = "personal:" + user_id
         document_id = uuid4()
         matching_id = uuid4()
         session.add(
             UnifiedDocument(
                 id=document_id,
                 user_id=user_id,
+                tenant_id=tenant_id,
                 title="Phrase matching probe",
                 source_uri=None,
                 object_uri=f"eval://{document_id}",
@@ -129,6 +135,7 @@ async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards()
                     id=matching_id,
                     document_id=document_id,
                     user_id=user_id,
+                    tenant_id=tenant_id,
                     document_version=1,
                     chunk_index=0,
                     chunk_kind="generic",
@@ -147,6 +154,7 @@ async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards()
                 UnifiedChunk(
                     document_id=document_id,
                     user_id=user_id,
+                    tenant_id=tenant_id,
                     document_version=1,
                     chunk_index=1,
                     chunk_kind="generic",
@@ -169,6 +177,7 @@ async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards()
 
         result = await repo.bm25_search(
             user_id=user_id,
+            tenant_id=tenant_id,
             query="guarantee",
             candidate_limit=10,
             filter_params=build_search_filter_params(metadata_filter={}),
@@ -182,7 +191,7 @@ async def test_exact_phrase_executes_case_insensitively_with_literal_wildcards()
 
         hydrated = await repo.fetch_chunks_by_ids(
             [str(matching_id)],
-            tenant_id="personal:" + USER_ID,
+            tenant_id=tenant_id,
             exact_phrase="100% guarantee under clause_2",
         )
         assert isinstance(hydrated, Success), hydrated

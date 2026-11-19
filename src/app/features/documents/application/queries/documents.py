@@ -218,7 +218,7 @@ GRAPHITI_BRANCH_NAME = "graphiti"
 
 
 def fused_branches(graphiti: Graphiti | None = None) -> tuple[RetrievalBranchPolicy, ...]:
-    """Return the branches the fusion runs: the mandatory three, plus graph."""
+    """Return the branches the fusion runs: the mandatory two, plus graph."""
     if graphiti is None:
         return RETRIEVAL_BRANCHES
     return (

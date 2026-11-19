@@ -34,7 +34,9 @@ def _request_idempotency_key(request: Request, header: str | None) -> str | None
     return header or getattr(request.state, "correlation_id", None)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(limit_billing_mutation)])
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, dependencies=[Depends(limit_billing_mutation)]
+)
 async def create_subscription(  # noqa: PLR0917
     payload: SubscriptionCreateDTO,
     request: Request,

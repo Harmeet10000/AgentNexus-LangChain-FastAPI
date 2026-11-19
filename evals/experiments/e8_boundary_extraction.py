@@ -171,16 +171,11 @@ async def main() -> None:  # noqa: PLR0914 — one measurement pass keeps every 
             f"{len(per_boundary)} slices vs 1 mixed tuple whole-document; party sets "
             f"pairwise disjoint: {pairwise_disjoint}",
             "improves_correctness": improves,
-            "verdict": (
-                "CONDITIONAL: the boundary-local mechanism separates contract metadata "
-                "where explicit markers exist (fixture control), but on the real SRC-04 "
-                "packet the conservative marker function detects "
-                f"{len(boundary_result.boundaries)} boundary(ies) against the recorded "
-                f"{len(recorded)} contracts, so on SRC-04 today per-contract extraction "
-                "degenerates to the whole-document path. Improving SRC-04 correctness "
-                "requires the recorded page-range boundaries (or stronger markers) to "
-                "seed establish_contract_boundaries — recorded as the follow-up need, "
-                "not papered over."
+            "verdict": _correctness_verdict(
+                boundaries_detected=len(boundary_result.boundaries),
+                recorded=len(recorded),
+                distinct_tuples=len(boundary_tuples),
+                coverage_contracts=detected_contracts,
             ),
         },
         "cost_verdict": {
@@ -190,9 +185,10 @@ async def main() -> None:  # noqa: PLR0914 — one measurement pass keeps every 
             "chars_processed_ratio": round(boundary_chars / whole_chars, 6)
             if whole_chars
             else None,
-            "note": "contract-local extraction multiplies classification invocations by the "
-            "boundary count but each classifies only its slice; total characters processed "
-            "stay within ~1x of whole-document",
+            "note": "contract-local extraction multiplies classification invocations by "
+            "the slice count (see cost_ratio for the measured multiple); each slice "
+            "classifies only its own characters — the characters-processed ratio is "
+            "reported separately and stays within ~1x of whole-document",
         },
         "measurement_note": "Both paths run the real production classification code over the "
         "recorded SRC-04 pages.json (no model provider). Detected boundaries are compared to "
@@ -204,6 +200,64 @@ async def main() -> None:  # noqa: PLR0914 — one measurement pass keeps every 
     sys.stdout.write(f"report written: {OUTPUT}\n")
     sys.stdout.write(json.dumps(report["correctness_verdict"], indent=1) + "\n")
     sys.stdout.write(json.dumps(report["cost_verdict"], indent=1) + "\n")
+
+
+def _correctness_verdict(
+    *,
+    boundaries_detected: int,
+    recorded: int,
+    distinct_tuples: int,
+    coverage_contracts: int,
+) -> str:
+    """Derive the verdict wording from the measured slice coverage.
+
+    Greptile wave-3 finding: the verdict used to read "degenerates to the
+    whole-document path" unconditionally, while a run detecting 52 slices had
+    a 52.0 cost ratio — finding a start inside only one expected contract is
+    not the same as producing one slice, and neither collapses nor fragments
+    may be described by a fixed phrase. The wording now follows the
+    measurement: a single slice/tuple is the degenerate case; an over-split
+    run (slices far above the recorded contracts, starts inside only some of
+    them) is fragmentation, not success; only slice count and coverage at or
+    above the recorded contracts read as measured separation.
+    """
+    fixture_clause = (
+        "the boundary-local mechanism separates contract metadata where explicit "
+        "markers exist (fixture control)"
+    )
+    follow_up = (
+        "Improving SRC-04 correctness requires the recorded page-range boundaries "
+        "(or stronger markers) to seed establish_contract_boundaries — recorded as "
+        "the follow-up need, not papered over."
+    )
+    measured_shape = (
+        f"the conservative marker function produces {boundaries_detected} slice(s) "
+        f"for {recorded} recorded contracts, with boundary starts inside "
+        f"{coverage_contracts} of them and {distinct_tuples} distinct metadata "
+        "tuple(s) on the real SRC-04 packet"
+    )
+    if distinct_tuples <= 1 or boundaries_detected <= 1:
+        return (
+            f"DEGENERATE: {measured_shape}; per-contract extraction collapses onto "
+            "the whole-document path. "
+            + fixture_clause
+            + ". "
+            + follow_up
+        )
+    if boundaries_detected > recorded or coverage_contracts < recorded:
+        return (
+            f"FRAGMENTED: {measured_shape} — boundary identity is fragmented "
+            "(over-split) and/or partially covered, so per-contract extraction "
+            "does not yet beat the whole-document path on SRC-04. "
+            + fixture_clause
+            + ". "
+            + follow_up
+        )
+    return (
+        f"MEASURED: {measured_shape} — slice identity tracks the recorded contracts. "
+        + fixture_clause
+        + "."
+    )
 
 
 def _fixture_control() -> dict[str, object]:

@@ -67,9 +67,11 @@ Verify readiness: `curl http://127.0.0.1:5000/health` → **200** (it is `/healt
 
 - **TWO workers are required**: `make celery` (default queue) AND `make celery-ingestion`
   (the ingestion dispatches to `CELERY_INGESTION_QUEUE` — the default worker never sees it).
-- `DocumentUploadResponse.doc_id` is the JOB's id, **not** the document row id. The real
-  document id: `documents.object_uri` contains the content sha256 — map via sha256 of the
-  artifact file (done by `.live-ingestion-mapping.json` remap; hashes in /tmp/artifact_hashes.json).
+- `DocumentUploadResponse.doc_id` IS the document row id (both the fresh and the
+  duplicate path return `document.id`; fresh uploads answer `task_id=None` because the
+  command service queues before any extraction runs). The old "job id / hash remap"
+  claim was wrong (Greptile wave-3 finding): `.live-ingestion-mapping.json` maps
+  source_id → doc_id directly and needs NO manual hash remapping step.
 - The object key is `<sha256>.<ext>` — friendly filenames are not preserved.
 - Statuses: received → processing → parsed → stored_postgres → completed(_with_warnings)/failed.
 
@@ -92,11 +94,22 @@ autoretries burned it. Quota resets ~12h from first 429 (2026-11-10 ~09:00 UTC).
 
 **Resume procedure (zero code changes needed):**
 1. Ensure API + `make celery` + `make celery-ingestion` are running (RUNBOOK top).
-2. `uv run python scripts/live_measurement/ingest_corpus.py` — idempotent; the
-   12 failed documents re-ingest (content-hash duplicates skip the 3 successes).
-3. `uv run python scripts/live_measurement/live_score.py` — the live baseline +
-   per-class report (baseline pass already validated through chunk loading).
-4. G2/G5/G4 comparisons per the task plan; tick roadmap 2.2/4.3 with numbers.
+2. `uv run python scripts/live_measurement/ingest_corpus.py` — idempotent; each
+   artifact now commits BEFORE its mapping entry is written, and already-mapped
+   sources skip only on a successful terminal status (failed/parked documents
+   report `retry-needed` — re-drive them with
+   `scripts/live_measurement/reingest_failed_inprocess.py`, which now also
+   includes terminal `failed` rows).
+3. `uv run python scripts/live_measurement/live_score.py` — branch modes via
+   `LIVE_BRANCH`: `bm25` / `trigram` / `vector` / `bm25_rerank` / `vector_rerank`
+   dispatch exactly the requested branch (a text-only run makes no hosted
+   rerank or embedding calls); `LIVE_BRANCH=comparison` (default) runs the
+   full three-pass report.
+4. G2 comparisons per the task plan. NOTE: this runner measures single search
+   legs, NOT the served LangGraph path — `DOCUMENTS_GRAPHITI_FUSION_ENABLED`
+   (G4) and `DOCUMENTS_SECTION_HYDRATION_ENABLED` (G5) cannot affect it, so
+   the G4/G5 comparisons need the served path, not this script (the reports
+   record this scope explicitly).
 
 Provider note: switching embeddings to OpenAI is NOT viable without a schema
 change — `chunks.embedding` is vector(768) and no OpenAI model emits 768 dims;

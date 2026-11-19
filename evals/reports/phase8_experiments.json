@@ -67,8 +67,8 @@
       "id": "prompt-injection-cross-tenant-redteam",
       "question": "Do the injection and cross-tenant defenses hold under the red-team fixtures?",
       "status": "measured (hermetic suites)",
-      "evidence": {"report": "evals/reports/redteam_phase8.json", "aggregate": "86 passed, 2 failed"},
-      "finding": "The mechanical defenses hold (tenant-boundary, scope-widening, forged/absent evidence, not-assessable rendering, multi-contract identity, ingestion injection). The 2 failures are a PRE-EXISTING production boundary-function regression on HEAD (any <=120-char line containing 'contract' starts a boundary; the Governing-Law clause is severed from its contract body), documented with root cause in the red-team report and in evals/reports/e8_per_contract_vs_per_document_src04.json; fixing it belongs to the document-ingestion owners (outside this change's edit scope).",
+      "evidence": {"report": "evals/reports/redteam_phase8.json", "aggregate": "88 passed, 0 failed"},
+      "finding": "The mechanical defenses hold (tenant-boundary, scope-widening, forged/absent evidence, not-assessable rendering, multi-contract identity, ingestion injection). The two boundary failures this suite originally recorded (any <=120-char line containing 'contract' started a boundary; the Governing-Law clause was severed from its contract body) are FIXED on HEAD: establish_contract_boundaries now requires real heading markers (# or ALL-CAPS) and the red-team report was regenerated — 88 passed, 0 failed, resolution recorded in the report itself. The earlier '86 passed, 2 failed' text here contradicted its linked report (Greptile wave-3 finding) and is reconciled.",
       "live_run": "model-in-the-loop injection red-team pending with the quota-blocked live run"
     }
   ],

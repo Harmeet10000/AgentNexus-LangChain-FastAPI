@@ -370,6 +370,13 @@ Root cause (empirically confirmed, not guessed): the crash is ValueError: zip() 
 (a) Pass batch_size=1 in GeminiEmbedderConfig in connections/graphiti.py (recommended), also find gemini-embedding-2 model with rate limits and how does this fot into here(web search)  DONE
 242. fix agent tools. need to check what are all the tools my agent has. does it have all the tools it needs or does it require more? what are the best practices and principles for making agent tools.   DONE — audited; covered by PLAN-agent-tools.md + 7 specced changes (see audit 2026-11-01)
 252. retrival graph if present and figure out is this is the best way to do retrival Full picture gathered. Here are the facts first, then one decision I need from you before touching the layout (the two halves of your instruction point at different homes).   DONE — decision D6 made: mount the compiled graph; `mount-retrieval-graph` change 22/22 tasks checked
+171. use CacheBackedEmbeddings fore reusing embeddings  DONE
+172. use prebuilt and custom middlewares in langchain   DONE
+179. make proper plan for adding caching from this video and use redisvl, langcache?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI  DONE
+284. add a skill/credentials for agent to test the app and also check how exactly this is being done either programatically or through script Personal tenants are derived from the Mongo account id (`personal:<user_id>`).
+PostgreSQL owns the tenant, membership, legal roles, role revision, and
+`self_review_allowed`; Mongo fields are mirrors used for account hydration.   DONE
+285. It conflicts with your own rule. document_text: str | None in state means full text can reach checkpoints, which contradicts “never store chunk text in state”. If ClauseSegment.text uses exclude=True, it may be silently dropped on checkpoint round trip, so after resume the text is None and a node might proceed with nothing. Write a test that checkpoints, resumes and asserts text is rehydrated from Redis.  DONE 
 
 152. for AI gateway checkout pydantic gateway, mastra, platformatic         DELAYED
 155. check ripgrep, tree-sitter, zoekt for creating search tool that you can expose to an LLM to replace a traditional vector database and can these be used to search through text, PDF and more? learn more tools like this in popular coding harnesses and other harnesses can be used to make the lynk linter     DELAYED    
@@ -432,24 +439,69 @@ To solve these problems, the creator shifted to a **production-grade database ar
 243. study RFC for documenting protocol specs as well as others
 
 151. add langchain-cisco-aidefense, compact-middleware, langchain-collapse
-
-
-171. use CacheBackedEmbeddings fore reusing embeddings
-172. use prebuilt and custom middlewares in langchain 
-179. make proper plan for adding caching from this video and use redisvl, langcache?  https://youtu.be/19x8pKiaQVU?si=TvC5mFHU0-M-wHEI
-250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables
-
-
-284. add a skill/credentials for agent to test the app and also check how exactly this is being done either programatically or through script Personal tenants are derived from the Mongo account id (`personal:<user_id>`).
-PostgreSQL owns the tenant, membership, legal roles, role revision, and
-`self_review_allowed`; Mongo fields are mirrors used for account hydration.
-285. It conflicts with your own rule. document_text: str | None in state means full text can reach checkpoints, which contradicts “never store chunk text in state”. If ClauseSegment.text uses exclude=True, it may be silently dropped on checkpoint round trip, so after resume the text is None and a node might proceed with nothing. Write a test that checkpoints, resumes and asserts text is rehydrated from Redis.
-operator.add accumulators aren’t idempotent. Retries, replays and re-runs of a Send fan-out append duplicates, there’s no way to reset them, and ordering across parallel branches shouldn’t be relied on. Use keyed reducers that merge by ID instead.
+250. instal pdb debugger and others, flamegraph, skip list DS, swiss tables, SS
+286. operator.add accumulators aren’t idempotent. Retries, replays and re-runs of a Send fan-out append duplicates, there’s no way to reset them, and ordering across parallel branches shouldn’t be relied on. Use keyed reducers that merge by ID instead.  do i need custom reducer or does langchain provide me with one? 
+287. update firecrawl credentials and understand the diff celery commands like `make celery` for default-queue work and `make celery-beat` 
+288. refine the test as there is a lot of them and might need them all. check property based testing and the content in docs/learning
 ```
 
-10:00 AM Beijing Time = 07:30 AM IST
+The tunnel is **already up** (an ngrok instance survived — likely a reserved static domain, since the URL is identical to the registered one). Verifying the webhook path end-to-end, then the handoff status:
 
-7:00 PM Beijing Time = 04:30 PM IST
+**ngrok: done** — tunnel up at the same reserved URL (`reverend-mousiness-comment.ngrok-free.dev` → localhost:5000), and a freshly signed Razorpay delivery through it returned **200** from a real external IP. The webhook chain is verified end-to-end again post-restart.
+
+## Handoff documents — the complete left/done map
+
+### ❌ Still left (only 3 items, all with external dependencies)
+
+| Item | What it needs |
+|---|---|
+| **§4 quota-window work** — 7 SRC PDFs → vector scoring → G2/G5/G4 flag decisions → roadmap 2.2/4.3 ticks | The driver is ready and Aura is resumed, but it needs a **quiet machine window** (you said ingestion can wait) — plus the Neo4j Aura free tier auto-pauses after 3 idle days, so **resume it in the console right before running** |
+| **F7 full closure** | A **verified Resend sending domain** (your DNS) — until then test-mode delivers only to your account email |
+| **G5 subscription step** | Done and re-verified live — plans sync, `total_count` fix works, subscription creation reaches business rules; the stale pre-fix rows are truthful markers with an exit path now (G10 finalization). Nothing owed unless you want the stale rows purged |
+
+### ⏳ Owner-gated (waiting on your go, not on code)
+
+- Phase 7 end-user delete surface
+- Staging environment (Phase 9)
+- 7.3 external legal signoff
+- Crawler egress proxy credential (the hardened crawler requires one by design)
+- CodeRabbit auth login (I'll rerun the review of the fix batch after)
+
+### ✅ Everything else in the handoff is done
+
+§6.1 rerank stratum (flag + roadmap §7.1), §6.2 D-3 (typed quota state, validated live), §6.3 D-1 (verified over the 55-min sweep), §7 deletable files, §8 collision management, hygiene (reports/gitignore + 666 `.pyc` untracked + scripts-lint handled by the wave-3 crew), plus everything the three smoke rounds found: F1–F12, G1–G9 (except the owner-side G5/F7 pieces), G10 dead-create exit, keyed reducers (#285), both test flakes, docs drift, and the registry-isolation fixture.
+
+### 🔄 In flight right now (agents)
+
+1. **Wave-3 crew** — the remaining Greptile P2s (re-pulled by review ID after the OOM)
+2. **Remaining-endpoints sweep** — the final coverage pass over the 138-op inventory (targeting everything the three prior rounds missed)
+
+When they land: integrate wave-3 → full gates → commit → push → and the handoff gets its final addendum. The only thing standing between the handoff and "§4 done" is your quiet-hour call on the quota window.
+
+Deep Research Process Metrics
+From process_metrics.py:
+ 
+Metric	Poor	Acceptable	Good	Excellent
+Citation density	<1.0/100 words	1.0-2.0	2.0-3.0	>3.0
+Follow-up depth	0 (no follow-ups)	0.2-0.5	0.5-1.0	>1.0
+Brief-to-report coverage	<0.05	0.05-0.10	0.10-0.20	>0.20
+Claim consistency score	<0.3	0.3-0.5	0.5-0.7	>0.7
+ 
+ 
+Retrieval Quality Benchmarks
+ 
+Metric	Poor	Acceptable	Good	Excellent	Notes
+MRR	<0.3	0.3-0.5	0.5-0.7	>0.7	First relevant result rank
+nDCG@10	<0.4	0.4-0.6	0.6-0.8	>0.8	Ranking quality with position discount
+Precision@5	<0.4	0.4-0.6	0.6-0.8	>0.8	5 results, binary relevance
+Recall@10	<0.5	0.5-0.7	0.7-0.85	>0.85	Coverage of relevant documents
+ 
+Domain-Specific Targets
+Legal Document Retrieval (your domain):
+MRR ≥ 0.65 (legal queries often have single correct answer)
+nDCG@10 ≥ 0.75 (ranking matters—wrong section is failure)
+Precision@5 ≥ 0.70 (first 5 results must be relevant)
+Recall@10 ≥ 0.80 (comprehensive retrieval for due diligence)
 
 summarise these chapters in great detail and depth and take video's transcript as reference for outputing verbatim
 
@@ -558,7 +610,7 @@ bit packing, texture atlasting, delta encoding, deduplication
         return cached_result
     else:
         execute()
-        persist()
+        persist()    
 8. (future) Introduce Execution Budgeting System   (maybe in future)
 
     You mentioned token limiting, but not global budgets.
@@ -935,7 +987,3 @@ Use verification layers. Leverage stop hooks or an adversarial review agent so C
 **19. Hidden commands (18:52 - 20:12):**
 Use `/doctor` for health checks, `/insights` for usage reports, `/btw` for side questions, and `/branch` to spawn a new conversation without losing existing context.
 ```
-
-**255. Resume corpus ingestion (7 quota-failed SRC PDFs) — Gemini free-tier 1000/day embedding cap is the blocker; the other 5 sources + SYN fixtures are ingested and scored (partial-corpus baseline recorded in evals/reports/live_baseline_legal_retrieval_v2.json). Resume = scripts/live_measurement/RUNBOOK.md: `make celery` + `make celery-ingestion` + uvicorn, then `uv run python scripts/live_measurement/ingest_corpus.py` (idempotent), then `uv run python scripts/live_measurement/live_score.py` with LIVE_BRANCH=vector for the full G2/G5/G4 flag decisions. Do it on a quota-reset day.**
-
-286. plan semantic answer caching from the redis video (redisvl SemanticCache vs LangCache) — full openspec change `add-semantic-answer-cache` written and strict-validated: proposal (L-class), discovery skip (no async), spec deltas — new capability semantic-answer-cache (15 requirements: per-user partition identity, vector-space identity [model+dimension, ADR-003], threshold-gated + calibrated, observe mode default, degradation + 0.5s deadline, provenance, budget semantics status-quo-documented, degraded-envelope guard, query-text retention) + legal-corpus-retrieval MODIFIED (version-aware boundary binds similarity matches), design D1–D12, ADR-001 backend port (LangCache deferred) / ADR-002 partition digest / ADR-003 vector identity, 17 tasks in 6 waves, review APPROVED across 3 adversarial passes. Key adaptations vs the video: partition digest reused from the parity-pinned exact-key derivation minus query (the video's global cache = the cache-auth defect class this repo already documented), envelope-not-answer, observe-first rollout gated by a measured decision rule (≥14 days, ≥5% projected hit rate, memory headroom, maxmemory-policy check), threshold calibrated from adversarial eval (negations / party swaps / multilingual) instead of the video's 0.1. Operational gates live in design.md Migration Plan, deliberately not in tasks.md, so archive is not blocked on the 14-day observe window. Next: `/openspec-apply-change`; deferred follow-ups: LangCache adapter behind the port, tenant-shared matching flag. PLANNED — awaiting apply

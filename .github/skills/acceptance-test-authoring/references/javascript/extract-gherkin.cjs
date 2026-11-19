@@ -39,6 +39,8 @@ function extractFile(mdPath) {
   let openLine = 0;
   let h1Count = 0;
   let pendingScenario = null; // scenario heading still awaiting its fence
+  let lastScenario = null; // the scenario whose fence is currently open
+  let fenceHasSteps = false; // executable step seen inside the current fence?
 
   lines.forEach((line, i) => {
     if (state === 'prose') {
@@ -47,7 +49,12 @@ function extractFile(mdPath) {
         state = 'gherkin';
         fenceTicks = m[1].length;
         openLine = i + 1;
+        // A fence clears the pending-scenario check, so it must actually
+        // deliver steps: an empty or comment-only fence would let an
+        // unwritten acceptance check look complete.
+        lastScenario = pendingScenario;
         pendingScenario = null;
+        fenceHasSteps = false;
         out.push('');
         return;
       }
@@ -103,6 +110,13 @@ function extractFile(mdPath) {
     }
     const close = new RegExp('^`{' + fenceTicks + ',}\\s*$');
     if (close.test(line)) {
+      if (state === 'gherkin' && lastScenario !== null && !fenceHasSteps) {
+        throw new Error(
+          `${mdPath}:${lastScenario.line}: "#### ${lastScenario.keyword}: ${lastScenario.name}" ` +
+            `fence holds no executable step — an empty or comment-only fence does not ` +
+            `satisfy the scenario's fence requirement`
+        );
+      }
       state = 'prose';
       out.push('');
       return;
@@ -117,6 +131,9 @@ function extractFile(mdPath) {
         `${mdPath}:${i + 1}: "${kw[1]}:" inside a \`\`\`gherkin fence — structure comes from Markdown ` +
           `headings ("# title", "### Requirement:", "#### Scenario:"); fences hold only steps`
       );
+    }
+    if (line.trim() !== '' && !line.trim().startsWith('#')) {
+      fenceHasSteps = true;
     }
     out.push(line);
   });

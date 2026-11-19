@@ -91,9 +91,7 @@ async def test_deep_health_payload_carries_the_resolved_sha(
 
     monkeypatch.setenv("GIT_SHA", "unknown")
     monkeypatch.setattr(build_info, "_cached_git_sha", lambda: "dd3abfe")
-    monkeypatch.setattr(
-        "app.features.health.router.ALL_PROBES", tuple(_healthy for _ in range(7))
-    )
+    monkeypatch.setattr("app.features.health.router.ALL_PROBES", tuple(_healthy for _ in range(7)))
     get_settings.cache_clear()
 
     app = FastAPI()

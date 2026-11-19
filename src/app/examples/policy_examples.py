@@ -79,7 +79,7 @@ TOC_STAGE = ExtractionStage(
 def _stub_doc() -> Any:
     doc = SimpleNamespace()
     doc.export_to_markdown = lambda: "# Title\n\n## Risk\n\n## Term\n"
-    doc.export_to_doc_tags = lambda: "<doctags/>"
+    doc.export_to_doctags = lambda: "<doctags/>"
     return doc
 
 
@@ -134,10 +134,6 @@ class _StubRepo:
         self.calls.append("vector_search")
         return Success([{"chunk_id": "vec-1", "score": 0.8}])
 
-    async def trigram_search(self, **_kwargs: Any) -> DocumentResult[list[dict[str, Any]]]:
-        self.calls.append("trigram_search")
-        return Success([{"chunk_id": "tri-1", "score": 0.7}])
-
     async def exact_phrase_search(self, **_kwargs: Any) -> DocumentResult[list[dict[str, Any]]]:
         self.calls.append("exact_phrase_search")
         return Success([{"chunk_id": "exact-1", "score": 1.0}])
@@ -183,6 +179,7 @@ async def _demo_retrieval_policy() -> Result[None, str]:
     fused_result = await retrieve_fused(
         repo=repo,
         user_id="user-1",
+        tenant_id="personal:user-1",
         query_text="indemnity cap",
         query_embedding=[0.0, 0.1, 0.2],
         candidate_limit=50,
@@ -196,13 +193,13 @@ async def _demo_retrieval_policy() -> Result[None, str]:
         return Failure(f"shared fused path failed: {fused_result.failure().message}")
     fused, _lookup = fused_result.unwrap()
     result = _check(
-        repo.calls == ["bm25_search", "vector_search", "trigram_search", "fetch_chunks_by_ids"],
-        "one query must fan out to the three branch legs, then fetch",
+        repo.calls == ["bm25_search", "vector_search", "fetch_chunks_by_ids"],
+        "one query must fan out to the two branch legs, then fetch",
     )
     if isinstance(result, Failure):
         return result
     result = _check(
-        [item.chunk_id for item in fused] == ["tri-1", "bm25-1", "vec-1"],
+        [item.chunk_id for item in fused] == ["bm25-1", "vec-1"],
         "fused order must follow the shared reciprocal-rank path",
     )
     if isinstance(result, Failure):
@@ -214,6 +211,7 @@ async def _demo_retrieval_policy() -> Result[None, str]:
     )
     branch_input = _BranchInput(
         user_id="user-1",
+        tenant_id="personal:user-1",
         query_text="indemnity cap",
         query_embedding=[0.0, 0.1, 0.2],
         candidate_limit=50,
@@ -221,17 +219,16 @@ async def _demo_retrieval_policy() -> Result[None, str]:
     )
     results = await asyncio.gather(*(branch.run(repo, branch_input) for branch in extended))
     result = _check(
-        [branch.name for branch in extended] == ["bm25", "vector", "trigram", "exact_phrase"],
-        "the fourth branch registers alongside the shipped branches",
+        [branch.name for branch in extended] == ["bm25", "vector", "exact_phrase"],
+        "the third branch registers alongside the shipped branches",
     )
     if isinstance(result, Failure):
         return result
-    result = _check(len(results) == 4, "every registered branch must run")
+    result = _check(len(results) == 3, "every registered branch must run")
     if isinstance(result, Failure):
         return result
     return _check(
-        repo.calls[-4:]
-        == ["bm25_search", "vector_search", "trigram_search", "exact_phrase_search"],
+        repo.calls[-3:] == ["bm25_search", "vector_search", "exact_phrase_search"],
         "branches must execute in registry order",
     )
 
@@ -276,7 +273,17 @@ async def _fatal_setup(_app: FastAPI, _settings: Any) -> None:
 async def _demo_startup_policy() -> Result[None, str]:
     result = _check(
         [policy.name for policy in STARTUP_POLICIES]
-        == ["cognee", "graphiti", "crawl4ai", "object_storage", "celery", "outbox_relay"],
+        == [
+            "langgraph_checkpointer",
+            "cognee",
+            "graphiti",
+            "crawl4ai",
+            "object_storage",
+            "celery",
+            "outbox_relay",
+            "retrieval_engine",
+            "agent_saul_graph",
+        ],
         "policies must boot in dependency order",
     )
     if isinstance(result, Failure):

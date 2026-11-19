@@ -315,3 +315,136 @@ def test_cli_exits_nonzero_on_a_failed_gate(
     assert (
         json.loads((tmp_path / "r.json").read_text(encoding="utf-8"))["gate"]["verdict"] == "fail"
     )
+
+
+def _fixture_gold_set(tmp_path: Path, *, row_overrides: dict[str, object] | None = None) -> Path:
+    """A minimal loadable ingestion-fidelity set + sibling manifest in tmp_path.
+
+    Clones the committed set's first row (guaranteed-valid provenance) and
+    pairs it with a manifest whose per_artifact entry declares the row's
+    document; the artifact file itself is absent, which the manifest audit
+    treats as a checksum-skip warning, not an issue.
+    """
+    base_row = dict(_raw_gold_rows()[0])
+    row: dict[str, object] = {
+        "case_id": "coverage_order-FIX-01",
+        "label": "coverage_order",
+        "document_id": "FIX-01",
+        "profiles": [],
+        "expectation": {"min_source_coverage": 0.9},
+        "provenance": base_row["provenance"],
+    }
+    if row_overrides:
+        row.update(row_overrides)
+    metadata = {
+        "version": INGESTION_FIDELITY_SET_VERSION,
+        "provenance_schema_version": "golden_provenance_v1",
+    }
+    gold_path = tmp_path / "ingestion_fidelity_fixture.jsonl"
+    gold_path.write_text(
+        json.dumps(metadata) + "\n" + json.dumps(row) + "\n", encoding="utf-8"
+    )
+    manifest = {
+        "manifest_version": "1",
+        "golden_set_version": INGESTION_FIDELITY_SET_VERSION,
+        "artifact": "evals/golden/ingestion_fidelity_fixture.jsonl",
+        "per_artifact": [
+            {
+                "source_id": "FIX-01",
+                "sha256": "a" * 64,
+                "source_url": "https://example.org/fix-01",
+                "classification": "public",
+                "permission_status": "public_terms_verified",
+                "redistribution_status": "allowed",
+            }
+        ],
+    }
+    (tmp_path / "ingestion_fidelity_fixture.manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    return gold_path
+
+
+@pytest.mark.asyncio
+async def test_ingestion_loader_rejects_missing_provenance_schema_version(tmp_path: Path) -> None:
+    """A set with no provenance_schema_version fails closed (wave-3 finding)."""
+    gold_path = _fixture_gold_set(tmp_path)
+    lines = gold_path.read_text(encoding="utf-8").splitlines()
+    metadata = json.loads(lines[0])
+    del metadata["provenance_schema_version"]
+    gold_path.write_text(
+        json.dumps(metadata) + "\n" + "\n".join(lines[1:]) + "\n", encoding="utf-8"
+    )
+
+    result = await load_ingestion_fidelity_set(gold_path)
+
+    assert not isinstance(result, Success)
+    assert "provenance_schema_version" in result.failure().message
+
+
+@pytest.mark.asyncio
+async def test_ingestion_loader_rejects_unknown_provenance_schema_version(tmp_path: Path) -> None:
+    gold_path = _fixture_gold_set(tmp_path)
+    lines = gold_path.read_text(encoding="utf-8").splitlines()
+    metadata = json.loads(lines[0])
+    metadata["provenance_schema_version"] = "golden_provenance_v99"
+    gold_path.write_text(
+        json.dumps(metadata) + "\n" + "\n".join(lines[1:]) + "\n", encoding="utf-8"
+    )
+
+    result = await load_ingestion_fidelity_set(gold_path)
+
+    assert not isinstance(result, Success)
+    assert "provenance_schema_version" in result.failure().message
+
+
+@pytest.mark.asyncio
+async def test_ingestion_loader_rejects_release_tier_without_completed_review(
+    tmp_path: Path,
+) -> None:
+    """A release-tier row with pending review and no adjudication must fail.
+
+    The loader used to skip the shared release-tier accountability checks the
+    retrieval validator enforces, so unreviewed labels validated here.
+    """
+    gold_path = _fixture_gold_set(tmp_path)
+    lines = gold_path.read_text(encoding="utf-8").splitlines()
+    row = json.loads(lines[1])
+    row["provenance"]["quality_tier"] = "release"
+    row["provenance"]["human_review_status"] = "pending"
+    row["provenance"]["adjudication"] = None
+    gold_path.write_text(lines[0] + "\n" + json.dumps(row) + "\n", encoding="utf-8")
+
+    result = await load_ingestion_fidelity_set(gold_path)
+
+    assert not isinstance(result, Success)
+    failure = result.failure()
+    assert "release-quality case requires" in failure.message
+    # The loader reports every row issue, not only the first one.
+    reported = " ".join(str(i) for i in (failure.details or {}).get("issues", []))
+    assert "requires completed human review" in reported
+
+
+def test_fresh_evaluate_gold_set_passes_on_the_current_code() -> None:
+    """Run the evaluator NOW, not only against the committed report.
+
+    Greptile wave-3 finding: the published-report test checks a committed JSON
+    file, so chunking/threshold/gold-expectation changes could leave the suite
+    green while the actual corpus regressed. The fresh run is cheap (pure CPU,
+    ~3s) and asserts the live verdict; the saved-report checks above stay
+    separate (they pin what was published).
+    """
+    from app.ai.evaluation.ingestion_fidelity import evaluate_gold_set
+
+    # Sync entry point: returns the report, or raises when the set fails to load.
+    report = evaluate_gold_set(
+        gold_set_path=GOLD_SET_PATH,
+        corpus_root=Path("evals/corpus"),
+    )
+    gate = report.gate
+    assert gate.verdict == "pass", (
+        f"fresh corpus evaluation failed: {gate.rows_failed} rows "
+        f"({gate.failed_case_ids})"
+    )
+    assert gate.rows_failed == 0
+    assert gate.rows_passed == 25

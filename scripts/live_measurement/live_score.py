@@ -1,4 +1,4 @@
-"""LIVE scoring of the golden set against the production retrieval path.
+"""LIVE scoring of the golden set against the production search legs.
 
 Mirrors the deterministic harness but swaps the offline index for the LIVE
 index: queries are embedded via the production Gemini path, ranked by the
@@ -6,17 +6,28 @@ production vector (+bm25) search over the ingested corpus in Timescale, and
 the retrieved live chunks are mapped back to the golden set's convention ids
 (``SRC-XX:pNN:cNN``) by normalized text containment.
 
-Branch modes (``LIVE_BRANCH`` env):
-- ``bm25`` / ``trigram``: text legs only — no embeddings (usable during the
-  Gemini quota block).
-- ``vector``: embeds via Gemini; recorded PENDING when the quota is exhausted.
-- ``bm25_rerank`` / ``vector_rerank``: standard fusion-then-rerank shape — the
-  text/vector leg fetches its top-50 candidates, the hosted cross-encoder
-  (``get_shared_reranker()``) reorders them, and the reranked top-k is mapped
-  to convention ids. The comparison report
-  (``evals/reports/live_rerank_comparison_legal_retrieval_v2.json``) records
-  the measured rerank delta and the reranker-latency overhead.
+MEASUREMENT SCOPE (honest by construction): this runner measures individual
+production search legs over the live index — it does NOT run the served
+retrieval graph (LangGraph fusion over keyword+vector legs, hosted rerank,
+hydration). Consequently ``DOCUMENTS_GRAPHITI_FUSION_ENABLED`` and
+``DOCUMENTS_SECTION_HYDRATION_ENABLED`` cannot affect these numbers, and the
+reports here are single-leg comparisons, never a served-path G4/G5 verdict.
+The comparison report records this scope explicitly.
 
+Branch modes (``LIVE_BRANCH`` env) — the requested branch IS dispatched:
+- ``bm25`` / ``trigram``: text legs only — no embeddings, no rerank calls
+  (usable during the Gemini quota block).
+- ``vector``: embeds via Gemini; recorded PENDING when the quota is exhausted.
+- ``bm25_rerank`` / ``vector_rerank``: fusion-then-rerank shape — the leg
+  fetches its top-50 candidates, the hosted cross-encoder
+  (``get_shared_reranker()``) reorders them, and the reranked top-k is mapped
+  to convention ids.
+- ``comparison`` (the default): the full three-pass report — bm25, bm25_rerank,
+  then a quota-gated vector_rerank pass — written to
+  ``evals/reports/live_rerank_comparison_legal_retrieval_v2.json`` with the
+  measured rerank delta and the reranker-latency overhead.
+
+Single-branch runs write ``evals/reports/live_<branch>_pass.json``.
 Writes evals/reports/live_*.json. See scripts/live_measurement/RUNBOOK.md.
 """
 
@@ -40,6 +51,12 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 
 from app.ai.embeddings import EmbeddingTaskType, embed_text  # noqa: E402
+from app.ai.evaluation.metrics import (  # noqa: E402
+    ndcg_at_k,
+    precision_at_k,
+    recall_at_k,
+    reciprocal_rank,
+)
 from app.config import get_settings  # noqa: E402
 from app.connections.postgres import get_database_url  # noqa: E402
 from app.features.documents.adapters.persistence.postgres.document_repository import (  # noqa: E402
@@ -58,7 +75,14 @@ CORPUS = REPO / "evals" / "corpus" / "artifacts"
 REPORTS = REPO / "evals" / "reports"
 K = 10
 RERANK_CANDIDATES = 50
-BRANCH = __import__("os").environ.get("LIVE_BRANCH", "bm25")
+_SINGLE_BRANCHES = ("bm25", "trigram", "vector", "bm25_rerank", "vector_rerank")
+BRANCH = __import__("os").environ.get("LIVE_BRANCH", "comparison")
+_RUNNER_MODES = {*_SINGLE_BRANCHES, "comparison"}
+if BRANCH not in _RUNNER_MODES:
+    _modes = "LIVE_BRANCH={!r} is not a runner mode; expected one of {}, comparison".format(
+        BRANCH, ", ".join(_SINGLE_BRANCHES)
+    )
+    raise SystemExit(_modes)
 
 # Degradation-capture tap: the HostedReranker degrades silently (fused order
 # truncated) on any provider failure, which would collapse the measured rerank
@@ -214,6 +238,11 @@ class LiveIndex:
         # Map each live chunk to its document's source via the ingestion mapping.
         mapping = json.loads((REPO / ".live-ingestion-mapping.json").read_text())
         self._doc_to_source = {m["doc_id"]: sid for sid, m in mapping.items()}
+        # chunk_id -> document_id, so a hit maps to its convention source by
+        # provenance rather than by global text coincidence.
+        self._chunk_to_doc = {
+            chunk["chunk_id"]: chunk["document_id"] for chunk in self._live_chunks
+        }
         for chunk in self._live_chunks:
             sid = self._doc_to_source.get(chunk["document_id"], "UNMAPPED")
             self.chunks_by_source[sid] = self.chunks_by_source.get(sid, 0) + 1
@@ -224,16 +253,51 @@ class LiveIndex:
         if self.engine is not None:
             await self.engine.dispose()
 
-    def map_to_convention(self, content: str) -> str | None:
-        """Map a live chunk to its convention id by normalized containment."""
+    def map_to_convention(
+        self, content: str, *, source_hint: str | None = None
+    ) -> tuple[str | None, bool]:
+        """Map a live chunk to its convention id by normalized containment.
+
+        Returns ``(convention_id_or_None, ambiguous)``. When the live chunk's
+        document is known (``source_hint``), candidates are restricted to that
+        source's convention ids — the corpus repeats identical header blocks on
+        several pages (SRC-04 pages 1-3), so a global containment search used
+        to credit a page-2 hit to the first page carrying the same text. An
+        ambiguous global fallback (or any unmapped hit) is reported, never
+        guessed: ``ambiguous`` marks a mapping that equal-length containment
+        could not resolve to one id.
+        """
         target = normalize(content)
         if not target:
-            return None
+            return None, False
+        if source_hint:
+            candidates = {
+                cid: ctext
+                for cid, ctext in self._convention.items()
+                if cid.startswith(f"{source_hint}:")
+            }
+        else:
+            candidates = self._convention
         best_id, best_len = None, 0
-        for cid, ctext in self._convention.items():
+        for cid, ctext in candidates.items():
             if (target in ctext or ctext in target) and len(ctext) > best_len:
                 best_id, best_len = cid, len(ctext)
-        return best_id
+        if best_id is None and source_hint:
+            # The chunk's own source holds no containment match: fall back to
+            # the global index, but the cross-source guess is ambiguous by
+            # construction and must not be scored as a confident mapping.
+            best_id, best_len = None, 0
+            for cid, ctext in self._convention.items():
+                if (target in ctext or ctext in target) and len(ctext) > best_len:
+                    best_id, best_len = cid, len(ctext)
+            if best_id is not None:
+                return best_id, True
+        ties = sum(
+            1
+            for ctext in candidates.values()
+            if (target in ctext or ctext in target) and len(ctext) == best_len
+        )
+        return best_id, ties > 1
 
     async def _hydrate(self, ids: list[str]) -> dict[str, str]:
         contents: dict[str, str] = {}
@@ -281,12 +345,15 @@ class LiveIndex:
             raise result
         if hasattr(result, "unwrap"):
             if isinstance(result, Failure):
+                # A failed leg is a broken measurement, not an empty ranking:
+                # scoring it would produce a normal-looking zero report. Stop
+                # the run so the operator fixes the store/filters first.
                 failure = result.failure()
-                print(
-                    f"{leg}_search FAILURE: {getattr(failure, 'message', failure)!r} "
+                message = (
+                    f"{leg}_search failed: {getattr(failure, 'message', failure)!r} "
                     f"details={getattr(failure, 'details', None)}"
                 )
-                return []
+                raise RuntimeError(message)
             return result.unwrap()
         return result
 
@@ -318,6 +385,9 @@ class LiveIndex:
         depth = min(len(rows), RERANK_CANDIDATES if want_rerank else k)
         ids = [str(row.get("chunk_id")) for row in rows[:depth] if isinstance(row, dict)]
         if not ids:
+            diagnostics["mapping_total"] = 0
+            diagnostics["mapping_unmapped"] = 0
+            diagnostics["mapping_ambiguous"] = 0
             return [], diagnostics
         contents = await self._hydrate(ids)
         scores_by_id = {
@@ -331,36 +401,57 @@ class LiveIndex:
         else:
             ids = ids[:k]
 
-        mapped: list[str] = []
+        # Unmapped results keep a None placeholder: dropping them would move
+        # later hits up the ranking and report a better reciprocal rank than
+        # the retrieval produced. Placeholders score as misses at their own
+        # position; the mapping coverage is reported alongside the ranking.
+        mapped: list[str | None] = []
+        ambiguous = 0
+        unmapped = 0
         for cid in ids:
-            conv = self.map_to_convention(contents.get(cid, ""))
-            if conv:
-                mapped.append(conv)
+            conv, is_ambiguous = self.map_to_convention(
+                contents.get(cid, ""),
+                source_hint=self._doc_to_source.get(self._chunk_to_doc.get(cid, "")),
+            )
+            if conv is None:
+                unmapped += 1
+            elif is_ambiguous:
+                ambiguous += 1
+            mapped.append(conv)
+        diagnostics["mapping_total"] = len(ids)
+        diagnostics["mapping_unmapped"] = unmapped
+        diagnostics["mapping_ambiguous"] = ambiguous
         return mapped, diagnostics
 
 
-def score(ranked: list[str], expected: set[str], k: int = K) -> dict[str, float]:
-    top = ranked[:k]
-    hits = [1 if cid in expected else 0 for cid in top]
-    recall = sum(hits) / len(expected) if expected else 0.0
-    rr = 0.0
-    for pos, hit in enumerate(hits, 1):
-        if hit:
-            rr = 1.0 / pos
-            break
-    precision_at_5 = sum(hits[:5]) / 5
-    dcg = sum(
-        h / (1 + i) ** 0.65 if (h := 1 if cid in expected else 0) else 0
-        for i, cid in enumerate(top)
-    )
-    idcg = sum(1 / (1 + i) ** 0.65 for i in range(min(len(expected), k)))
-    ndcg = dcg / idcg if idcg else 0.0
+def score(ranked: list[str | None], expected: set[str], k: int = K) -> dict[str, float]:
+    """Score one query with the shared offline metric functions.
+
+    The hand-rolled discount (``(1+i)**0.65``) and the duplicate-counting hits
+    disagreed with ``ndcg_at_k``/``recall_at_k`` — two hits mapped to one
+    expected id could push recall above 1, and the power discount made live
+    numbers incomparable with the offline reports. Unmapped results are kept
+    as empty strings so their positions still count as misses (never compacted
+    away), and the shared functions dedupe repeated convention ids.
+    """
+    positional = ["" if cid is None else cid for cid in ranked]
     return {
-        "recall@k": recall,
-        "mrr": rr,
-        "ndcg@k": ndcg,
-        "precision@5": precision_at_5,
-        "hits": sum(hits),
+        "recall@k": recall_at_k(positional, expected, k),
+        "mrr": reciprocal_rank(positional, expected, k),
+        "ndcg@k": ndcg_at_k(positional, expected, k),
+        "precision@5": precision_at_k(positional, expected, 5),
+        "hits": len(set(positional[:k]) & expected),
+    }
+
+
+def _aggregate_overall(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """The same aggregate run_pass reports, computed over a filtered subset."""
+    n = len(rows) or 1
+    return {
+        "recall@10": sum(r["scores"]["recall@k"] for r in rows) / n,
+        "mrr": sum(r["scores"]["mrr"] for r in rows) / n,
+        "ndcg@10": sum(r["scores"]["ndcg@k"] for r in rows) / n,
+        "precision@5": sum(r["scores"]["precision@5"] for r in rows) / n,
     }
 
 
@@ -389,22 +480,17 @@ async def run_pass(
         )
     elapsed = time.perf_counter() - started
 
-    def aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
-        n = len(rows) or 1
-        return {
-            "recall@10": sum(r["scores"]["recall@k"] for r in rows) / n,
-            "mrr": sum(r["scores"]["mrr"] for r in rows) / n,
-            "ndcg@10": sum(r["scores"]["ndcg@k"] for r in rows) / n,
-            "precision@5": sum(r["scores"]["precision@5"] for r in rows) / n,
-        }
-
-    overall = aggregate(per_query)
+    overall = _aggregate_overall(per_query)
     by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
     by_jur: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in per_query:
         by_kind[r["document_kind"] or "unknown"].append(r)
         by_jur[r["jurisdiction"] or "unknown"].append(r)
     degraded = [r for r in per_query if r["rerank_status"] not in {"ok", None}]
+    mapped_positions = sum(
+        r["mapping_total"] - r["mapping_unmapped"] for r in per_query
+    )
+    total_positions = sum(r["mapping_total"] for r in per_query)
     latencies = [r["latency_ms"] for r in per_query if r["latency_ms"] is not None]
     rerank_only = [r["rerank_ms"] for r in per_query if r.get("rerank_ms") is not None]
     report = {
@@ -429,8 +515,18 @@ async def run_pass(
         },
         "rerank_degraded_queries": len(degraded),
         "rerank_degraded_case_ids": [r["case_id"] for r in degraded],
-        "by_document_kind": {kind: aggregate(rows) for kind, rows in sorted(by_kind.items())},
-        "by_jurisdiction": {jur: aggregate(rows) for jur, rows in sorted(by_jur.items())},
+        "mapping_coverage": {
+            "rank_positions_total": total_positions,
+            "rank_positions_mapped": mapped_positions,
+            "rank_positions_unmapped": total_positions - mapped_positions,
+            "ambiguous_mappings": sum(r["mapping_ambiguous"] for r in per_query),
+        },
+        "by_document_kind": {
+            kind: _aggregate_overall(rows) for kind, rows in sorted(by_kind.items())
+        },
+        "by_jurisdiction": {
+            jur: _aggregate_overall(rows) for jur, rows in sorted(by_jur.items())
+        },
         "per_query": per_query,
     }
     return report
@@ -518,9 +614,18 @@ def golden_coverage(golden: list[dict[str, Any]], index: LiveIndex) -> dict[str,
     chunks (quota-failed ingestions) — no retrieval branch can hit it.
     """
     ingested = {s for s, n in index.chunks_by_source.items() if n > 0 and s != "UNMAPPED"}
-    fully = partially = uncoverable = 0
+    fully = partially = uncoverable = no_evidence = 0
+    no_evidence_case_ids: list[str] = []
     for row in golden:
-        expected_sources = {cid.split(":")[0] for cid in row["expected_chunk_ids"]}
+        expected_ids = row["expected_chunk_ids"]
+        if not expected_ids:
+            # No-evidence cases (e.g. unanswerable rows) declare no expected
+            # chunks: they stay scoreable (every branch scores zero) no matter
+            # how complete the corpus is, and must not be labeled quota-blocked.
+            no_evidence += 1
+            no_evidence_case_ids.append(str(row.get("case_id")))
+            continue
+        expected_sources = {cid.split(":")[0] for cid in expected_ids}
         overlap = expected_sources & ingested
         if not overlap:
             uncoverable += 1
@@ -536,11 +641,14 @@ def golden_coverage(golden: list[dict[str, Any]], index: LiveIndex) -> dict[str,
         "golden_queries_fully_covered": fully,
         "golden_queries_partially_covered": partially,
         "golden_queries_uncoverable": uncoverable,
+        "golden_queries_no_evidence": no_evidence,
+        "golden_queries_no_evidence_case_ids": no_evidence_case_ids,
         "note": (
             "PARTIAL corpus: only the sources above were ingested (the rest are "
             "quota-failed); uncoverable queries cannot be hit by any branch. "
-            "Full-corpus confirmation of the rerank delta is PENDING corpus "
-            "completion."
+            "No-evidence cases declare no expected chunks and stay in the "
+            "measured set by design. Full-corpus confirmation of the rerank "
+            "delta is PENDING corpus completion."
         ),
     }
 
@@ -593,20 +701,32 @@ def build_comparison_report(
     overall_delta = delta(rerank["overall"], bm25["overall"])
     better = overall_delta["mrr"] > 0 or overall_delta["precision@5"] > 0
     vector_status = "PENDING" if vector_pass is None else vector_pass.get("status", "measured")
-    # Degraded rerank calls collapse to the fused order (the HostedReranker's
-    # degradation contract), which biases the measured rerank delta toward
-    # zero — the delta below is therefore a conservative lower bound.
     degraded_bm25 = rerank.get("rerank_degraded_queries", 0)
     degraded_vector = (vector_pass or {}).get("rerank_degraded_queries", 0)
+    # Degraded rerank calls collapse to the fused order (the HostedReranker's
+    # degradation contract), so each contributes exactly a zero delta and only
+    # dilutes the aggregate. Successful calls, though, can reorder WORSE as
+    # well as better — the per-query directions below already record worsened
+    # queries — so the measurement is a mixed success/fallback aggregate, NOT
+    # a lower bound on the rerank gain. The successful-only delta is reported
+    # beside it so the fallback dilution is visible.
+    successful_bm25 = [r for r in rerank["per_query"] if r.get("rerank_status") == "ok"]
+    successful_only_delta = (
+        delta(_aggregate_overall(successful_bm25), bm25["overall"]) if successful_bm25 else {}
+    )
     caveats = [
         f"PARTIAL corpus: {coverage['golden_queries_uncoverable']} of "
         f"{coverage['golden_queries_total']} golden queries reference no ingested "
-        "source and cannot be hit by any branch.",
+        "source and cannot be hit by any branch "
+        f"({coverage['golden_queries_no_evidence']} further queries declare no "
+        "expected chunks and are measured as designed).",
         (
-            f"{degraded_bm25} of {rerank['queries']} bm25+rerank calls were "
-            "rate-limited (429) even after exponential backoff and degraded to "
-            "the fused order — the measured rerank delta is a conservative "
-            "lower bound."
+            f"MIXED measurement, not a lower bound: {degraded_bm25} of "
+            f"{rerank['queries']} bm25+rerank calls degraded to the fused order "
+            "(zero delta each — they only dilute the aggregate), while the "
+            "successful calls reorder queries both better AND worse. The "
+            "successful-only delta is reported in "
+            "deltas.rerank_minus_bm25.successful_calls_only."
         ),
     ]
     if degraded_vector:
@@ -660,6 +780,8 @@ def build_comparison_report(
             "rerank_minus_bm25": {
                 "overall": overall_delta,
                 "by_document_kind": kinds,
+                "successful_calls_only": successful_only_delta,
+                "successful_calls_measured": len(successful_bm25),
             },
             "vector_rerank_minus_bm25": {
                 "overall": delta((vector_pass or {}).get("overall", {}), bm25["overall"])
@@ -684,43 +806,89 @@ def build_comparison_report(
     }
 
 
+_MEASUREMENT_SCOPE: dict[str, str] = {
+    "measurement_scope": (
+        "single production search legs over the live index (bm25/trigram/"
+        "vector, optionally reranked); NOT the served LangGraph fusion path"
+    ),
+    "flag_sensitivity": (
+        "DOCUMENTS_GRAPHITI_FUSION_ENABLED and "
+        "DOCUMENTS_SECTION_HYDRATION_ENABLED do not affect this runner; "
+        "these numbers are not a served-path G4/G5 verdict"
+    ),
+}
+
+
 async def main() -> None:
     creds = json.loads((REPO / ".testing-credentials.json").read_text())
     golden = load_golden()
-    print(f"golden queries: {len(golden)}")
+    print(f"golden queries: {len(golden)}; branch mode: {BRANCH}")
     _install_degradation_tap()
     index = LiveIndex(creds)
     await index.connect()
     try:
-        # Gate 1: the degradation counter must NOT flip with the key present.
-        counter_flip = await verify_key_present_no_counter_flip()
-        print("counter-flip verification:", json.dumps(counter_flip, indent=1))
-
-        bm25 = await run_pass(index, golden, "bm25_only", "bm25")
-        print("bm25_only:", json.dumps(bm25["overall"], indent=1))
-
-        rerank_pass = await run_pass(index, golden, "bm25_rerank", "bm25_rerank")
-        print("bm25_rerank:", json.dumps(rerank_pass["overall"], indent=1))
-
-        # Third pass only if the Gemini quota allows even a probe.
-        vector_pass: dict[str, Any] | None = None
-        try:
-            await embed_text("quota probe", task_type=EmbeddingTaskType.QUERY)
-            vector_pass = await run_pass(index, golden, "vector_rerank", "vector_rerank")
-            print("vector_rerank:", json.dumps(vector_pass["overall"], indent=1))
-        except Exception as exc:  # noqa: BLE001 — quota probe failure is a recorded outcome
-            print(f"vector leg unavailable (quota): {exc}")
-
-        coverage = golden_coverage(golden, index)
-        report = build_comparison_report(bm25, rerank_pass, vector_pass, coverage, counter_flip)
-        (REPORTS / "live_rerank_comparison_legal_retrieval_v2.json").write_text(
-            json.dumps(report, indent=1)
-        )
-        print("deltas:", json.dumps(report["deltas"]["rerank_minus_bm25"]["overall"], indent=1))
-        print("latency:", json.dumps(report["latency"], indent=1))
-        print("coverage:", json.dumps(coverage, indent=1))
+        if BRANCH == "comparison":
+            await _run_comparison(index, golden)
+        else:
+            # The requested branch is dispatched as-is: a text-only run makes
+            # no hosted rerank calls and no embedding calls; a rerank branch
+            # verifies the degradation contract for its own calls only.
+            involves_rerank = BRANCH.endswith("_rerank")
+            counter_flip: dict[str, Any] | None = None
+            if involves_rerank:
+                counter_flip = await verify_key_present_no_counter_flip()
+                print("counter-flip verification:", json.dumps(counter_flip, indent=1))
+            label = BRANCH
+            pass_report = await run_pass(index, golden, label, BRANCH)
+            print(f"{label}:", json.dumps(pass_report["overall"], indent=1))
+            coverage = golden_coverage(golden, index)
+            report = {
+                "report": f"live_{BRANCH}_pass_legal_retrieval_v2",
+                "generated_at": datetime.now(UTC).isoformat(),
+                "branch": BRANCH,
+                **_MEASUREMENT_SCOPE,
+                "corpus_coverage": coverage,
+                "counter_flip_verification": counter_flip,
+                **pass_report,
+            }
+            (REPORTS / f"live_{BRANCH}_pass_legal_retrieval_v2.json").write_text(
+                json.dumps(report, indent=1)
+            )
+            print("coverage:", json.dumps(coverage["golden_queries_uncoverable"], indent=1))
     finally:
         await index.close()
+
+
+async def _run_comparison(index: LiveIndex, golden: list[dict[str, Any]]) -> None:
+    """The explicit full-comparison mode (LIVE_BRANCH=comparison)."""
+    # Gate 1: the degradation counter must NOT flip with the key present.
+    counter_flip = await verify_key_present_no_counter_flip()
+    print("counter-flip verification:", json.dumps(counter_flip, indent=1))
+
+    bm25 = await run_pass(index, golden, "bm25_only", "bm25")
+    print("bm25_only:", json.dumps(bm25["overall"], indent=1))
+
+    rerank_pass = await run_pass(index, golden, "bm25_rerank", "bm25_rerank")
+    print("bm25_rerank:", json.dumps(rerank_pass["overall"], indent=1))
+
+    # Third pass only if the Gemini quota allows even a probe.
+    vector_pass: dict[str, Any] | None = None
+    try:
+        await embed_text("quota probe", task_type=EmbeddingTaskType.QUERY)
+        vector_pass = await run_pass(index, golden, "vector_rerank", "vector_rerank")
+        print("vector_rerank:", json.dumps(vector_pass["overall"], indent=1))
+    except Exception as exc:  # noqa: BLE001 — quota probe failure is a recorded outcome
+        print(f"vector leg unavailable (quota): {exc}")
+
+    coverage = golden_coverage(golden, index)
+    report = build_comparison_report(bm25, rerank_pass, vector_pass, coverage, counter_flip)
+    report.update(_MEASUREMENT_SCOPE)
+    (REPORTS / "live_rerank_comparison_legal_retrieval_v2.json").write_text(
+        json.dumps(report, indent=1)
+    )
+    print("deltas:", json.dumps(report["deltas"]["rerank_minus_bm25"]["overall"], indent=1))
+    print("latency:", json.dumps(report["latency"], indent=1))
+    print("coverage:", json.dumps(coverage, indent=1))
 
 
 if __name__ == "__main__":

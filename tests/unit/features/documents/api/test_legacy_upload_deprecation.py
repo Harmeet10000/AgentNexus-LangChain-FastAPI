@@ -223,9 +223,7 @@ def legacy_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     app.state.redis = FakeRedis()
     app.include_router(ingestion_router_module.router)
     app.dependency_overrides[document_dependencies.get_document_command_service] = lambda: service
-    app.dependency_overrides[document_dependencies.get_document_authorization] = (
-        _FakeAuthorization
-    )
+    app.dependency_overrides[document_dependencies.get_document_authorization] = _FakeAuthorization
     with TestClient(app, raise_server_exceptions=False) as client:
         yield client
 

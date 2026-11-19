@@ -82,7 +82,11 @@ async def update_profile(
     )
 
 
-@router.post("/change-password", response_model=APIResponse[None], dependencies=[Depends(limit_change_password)])
+@router.post(
+    "/change-password",
+    response_model=APIResponse[None],
+    dependencies=[Depends(limit_change_password)],
+)
 async def change_password(
     body: ChangePasswordRequest,
     user: CurrentVerifiedUser,

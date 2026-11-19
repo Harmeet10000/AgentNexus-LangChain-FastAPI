@@ -65,6 +65,7 @@ All deliberate — silent drops are the failure mode to fear. **Both stacks clas
 | No H1 title | **Hard error** — there would be no `Feature:` |
 | More than one H1 | **Hard error** — a spec.md is exactly one capability |
 | `#### Scenario:` with no fence before the next heading (or before EOF) | **Hard error** — a scenario with no steps would silently pass |
+| A scenario's gherkin fence holds no executable step (only blanks or `#` comments) | **Hard error** — an empty or comment-only fence satisfies the fence check above, so an unwritten acceptance check would look complete |
 | `Feature:` / `Rule:` / `Scenario:` / `Scenario Outline:` / `Example:` inside a gherkin fence | **Hard error** — structure comes from headings. This is what an old-format spec hits, so the migration failure is loud |
 | Zero gherkin fences in a `spec.md` | Fine — a REMOVED-only delta legitimately has no steps |
 | `Examples:` and `Background:` inside a fence | Allowed — both legitimately belong there |

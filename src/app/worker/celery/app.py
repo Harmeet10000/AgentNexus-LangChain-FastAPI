@@ -7,7 +7,7 @@ imports never load task modules.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 from celery.apps.beat import Beat
 from celery.apps.worker import Worker
@@ -123,7 +123,7 @@ class CatalogValidatingWorker(Worker):
 class CatalogValidatingBeat(Beat):
     """Validate beat's schedule/config surface before starting its scheduler."""
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         # The F1 twin: celery's click path constructs ``app.Beat(...)``
         # without an ``app=`` kwarg exactly as it does for ``app.Worker``,
         # and ``Beat.__init__`` reads ``self.app`` (None) before the click

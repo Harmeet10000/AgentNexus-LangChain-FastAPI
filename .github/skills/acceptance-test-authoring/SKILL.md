@@ -94,14 +94,14 @@ Spec linting is shared across stacks: gherkin-lint over the extracted output wit
 Before an `acceptance-tests/` project exists, run the extractor from this skill:
 
 ```sh
-node .agents/skills/acceptance-test-authoring/references/javascript/extract-gherkin.cjs openspec acceptance-tests/.extracted \
-  && npx gherkin-lint --config .agents/skills/acceptance-test-authoring/references/gherkin-lintrc.json acceptance-tests/.extracted
+node .github/skills/acceptance-test-authoring/references/javascript/extract-gherkin.cjs openspec acceptance-tests/.extracted \
+  && npx gherkin-lint --config .github/skills/acceptance-test-authoring/references/gherkin-lintrc.json acceptance-tests/.extracted
 ```
 
 The Python extractor is a drop-in substitute:
 
 ```sh
-python .agents/skills/acceptance-test-authoring/references/python/extract_gherkin.py openspec acceptance-tests/.extracted
+python .github/skills/acceptance-test-authoring/references/python/extract_gherkin.py openspec acceptance-tests/.extracted
 ```
 
 ## Page Object Model

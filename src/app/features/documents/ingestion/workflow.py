@@ -180,9 +180,7 @@ def _make_ingest_document_node(
                 return {
                     "status": "failed",
                     "error_code": EmbeddingQuotaExhaustedError.error_code,
-                    "error_message": (
-                        f"{exc.detail} (quota park persistence failed; retrying)"
-                    ),
+                    "error_message": (f"{exc.detail} (quota park persistence failed; retrying)"),
                     "error_retryable": True,
                 }
             return {

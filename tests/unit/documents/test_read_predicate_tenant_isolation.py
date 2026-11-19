@@ -194,16 +194,28 @@ async def test_read_predicate_binds_only_the_calling_tenant(
         executions_by_tenant[tenant] = session.executions
 
         assert session.executions, f"{name} issued no statement"
+        # A statement with NO tenant bind at all used to be skipped silently —
+        # which is exactly the regression this suite exists to catch (a dropped
+        # tenant predicate removes the bind too). Only session-scoped pragmas
+        # (DiskANN's SET LOCAL) may carry no scope binds; every other statement
+        # must bind the caller's tenant, and each call must check at least one
+        # real read.
+        checked_reads = 0
         for execution in session.executions:
-            values = _bound_values(execution)
             rendered = _rendered(execution)
-            if not any(isinstance(value, str) and "personal:" in value for value in values):
-                continue  # e.g. DiskANN SET LOCAL — carries no scope binds at all
+            if "SET LOCAL" in rendered:
+                continue  # session-scoped pragma — carries no per-call scope binds
+            values = _bound_values(execution)
+            checked_reads += 1
             assert tenant in values, f"{name} did not bind the caller's tenant for {tenant}"
             other = _TENANT_B if tenant == _TENANT_A else _TENANT_A
             assert other not in values, f"{name} bound the other tenant for {tenant}"
             assert other not in rendered, f"{name} rendered the other tenant for {tenant}"
             assert foreign_id not in rendered, f"{name} rendered the other tenant's document"
+        assert checked_reads > 0, (
+            f"{name}: every issued statement was skipped as scope-free — "
+            "the read's tenant predicate is missing entirely"
+        )
 
 
 def test_chunk_fetch_tenant_scope_is_required_not_optional() -> None:

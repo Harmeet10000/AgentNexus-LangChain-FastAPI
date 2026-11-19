@@ -52,7 +52,9 @@ limit_login = get_rate_limiter(burst=5, rate=5, period=60, scope="login")
 # are 300s-window classes whose budgets must not bleed into each other (or
 # into any future unscoped limiter) through the raw `rl:gcra:{ip}` bucket.
 limit_forgot_password = get_rate_limiter(burst=3, rate=3, period=300, scope="forgot-password")
-limit_resend_verification = get_rate_limiter(burst=2, rate=2, period=300, scope="resend-verification")
+limit_resend_verification = get_rate_limiter(
+    burst=2, rate=2, period=300, scope="resend-verification"
+)
 
 
 # Read this before you read the code: The auth router is the most complex part of the codebase, so it's worth a high-level overview before diving in. The main goals here are:

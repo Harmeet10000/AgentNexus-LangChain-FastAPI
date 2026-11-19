@@ -82,6 +82,8 @@ class ContextComparisonReport(BaseModel):
     overall: ClassComparison
     per_class: list[ClassComparison]
     decision: str
+    # ``None`` on reports written before the CLI wired ``--commit`` through.
+    commit: str | None = None
 
 
 def build_fixture_overlay(corpus_root: Path) -> tuple[dict[str, str], str]:
@@ -167,6 +169,7 @@ async def compare_context_overlay(
     overlay: dict[str, str],
     overlay_description: str,
     cutoff: int = _COMPARISON_CUTOFF,
+    commit: str | None = None,
 ) -> ContextComparisonReport:
     """Run baseline and overlaid evaluations and report per-class deltas."""
     queries = golden_set.queries
@@ -187,6 +190,7 @@ async def compare_context_overlay(
         row_count=len(queries),
         cutoff=cutoff,
         overlay_description=overlay_description,
+        commit=commit,
         overall=overall,
         per_class=per_class,
         decision=(
@@ -203,10 +207,16 @@ async def run_comparison(
     golden_set_path: Path,
     corpus_root: Path,
     overlay_path: Path,
+    cutoff: int = _COMPARISON_CUTOFF,
+    commit: str | None = None,
 ) -> ContextComparisonReport | None:
     """Load the golden set and a recorded overlay, and produce the comparison.
 
     Returns None when the golden set fails validation (the CLI reports it).
+    ``cutoff`` and ``commit`` pass the CLI's ``--k``/``--commit`` options
+    through: the requested cutoff drives the evaluation (instead of the
+    default cutoff silently overruling ``--k``) and the commit is recorded on
+    the report so the decision record names the code it measured.
     """
     result = await load_validated_golden_set(golden_set_path)
     if isinstance(result, Failure):
@@ -222,6 +232,8 @@ async def run_comparison(
         corpus_root=corpus_root,
         overlay={str(key): str(value) for key, value in overlay.items()},
         overlay_description=f"recorded overlay {overlay_path}",
+        cutoff=cutoff,
+        commit=commit,
     )
 
 
@@ -230,6 +242,8 @@ async def _run(args: argparse.Namespace) -> int:
         golden_set_path=args.golden_set,
         corpus_root=args.corpus,
         overlay_path=args.context_overlay,
+        cutoff=args.k,
+        commit=args.commit,
     )
     if comparison is None:
         sys.stderr.write("golden set failed validation\n")

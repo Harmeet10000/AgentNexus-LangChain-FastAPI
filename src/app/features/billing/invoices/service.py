@@ -360,7 +360,9 @@ class InvoiceService:
             if isinstance(response_result, Failure):
                 return response_result
             responses.append(response_result.unwrap())
-        return Success(InvoiceListResponse(items=responses, total=total, limit=limit, offset=offset))
+        return Success(
+            InvoiceListResponse(items=responses, total=total, limit=limit, offset=offset)
+        )
 
     @trace_layer("service")
     async def get_invoice(

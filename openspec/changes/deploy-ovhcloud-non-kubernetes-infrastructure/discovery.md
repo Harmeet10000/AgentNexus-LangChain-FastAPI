@@ -1,0 +1,1 @@
+No new async behavior in this change. Existing Celery task names, queue names, routing keys, payloads, delivery semantics, retries, dead-lettering, Beat timers, WebSocket topics, expiry rules, and read-model identities are preserved; only their deployment topology and operational verification change.

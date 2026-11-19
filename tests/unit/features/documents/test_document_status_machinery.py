@@ -184,6 +184,41 @@ async def test_extraction_incomplete_with_a_typed_reason_is_left_untouched() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("empty_reason", "description"),
+    [
+        ({"knowledge_extraction_failure": None}, "None value"),
+        ({"ingestion_error": {}}, "empty mapping"),
+        ({"extraction_failure_reason": "   "}, "whitespace-only string"),
+        ({"ingestion_error": []}, "empty list"),
+    ],
+)
+async def test_empty_reason_values_still_get_the_unrecorded_marker(
+    empty_reason: dict[str, object], description: str
+) -> None:
+    """A named-but-empty reason slot is no reason at all (wave-3 finding).
+
+    The guard used to test only key existence, so
+    ``{"knowledge_extraction_failure": None}`` bypassed it while providing no
+    usable diagnosis — the row was written ``extraction_incomplete=True`` with
+    nothing to diagnose it by.
+    """
+    session = _ScriptedSession([None])
+    repository = DocumentRepository(session)  # type: ignore[arg-type]
+
+    result = await repository.update_document_status(
+        document_id=DOCUMENT_ID,
+        status="failed",
+        metadata_={"ingestion_state": {"attempt": 1}, **empty_reason},
+        extraction_incomplete=True,
+    )
+
+    assert isinstance(result, Success), description
+    payload = json.loads(session.statements[0].compile().params["metadata_"])
+    assert payload["extraction_failure_reason"] == EXTRACTION_FAILURE_UNRECORDED, description
+
+
+@pytest.mark.asyncio
 async def test_complete_extraction_write_carries_no_failure_marker() -> None:
     session = _ScriptedSession([None])
     repository = DocumentRepository(session)  # type: ignore[arg-type]

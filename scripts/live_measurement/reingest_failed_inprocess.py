@@ -86,13 +86,15 @@ async def main() -> None:
                 {"id": m["doc_id"]},
             )
             row = res.first()
-            # Re-run everything non-terminal: content-hash duplicates skip the
-            # completed documents; processing/failed pipelines resume to completion.
-            if row is not None and row[2] not in (
-                "completed",
-                "completed_with_warnings",
-                "failed",
-            ):
+            # Re-run everything except a SUCCESSFUL terminal status. Quota-failed
+            # documents park as quota_exhausted; exhausted worker attempts save
+            # a terminal `failed` — and `run_document_ingestion_task` restarts
+            # those by setting `processing` again. Excluding `failed` (the old
+            # driver did) meant running this script after the quota reset
+            # silently skipped exactly the documents it exists to recover
+            # (Greptile wave-3 finding). Content-hash/idempotency dedupe keeps
+            # the re-drive safe.
+            if row is not None and row[2] not in ("completed", "completed_with_warnings"):
                 failed.append(
                     {
                         "source_id": sid,

@@ -1,6 +1,10 @@
 # AsyncAPI 3.x — <change>
 
-<!-- One line skip (`No async interfaces in this change.`) when no ws topics, commands, timers/expiry, presence, or telemetry. Every discovery domain event implemented here MUST have a channel; every channel MUST trace to a spec scenario (#### Scenario: WHEN <event>). Version per change; breaking payload changes MUST declare a subscriber migration. -->
+# One line skip (`No async interfaces in this change.`) when no ws topics,
+# commands, timers/expiry, presence, or telemetry. Every discovery domain event
+# implemented here MUST have a channel; every channel MUST trace to a spec
+# scenario (#### Scenario: WHEN <event>). Version per change; breaking payload
+# changes MUST declare a subscriber migration.
 
 asyncapi: 3.0.0
 info:

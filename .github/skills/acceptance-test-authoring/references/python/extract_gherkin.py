@@ -52,6 +52,8 @@ def extract_file(md_path):
     open_line = 0
     h1_count = 0
     pending_scenario = None  # scenario heading still awaiting its fence
+    last_scenario = None  # the scenario whose fence is currently open
+    fence_has_steps = False  # executable step seen inside the current fence?
     close_re = None
 
     for i, line in enumerate(lines):
@@ -62,7 +64,12 @@ def extract_file(md_path):
                 fence_ticks = len(m.group(1))
                 close_re = re.compile(r"^`{%d,}\s*$" % fence_ticks)
                 open_line = i + 1
+                # A fence clears the pending-scenario check, so it must actually
+                # deliver steps: an empty or comment-only fence would let an
+                # unwritten acceptance check look complete.
+                last_scenario = pending_scenario
                 pending_scenario = None
+                fence_has_steps = False
                 out.append("")
                 continue
             if INDENTED_GHERKIN_RE.match(line):
@@ -117,6 +124,12 @@ def extract_file(md_path):
             continue
 
         if close_re.match(line):
+            if state == "gherkin" and last_scenario is not None and not fence_has_steps:
+                raise ExtractionError(
+                    '%s:%d: "#### %s: %s" fence holds no executable step — an empty or '
+                    "comment-only fence does not satisfy the scenario's fence requirement"
+                    % (md_path, last_scenario[0], last_scenario[1], last_scenario[2])
+                )
             state = "prose"
             out.append("")
             continue
@@ -130,6 +143,8 @@ def extract_file(md_path):
                 'headings ("# title", "### Requirement:", "#### Scenario:"); fences hold '
                 "only steps" % (md_path, i + 1, kw.group(1))
             )
+        if line.strip() and not line.strip().startswith("#"):
+            fence_has_steps = True
         out.append(line)
 
     if state != "prose":

@@ -1,6 +1,6 @@
 {
   "experiment": "E8 (task 8.5): per-document vs per-contract metadata extraction on SRC-04",
-  "generated_at_utc": "2026-11-13T21:31:42.222658+00:00",
+  "generated_at_utc": "2026-11-19T17:43:06.764970+00:00",
   "artifact": "SRC-04",
   "pages": 372,
   "markdown_chars": 843821,
@@ -754,14 +754,14 @@
     "boundary_coverage": "1/5 recorded contracts have a detected boundary start inside their recorded page range",
     "metadata_separation": "19 distinct metadata tuples across 52 slices vs 1 mixed tuple whole-document; party sets pairwise disjoint: False",
     "improves_correctness": false,
-    "verdict": "CONDITIONAL: the boundary-local mechanism separates contract metadata where explicit markers exist (fixture control), but on the real SRC-04 packet the conservative marker function detects 52 boundary(ies) against the recorded 5 contracts, so on SRC-04 today per-contract extraction degenerates to the whole-document path. Improving SRC-04 correctness requires the recorded page-range boundaries (or stronger markers) to seed establish_contract_boundaries \u2014 recorded as the follow-up need, not papered over."
+    "verdict": "FRAGMENTED: the conservative marker function produces 52 slice(s) for 5 recorded contracts, with boundary starts inside 1 of them and 19 distinct metadata tuple(s) on the real SRC-04 packet \u2014 boundary identity is fragmented (over-split) and/or partially covered, so per-contract extraction does not yet beat the whole-document path on SRC-04. the boundary-local mechanism separates contract metadata where explicit markers exist (fixture control). Improving SRC-04 correctness requires the recorded page-range boundaries (or stronger markers) to seed establish_contract_boundaries \u2014 recorded as the follow-up need, not papered over."
   },
   "cost_verdict": {
     "whole_document_units": 1,
     "contract_local_units": 52,
     "cost_ratio": 52.0,
     "chars_processed_ratio": 1.0,
-    "note": "contract-local extraction multiplies classification invocations by the boundary count but each classifies only its slice; total characters processed stay within ~1x of whole-document"
+    "note": "contract-local extraction multiplies classification invocations by the slice count (see cost_ratio for the measured multiple); each slice classifies only its own characters \u2014 the characters-processed ratio is reported separately and stays within ~1x of whole-document"
   },
   "measurement_note": "Both paths run the real production classification code over the recorded SRC-04 pages.json (no model provider). Detected boundaries are compared to the recorded provenance page ranges; boundary detection is deliberately conservative and may detect fewer slices than the recorded 5-contract ground truth \u2014 the gap is recorded, not papered over."
 }

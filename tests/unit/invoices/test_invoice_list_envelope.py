@@ -95,9 +95,7 @@ def test_list_invoices_service_returns_paginated_envelope() -> None:
 
     import asyncio
 
-    result = asyncio.run(
-        service.list_invoices("user-1", limit=50, offset=0)
-    )
+    result = asyncio.run(service.list_invoices("user-1", limit=50, offset=0))
 
     assert isinstance(result, Success)
     payload = result.unwrap()

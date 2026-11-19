@@ -97,9 +97,7 @@ async def test_quota_raise_parks_the_document_non_terminally() -> None:
     repo = _RecordingRepo()
 
     async def _quota_boom(**_kwargs: Any) -> object:
-        quota_detail = (
-            "Embedding provider daily quota exhausted for model gemini-embedding-001"
-        )
+        quota_detail = "Embedding provider daily quota exhausted for model gemini-embedding-001"
         raise EmbeddingQuotaExhaustedError(
             quota_detail,
             model="gemini-embedding-001",
@@ -133,9 +131,7 @@ async def test_failed_park_write_falls_back_to_celery_retry() -> None:
     repo = _FailingParkRepo()
 
     async def _quota_boom(**_kwargs: Any) -> object:
-        quota_detail = (
-            "Embedding provider daily quota exhausted for model gemini-embedding-001"
-        )
+        quota_detail = "Embedding provider daily quota exhausted for model gemini-embedding-001"
         raise EmbeddingQuotaExhaustedError(
             quota_detail,
             model="gemini-embedding-001",

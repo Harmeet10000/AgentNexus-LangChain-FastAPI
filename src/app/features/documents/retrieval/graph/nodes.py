@@ -1018,9 +1018,7 @@ def make_post_process_node() -> Callable[[RetrievalState, Any], Awaitable[dict[s
                 **_stage_usage(STAGE_POST_PROCESS, 0),
                 **_violation_state(refusals),
             }
-        async with _stage_span(
-            STAGE_POST_PROCESS, context.budgets, document_class
-        ) as violations:
+        async with _stage_span(STAGE_POST_PROCESS, context.budgets, document_class) as violations:
             chunks: list[RetrievedChunk] = state.get("reranked_chunks", [])
             unique: dict[str, RetrievedChunk] = {}
             for chunk in chunks:

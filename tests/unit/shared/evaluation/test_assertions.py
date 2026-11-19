@@ -83,6 +83,52 @@ def test_zero_tolerance_security_metrics_fail_at_any_nonzero_count() -> None:
     assert all("zero-tolerance" in failure for failure in failures)
 
 
+def test_poisoning_events_survive_the_full_collection_to_assertion_path() -> None:
+    """An observed poisoning counter must reach the gate, not be dropped.
+
+    Greptile wave-3 finding: ``collect_metrics`` copied only
+    ``scope_violations``/``unauthorized_reads``, so an aggregate carrying
+    ``poisoning_events: 1`` lost that value and the advertised zero-tolerance
+    gate passed a poisoned run. The same copy runs for every supported report
+    family, and an observed value always beats the absent-counter default.
+    """
+    from_entailment = collect_metrics(
+        entailment_report={"aggregates": {"poisoning_events": 1}}
+    )
+    assert from_entailment["poisoning_events"] == pytest.approx(1.0)
+    failures = evaluate_assertions(from_entailment, _thresholds())
+    assert any("poisoning_events" in failure for failure in failures)
+
+    from_process = collect_metrics(process_report={"poisoning_events": 2})
+    assert from_process["poisoning_events"] == pytest.approx(2.0)
+    assert evaluate_assertions(from_process, _thresholds()) != []
+
+    from_retrieval = collect_metrics(
+        retrieval_report={"aggregates": {"poisoning_events": 1, "recall_at_k": 0.9}}
+    )
+    assert from_retrieval["poisoning_events"] == pytest.approx(1.0)
+    assert any("poisoning_events" in f for f in evaluate_assertions(from_retrieval, _thresholds()))
+
+    # An observed value from a later report family overwrites an earlier
+    # family's absent-counter default — order never silences an observation.
+    both = collect_metrics(
+        retrieval_report={"aggregates": {}},
+        entailment_report={"aggregates": {"poisoning_events": 1}},
+    )
+    assert both["poisoning_events"] == pytest.approx(1.0)
+
+
+def test_absent_poisoning_counter_defaults_to_zero_and_gate_passes() -> None:
+    metrics = collect_metrics(
+        retrieval_report={"aggregates": {"recall_at_k": 0.9}},
+        entailment_report={"aggregates": {"citation_validity": 1.0}},
+    )
+    assert metrics["poisoning_events"] == pytest.approx(0.0)
+    assert metrics["scope_violations"] == pytest.approx(0.0)
+    assert metrics["unauthorized_reads"] == pytest.approx(0.0)
+    assert evaluate_assertions(metrics, _thresholds()) == []
+
+
 def test_gated_metric_missing_from_reports_fails_closed() -> None:
     failures = evaluate_assertions({}, _thresholds())
     assert any("missing from the reports" in failure for failure in failures)
