@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -13,6 +14,7 @@ from crawl4ai.async_configs import GeolocationConfig
 from fakeredis import FakeServer
 from fakeredis.aioredis import FakeRedis
 from loguru import logger as loguru_logger
+from redis.exceptions import RedisError
 
 from app.features.crawler.adapters.crawl4ai.config import CrawlerConfig
 from app.features.crawler.adapters.persistence.redis.job_store import CrawlJobStore
@@ -293,3 +295,123 @@ def test_terminal_write_failure_logs_the_real_exception(
     assert exception[0] is RuntimeError
     notes = list(getattr(exception[1], "__notes__", []))
     assert any("operation=mark_failed_sync" in note for note in notes)
+
+
+async def _seed_reconciliation_rows() -> tuple[dict[str, str], FakeRedis, FakeServer]:
+    """Seed one row per lifecycle state on a fresh fakeredis server."""
+    fake_server = FakeServer()
+    inspection = FakeRedis(server=fake_server, decode_responses=True)
+    store = CrawlJobStore(inspection, ttl_seconds=300)
+    states: dict[str, str] = {}
+
+    async def _create(crawl_id: str) -> None:
+        await store.create(
+            crawl_id=crawl_id, owner="client-1", request_payload={"url": "https://example.com"}
+        )
+
+    await _create("crawl-recon-pending")
+    states["crawl-recon-pending"] = "pending"
+
+    await _create("crawl-recon-running")
+    await store.mark_running("crawl-recon-running")
+    states["crawl-recon-running"] = "running"
+
+    await _create("crawl-recon-failed")
+    await store.mark_failed("crawl-recon-failed", "stale failure")
+    states["crawl-recon-failed"] = "failed"
+
+    await _create("crawl-recon-cancelled")
+    await store.mark_cancelled("crawl-recon-cancelled")
+    states["crawl-recon-cancelled"] = "cancelled"
+
+    await _create("crawl-recon-cancelling")
+    await store.request_cancel("crawl-recon-cancelling", owner="client-1")
+    states["crawl-recon-cancelling"] = "cancelling"
+    return states, inspection, fake_server
+
+
+async def _live_status(redis: FakeRedis, crawl_id: str) -> str:
+    raw = await redis.get(CrawlJobStore._meta_key(crawl_id))
+    assert raw is not None
+    payload: dict[str, Any] = json.loads(raw)
+    return str(payload["status"])
+
+
+@pytest.mark.asyncio
+async def test_boot_reconcile_settles_only_orphaned_cancellations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boot reconciliation finalizes cancelling rows and nothing else.
+
+    The 2026-11-19 sweep left ``288a07df`` stuck in CANCELLING with no running
+    task: the finalize only ever ran inside a crawl task, so a row whose task
+    died was unreachable. At boot this worker owns no tasks, so a CANCELLING
+    row is orphaned by construction; ``pending``/``running`` rows are left
+    alone because their tasks may still be queued for delivery.
+    """
+    states, inspection, fake_server = await _seed_reconciliation_rows()
+    worker_redis = FakeRedis(server=fake_server, decode_responses=True)
+    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url: worker_redis)
+
+    settled = await crawler_job._reconcile_orphaned_cancellations()
+
+    assert settled == 1
+    assert await _live_status(inspection, "crawl-recon-cancelling") == "cancelled"
+    for crawl_id, state in states.items():
+        if crawl_id != "crawl-recon-cancelling":
+            assert await _live_status(inspection, crawl_id) == state
+
+    # Idempotent: a second boot finds nothing left to settle.
+    assert await crawler_job._reconcile_orphaned_cancellations() == 0
+    await inspection.aclose(close_connection_pool=True)
+
+
+@pytest.mark.asyncio
+async def test_boot_reconcile_is_bounded_by_the_row_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sweep settles at most the configured number of rows per boot."""
+    _states, inspection, fake_server = await _seed_reconciliation_rows()
+    extra = FakeRedis(server=fake_server, decode_responses=True)
+    extra_store = CrawlJobStore(extra, ttl_seconds=300)
+    await extra_store.create(
+        crawl_id="crawl-recon-cancelling-2",
+        owner="client-1",
+        request_payload={"url": "https://example.com"},
+    )
+    await extra_store.request_cancel("crawl-recon-cancelling-2", owner="client-1")
+    await extra.aclose(close_connection_pool=True)
+
+    worker_redis = FakeRedis(server=fake_server, decode_responses=True)
+    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url: worker_redis)
+    monkeypatch.setattr(crawler_job, "_RECONCILE_MAX_ROWS", 1)
+
+    settled = await crawler_job._reconcile_orphaned_cancellations()
+
+    assert settled == 1
+    settled_rows = [
+        crawl_id
+        for crawl_id in ("crawl-recon-cancelling", "crawl-recon-cancelling-2")
+        if await _live_status(inspection, crawl_id) == "cancelled"
+    ]
+    assert len(settled_rows) == 1
+    await inspection.aclose(close_connection_pool=True)
+
+
+def test_boot_reconcile_failure_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reconciliation outage must not fail worker boot."""
+    records, stack = _capture_log_records({"crawler_boot_reconcile_failed"})
+
+    async def unreachable() -> int:
+        message = "redis unreachable at boot"
+        raise RedisError(message)
+
+    monkeypatch.setattr(crawler_job, "_reconcile_orphaned_cancellations", unreachable)
+
+    with stack:
+        crawler_job.reconcile_orphaned_crawler_jobs()
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["extra"]["error_type"] == "RedisError"
+    assert "redis unreachable at boot" in str(record["extra"]["error"])

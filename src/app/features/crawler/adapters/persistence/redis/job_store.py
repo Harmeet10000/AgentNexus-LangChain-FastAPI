@@ -204,6 +204,24 @@ class CrawlJobStore:
             return False
         return payload.get("status") == CrawlJobStatus.CANCELLING.value
 
+    async def cancelling_crawl_ids(self, *, limit: int) -> list[str]:
+        """Return up to ``limit`` crawl_ids whose persisted status is CANCELLING.
+
+        The caller decides what a CANCELLING row means (boot-time recovery for
+        a writer that died mid-cancel, terminal-write finalize, ...); this
+        method only reads the persisted lifecycle state. The scan stops as
+        soon as the limit is reached, so the walk is bounded by the caller.
+        """
+        crawl_ids: list[str] = []
+        async for key in self.redis.scan_iter(match=self._meta_key("*"), count=100):
+            crawl_id = key.removeprefix("crawler:job:").removesuffix(":meta")
+            payload = await self._read_payload(crawl_id)
+            if payload is not None and payload.get("status") == CrawlJobStatus.CANCELLING.value:
+                crawl_ids.append(crawl_id)
+                if len(crawl_ids) >= limit:
+                    break
+        return crawl_ids
+
     async def save_result(self, crawl_id: str, result: CrawlResponse) -> CrawlJob:
         encoded = result.model_dump_json().encode("utf-8")
         if len(encoded) > get_settings().CRAWL_JOB_MAX_RESULT_BYTES:

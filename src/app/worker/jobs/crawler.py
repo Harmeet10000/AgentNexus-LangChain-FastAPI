@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from app.features.crawler.application.egress import CrawlerEgressPolicy
 
+from celery.signals import worker_ready
 from playwright.async_api import Error as PlaywrightError
 from redis.exceptions import RedisError
 from returns.result import Failure
@@ -62,6 +63,9 @@ _STORE_WRITE_EXC: tuple[type[Exception], ...] = (
     ValueError,
     RedisError,
 )
+
+#: Bound for the boot-time reconciliation sweep (rows settled per boot).
+_RECONCILE_MAX_ROWS = 100
 
 
 def _is_retryable(exc: BaseException) -> bool:
@@ -182,6 +186,54 @@ def _mark_failed_sync(crawl_id: str, message: str) -> None:
             error_type=type(exc).__name__,
             error=str(exc),
         ).exception("crawler_failure_write_failed")
+
+
+async def _reconcile_orphaned_cancellations() -> int:
+    """Settle ``cancelling`` rows left behind by the previous worker process.
+
+    Runs once at boot, before this worker accepts any crawl: a CANCELLING row
+    observed here was written by the dead process (this worker owns no tasks
+    yet), so finalizing it to CANCELLED is truthful and safe — the persisted
+    cancellation request wins, exactly as in :func:`_mark_terminal`. A task
+    redelivered later for such a row would cancel itself through the same
+    state, so the sweep cannot race a live writer into a lie.
+
+    ``pending`` and ``running`` rows are deliberately left alone: their tasks
+    may still sit queued for delivery (acks-late requeues worker-loss), and
+    settling them could mark a job FAILED that then runs to COMPLETED.
+    """
+    redis = _create_store_redis()
+    try:
+        store = CrawlJobStore(redis)
+        crawl_ids = await store.cancelling_crawl_ids(limit=_RECONCILE_MAX_ROWS)
+        for crawl_id in crawl_ids:
+            try:
+                await store.mark_cancelled(crawl_id)
+            except Exception as settle_exc:  # noqa: BLE001 — one stale row must not abort the sweep
+                settle_exc.add_note(f"crawl_id={crawl_id}, operation=crawler_boot_reconcile")
+                logger.bind(
+                    crawl_id=crawl_id,
+                    error_type=type(settle_exc).__name__,
+                    error=str(settle_exc),
+                ).warning("crawler_boot_reconcile_row_failed")
+        return len(crawl_ids)
+    finally:
+        await redis.aclose(close_connection_pool=True)
+
+
+@worker_ready.connect
+def reconcile_orphaned_crawler_jobs(**_kwargs: object) -> None:
+    """One-time boot reconciliation for the crawler worker's zombie rows."""
+    try:
+        settled = asyncio.run(_reconcile_orphaned_cancellations())
+    except Exception as exc:  # noqa: BLE001 — reconciliation must never fail boot
+        exc.add_note("operation=crawler_boot_reconcile")
+        logger.bind(error_type=type(exc).__name__, error=str(exc)).exception(
+            "crawler_boot_reconcile_failed"
+        )
+        return
+    if settled:
+        logger.bind(settled=settled).info("crawler_boot_reconcile_completed")
 
 
 async def _run_crawl_job(
