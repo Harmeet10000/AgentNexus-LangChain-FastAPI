@@ -1055,3 +1055,98 @@ fresh session; **principal tokens/sessions untouched and verified valid at
 sweep end** (`/auth/me` 200). One Resend-verification task poisoned to the
 DLX route (typed rejection, by design). No commits, no branch switches, no
 source or `.env.development` modifications, no unit restarts by the tester.
+
+## Billing addendum (2026-11-19) — the 7 subscription operations re-probed against a REAL provider-bound row
+
+Round 3 probed all seven subscription-detail/lifecycle operations against the
+stale orphan row `d15593de…` (`remote_sync:"permanent_failure"`, no provider
+id) and correctly got typed rejections, but the evidence was confounded: a
+stale row could not prove the rejections were the state machine working
+rather than the broken binding. The orchestrator has since bound the round-2
+"pending" row — `f0547bed-8873-48a8-8a8b-3201bcba6181`, whose Razorpay create
+DID succeed server-side (`sub_U26C973nFdCMWK`, status `created`,
+`notes.subscription_id` matching) but whose create response was lost to a
+client timeout — directly (`razorpay_subscription_id=sub_U26C973nFdCMWK`,
+`remote_sync=synced`). It is a genuine provider-bound subscription owned by
+the admin identity. All 7 operations re-probed as admin, DTO shapes read from
+`src/app/features/billing/subscriptions/dto.py` (PlanChangeDTO:
+`new_plan_id` UUID + optional tz-aware `effective_date`; pause body optional
+`pause_duration_days`; change-preview query `newPlanId`; trial-extension
+query `days` 1–30 + optional `reason`). No commits, no restarts, no source
+edits; billing-mutation limiter never approached (30/60).
+
+| Method + path | Status | Observed behavior | Required backend piece |
+|---|---|---|---|
+| GET /api/v2/subscriptions/f0547bed… | 200 | full row: `status:"created"`, `razorpaySubscriptionId:"sub_U26C973nFdCMWK"`, `remoteSync:"synced"`, `planId:4df5c11f…` (sweep3-pro-monthly, synced `plan_U0HeO8T1ATOO7d`, active), `paymentUrl:null` (checkout short_url was ALSO lost with the create response — see H3), `version:1`, period/trial/pause fields all null | Postgres + Razorpay binding |
+| GET /api/v2/subscriptions/{id}/payments | 200 | bare list, empty — truthful (subscription created but never authenticated/charged) | Postgres |
+| GET /api/v2/subscriptions/{id}/change-preview?newPlanId=9261e883… | 422 | typed `VALIDATION_ERROR` "Proration is only valid for active subscriptions" — correct for `created`; second synced plan exists (smoke-pro-monthly-v2 `plan_U0MGyYSJ84rmhM`), so the payload was valid | Postgres |
+| POST /api/v2/subscriptions/{id}/pause | 422 | typed `INVALID_STATE_TRANSITION` "Invalid state transition: created -> paused" — Razorpay-correct: pause requires an authenticated (active) subscription | Razorpay subscription lifecycle |
+| POST /api/v2/subscriptions/{id}/resume | 422 | typed `INVALID_STATE_TRANSITION` "Invalid state transition: created -> active" | same |
+| POST /api/v2/subscriptions/{id}/change-plan (PlanChangeDTO, target=synced 9261e883) | 422 | typed `VALIDATION_ERROR` "Invalid subscription state transition: created -> active" — correct rejection, but NOTE the envelope-code inconsistency: change-plan renders the same state rejection under `VALIDATION_ERROR` while pause/resume use `INVALID_STATE_TRANSITION` (H4) | same |
+| POST /api/v2/subscriptions/{id}/trial-extension?days=7&reason=sweep4-probe | 422 | typed `VALIDATION_ERROR` "Subscription is not in trial" — correct (no trial on the row) | same |
+
+Post-probe integrity check: re-GET shows `status:"created"`, `version:1`, no
+pause/trial/cancel fields set — all five 422s were side-effect-free typed
+rejections. Journal shows clean request handling, no errors.
+
+**Verdict: the round-3 typed rejections were the state machine working
+correctly, now proven against a real provider-bound row.** The remaining
+prerequisite for pause/resume/change-plan/trial-extension/change-preview to
+ever return 200 is **checkout authentication** (the customer completing the
+Razorpay first payment, moving the sub `created → authenticated/active`) —
+and that path is doubly broken here: the checkout `payment_url` was lost with
+the create response and never bound locally (H3), so the API cannot even
+direct the customer to authenticate. Owner instruction "leave it paused" is
+**not achievable without forcing** — the state machine forbids `created →
+paused` (and round 3 showed `created → cancelled` is also rejected, so a
+created-but-unauthenticated subscription cannot be exited through the API at
+all, only abandoned). Residue left as-is: an inert `created` row, provider
+side mirrored.
+
+### H3 (P2): reconciliation does NOT self-heal a provider-created subscription whose create response was lost
+
+Evidence chain (owner-confirmed + this sweep's row state):
+
+1. Round 2: `POST /api/v2/subscriptions` against a synced plan — the Razorpay
+   provider create **succeeded server-side** (`sub_U26C973nFdCMWK`,
+   `status:"created"`, `notes.subscription_id=f0547bed-8873-48a8-8a8b-3201bcba6181`)
+   while the client timed out before the id could be bound.
+2. The local row sat `created`/unbound (`razorpay_subscription_id:null`) for
+   ~1.5 h while Razorpay held the live subscription.
+3. `billing.reconciliation` **ran twice during that window and did not bind
+   the row** — it does not discover provider subscriptions by
+   `notes.subscription_id`, so the orphan persisted.
+4. Recovery happened only via direct orchestrator binding
+   (`razorpay_subscription_id=sub_U26C973nFdCMWK`, `remote_sync=synced`).
+5. Residual loss visible in this sweep: the bound row's `paymentUrl` is
+   `null` — the checkout short_url from the lost create response was never
+   recovered either, so even after binding, the subscription cannot be
+   authenticated through the API's own data.
+
+Fix direction: reconciliation should list recent provider subscriptions (or
+query by `notes.subscription_id`) and bind matching unbound local rows — id
+AND checkout URL — turning "client timeout during create" from a permanent
+orphan into a self-healing eventual consistency case. Related: round-3 G9b
+(the same create path's persist-then-500 divergence) is the producer of this
+orphan class.
+
+### H4 (P3): state-transition rejections render under inconsistent error codes
+
+`created → paused` and `created → active` (resume) render as
+`INVALID_STATE_TRANSITION`; the semantically identical change-plan rejection
+renders as `VALIDATION_ERROR` ("Invalid subscription state transition:
+created -> active"), and trial-extension as `VALIDATION_ERROR` ("Subscription
+is not in trial"). Same state-machine layer, three wire shapes — clients
+cannot dispatch on one code. Cosmetic but contract-level.
+
+### Counts (addendum)
+
+| Metric | Count |
+|---|---|
+| Operations re-probed against the provider-bound row | 7 (all previously probed in round 3 against the stale orphan; coverage count unchanged at 120/138 — this upgrades the evidence, not the coverage) |
+| PASS (detail/payments reads) | 2 (GET detail 200; GET payments 200 truthful-empty) |
+| Typed rejections confirmed state-machine-correct | 5 (change-preview, pause, resume, change-plan, trial-extension — all 422, side-effect-free, version unchanged) |
+| BLOCKED | checkout authentication (first payment) — prerequisite genuinely absent; also the only path by which pause/resume/change-plan/trial could ever return 200 |
+| Unexpected 5xx | 0 |
+| New defects | H3 (P2, reconciliation no-self-heal + lost payment_url), H4 (P3, error-code inconsistency) |
+| Residue | subscription `f0547bed…` left `created`/`synced`/inert (pause requested by owner is unreachable without forcing — state machine forbids `created → paused`; recorded, not forced) |
