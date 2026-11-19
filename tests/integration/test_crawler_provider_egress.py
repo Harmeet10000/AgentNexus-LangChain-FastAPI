@@ -72,6 +72,9 @@ async def test_disabled_external_processing_is_terminal_without_provider_call(
         async def is_cancelled(self, _crawl_id: str) -> bool:
             return False
 
+        async def is_cancel_requested(self, _crawl_id: str) -> bool:
+            return False
+
         async def mark_running(self, _crawl_id: str) -> None:
             return None
 

@@ -188,6 +188,22 @@ class CrawlJobStore:
     async def is_cancelled(self, crawl_id: str) -> bool:
         return bool(await self.redis.exists(self._cancel_key(crawl_id)))
 
+    async def is_cancel_requested(self, crawl_id: str) -> bool:
+        """Return True when cancellation was requested, by flag or by job state.
+
+        The cancel flag shares the job TTL, but a terminal write extends the
+        record's expiry while the flag keeps its original countdown, so the
+        persisted ``cancelling`` state must finalize on its own: a job the
+        owner cancelled must never settle to FAILED because its flag expired
+        first.
+        """
+        if await self.is_cancelled(crawl_id):
+            return True
+        payload = await self._read_payload(crawl_id)
+        if payload is None:
+            return False
+        return payload.get("status") == CrawlJobStatus.CANCELLING.value
+
     async def save_result(self, crawl_id: str, result: CrawlResponse) -> CrawlJob:
         encoded = result.model_dump_json().encode("utf-8")
         if len(encoded) > get_settings().CRAWL_JOB_MAX_RESULT_BYTES:

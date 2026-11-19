@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -10,15 +12,18 @@ from crawl4ai import CrawlerRunConfig
 from crawl4ai.async_configs import GeolocationConfig
 from fakeredis import FakeServer
 from fakeredis.aioredis import FakeRedis
+from loguru import logger as loguru_logger
 
 from app.features.crawler.adapters.crawl4ai.config import CrawlerConfig
 from app.features.crawler.adapters.persistence.redis.job_store import CrawlJobStore
 from app.features.crawler.api.http.dto import CrawlRequest
+from app.features.crawler.application.egress import CrawlerEgressConfigError
 from app.features.crawler.domain.models import CrawlJobStatus
 from app.worker.jobs import crawler as crawler_job
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Any, NoReturn
 
 
 class _ControlledBrowser:
@@ -71,6 +76,27 @@ async def _no_processor() -> None:
 
 async def _healthy_browser() -> bool:
     return True
+
+
+def _raise_misconfigured_egress() -> NoReturn:
+    """Simulate the smoke's misconfiguration: CRAWLER_EGRESS_PROXY_URL unset."""
+    message = "CRAWLER_EGRESS_PROXY_URL must be configured"
+    raise CrawlerEgressConfigError(message)
+
+
+def _capture_log_records(event_names: set[str]) -> tuple[list[dict[str, Any]], ExitStack]:
+    """Capture full loguru records for the given event names."""
+    records: list[dict[str, Any]] = []
+    stack = ExitStack()
+
+    def _sink(message: Any) -> None:
+        record = message.record
+        if record["message"] in event_names:
+            records.append(record)
+
+    sink_id = loguru_logger.add(_sink, level="DEBUG", format="{message}")
+    stack.callback(loguru_logger.remove, sink_id)
+    return records, stack
 
 
 async def _arrange_job(
@@ -161,3 +187,109 @@ async def test_worker_records_target_failure_after_valid_configuration(
     assert job.error_message == "controlled target execution failed"
     assert "geolocation" not in job.error_message.lower()
     await inspection_redis.aclose(close_connection_pool=True)
+
+
+@pytest.mark.asyncio
+async def test_terminal_failure_write_survives_misconfigured_egress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H1 (2026-11-19): the egress policy gates the crawl, not persistence.
+
+    With egress-policy resolution raising (the unset CRAWLER_EGRESS_PROXY_URL
+    misconfiguration), the task-boundary terminal write must still settle the
+    job to FAILED through the plain job-store client instead of leaving a
+    zombie ``pending`` row behind.
+    """
+    crawl_id = "crawl-egress-misconfig-failed"
+    store, _payload, inspection_redis = await _arrange_job(monkeypatch, crawl_id=crawl_id)
+    monkeypatch.setattr(crawler_job, "_resolve_egress_policy", _raise_misconfigured_egress)
+
+    await asyncio.to_thread(
+        crawler_job._mark_failed_sync,
+        crawl_id,
+        "Crawler egress boundary is misconfigured: CRAWLER_EGRESS_PROXY_URL must be configured",
+    )
+
+    job = await store.get(crawl_id, owner="client-1")
+    assert job is not None
+    assert job.status is CrawlJobStatus.FAILED
+    assert job.error_message.startswith("Crawler egress boundary is misconfigured")
+    await inspection_redis.aclose(close_connection_pool=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_job_without_running_task_finalizes_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H1 (2026-11-19): a ``cancelling`` row with no running task must settle.
+
+    The API-side cancel flips a stranded job to ``cancelling``; the worker-side
+    finalize must still write CANCELLED through the non-gated client even when
+    the egress policy is misconfigured.
+    """
+    crawl_id = "crawl-egress-misconfig-cancelled"
+    store, _payload, inspection_redis = await _arrange_job(monkeypatch, crawl_id=crawl_id)
+    await store.request_cancel(crawl_id, owner="client-1")
+    monkeypatch.setattr(crawler_job, "_resolve_egress_policy", _raise_misconfigured_egress)
+
+    await asyncio.to_thread(
+        crawler_job._mark_failed_sync, crawl_id, "Crawler egress boundary is misconfigured"
+    )
+
+    job = await store.get(crawl_id, owner="client-1")
+    assert job is not None
+    assert job.status is CrawlJobStatus.CANCELLED
+    await inspection_redis.aclose(close_connection_pool=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_state_finalizes_even_after_flag_expiry() -> None:
+    """The persisted ``cancelling`` state alone must request cancellation.
+
+    A terminal write extends the record's TTL while the cancel flag keeps its
+    original countdown, so finalize must honour the row state, not just the
+    flag — otherwise a cancelled job settles to FAILED once the flag expires.
+    """
+    crawl_id = "crawl-cancel-flag-expired"
+    store = CrawlJobStore(FakeRedis(decode_responses=True), ttl_seconds=300)
+    await store.create(
+        crawl_id=crawl_id, owner="client-1", request_payload={"url": "https://example.com"}
+    )
+    await store.request_cancel(crawl_id, owner="client-1")
+    assert await store.is_cancel_requested(crawl_id) is True
+
+    await store.redis.delete(CrawlJobStore._cancel_key(crawl_id))
+
+    assert await store.is_cancelled(crawl_id) is False
+    assert await store.is_cancel_requested(crawl_id) is True
+
+
+def test_terminal_write_failure_logs_the_real_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H2 (2026-11-19): ``crawler_failure_write_failed`` carries the exception.
+
+    The smoke recorded ``exception: null`` because the client construction
+    raised outside every except-logging handler; the log line must always
+    carry the exception type, message, and add_note chain.
+    """
+
+    def broken_store_client() -> NoReturn:
+        message = "worker redis url unset"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(crawler_job, "_create_store_redis", broken_store_client)
+
+    records, stack = _capture_log_records({"crawler_failure_write_failed"})
+    with stack:
+        crawler_job._mark_failed_sync("crawl-write-log-check", "egress misconfigured")
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["extra"]["error_type"] == "RuntimeError"
+    assert "worker redis url unset" in str(record["extra"]["error"])
+    exception = record["exception"]
+    assert exception is not None
+    assert exception[0] is RuntimeError
+    notes = list(getattr(exception[1], "__notes__", []))
+    assert any("operation=mark_failed_sync" in note for note in notes)

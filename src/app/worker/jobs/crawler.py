@@ -79,11 +79,13 @@ def _resolve_egress_policy() -> CrawlerEgressPolicy:
 
 
 def _create_worker_redis() -> Redis:
-    """Create the crawler worker's Redis client, honouring the fixed relay.
+    """Create the crawl-execution Redis client, honouring the fixed relay.
 
     When the deployment declares a relay, the worker reaches its managed
-    Redis *only* through it. There is no direct fallback: a relay or TLS
-    failure fails the job closed instead of reopening a public route.
+    Redis *only* through it while a crawl runs. There is no direct fallback:
+    a relay or TLS failure fails the job closed instead of reopening a public
+    route. Job persistence is not crawl traffic — the terminal-write path uses
+    :func:`_create_store_redis`, which never resolves the egress policy.
     """
     settings = get_settings()
     relay = _resolve_egress_policy().redis_relay
@@ -95,6 +97,20 @@ def _create_worker_redis() -> Redis:
         ssl_certfile=relay.cert_file,
         ssl_keyfile=relay.key_file,
     )
+
+
+def _create_store_redis() -> Redis:
+    """Create the job-store Redis client used for persistence writes.
+
+    The egress policy gates the crawl, not persistence: a misconfigured or
+    unavailable boundary must still let a terminal job state land instead of
+    leaving zombie ``pending``/``cancelling`` rows behind. This is the same
+    plain client every other worker builds via
+    :func:`app.connections.redis.create_redis_client` — no egress-policy
+    dependency — so the H1 misconfiguration class can only fail the crawl,
+    never the failure write.
+    """
+    return create_redis_client(get_settings().REDIS_URL)
 
 
 def _unhealthy_browser_failure(failure_message: str, crawl_id: str) -> NoReturn:
@@ -116,9 +132,14 @@ def _boundary_outage_failure(crawl_id: str) -> NoReturn:
 
 
 async def _mark_terminal(store: CrawlJobStore, crawl_id: str, message: str) -> None:
-    """Write FAILED unless the job was cancelled, which wins over failure."""
+    """Write FAILED unless cancellation was requested, which wins over failure.
+
+    Finalization consults the persisted cancellation request, so a ``cancelling``
+    row with no running task (the H1 second zombie) settles to CANCELLED by the
+    same non-gated write instead of being stranded.
+    """
     try:
-        if await store.is_cancelled(crawl_id):
+        if await store.is_cancel_requested(crawl_id):
             await store.mark_cancelled(crawl_id)
             return
     except _STORE_WRITE_EXC as cancel_exc:
@@ -132,13 +153,21 @@ async def _mark_terminal(store: CrawlJobStore, crawl_id: str, message: str) -> N
 
 
 async def _mark_failed_best_effort(crawl_id: str, message: str) -> None:
-    """Persist a terminal job status without the worker-owned browser loop."""
-    redis = _create_worker_redis()
+    """Persist a terminal job status without the worker-owned browser loop.
+
+    Uses the plain store client: this write must succeed even in the
+    misconfigured-egress environment that killed the crawl itself.
+    """
+    redis = _create_store_redis()
     try:
         await _mark_terminal(CrawlJobStore(redis), crawl_id, message)
     except Exception as store_exc:  # noqa: BLE001 — best-effort terminal write
         store_exc.add_note(f"crawl_id={crawl_id}, operation=mark_failed_best_effort")
-        logger.bind(crawl_id=crawl_id).warning("Could not persist crawler failure")
+        logger.bind(
+            crawl_id=crawl_id,
+            error_type=type(store_exc).__name__,
+            error=str(store_exc),
+        ).exception("Could not persist crawler failure")
     finally:
         await redis.aclose(close_connection_pool=True)
 
@@ -148,7 +177,11 @@ def _mark_failed_sync(crawl_id: str, message: str) -> None:
         asyncio.run(_mark_failed_best_effort(crawl_id, message))
     except Exception as exc:  # noqa: BLE001 — terminal write must never mask retry
         exc.add_note(f"crawl_id={crawl_id}, operation=mark_failed_sync")
-        logger.bind(crawl_id=crawl_id).warning("crawler_failure_write_failed")
+        logger.bind(
+            crawl_id=crawl_id,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        ).exception("crawler_failure_write_failed")
 
 
 async def _run_crawl_job(
