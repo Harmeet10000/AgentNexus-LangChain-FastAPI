@@ -1424,7 +1424,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/APIResponse_SearchResponse_"
+                  "$ref": "#/components/schemas/app__kernel__result__APIResponse_SearchResponse___1"
                 }
               }
             }
@@ -3903,7 +3903,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/APIResponse_SearchResponse_"
+                  "$ref": "#/components/schemas/app__kernel__result__APIResponse_SearchResponse___1"
                 }
               }
             }
@@ -4801,15 +4801,15 @@
     "/api/v2/search/rag": {
       "post": {
         "tags": [
-          "documents"
+          "search"
         ],
-        "summary": "Unified Rag",
-        "operationId": "unified_rag_api_v2_search_rag_post",
+        "summary": "Rag Search",
+        "operationId": "rag_search_api_v2_search_rag_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UnifiedRagRequest"
+                "$ref": "#/components/schemas/RagSearchRequest"
               }
             }
           },
@@ -4821,7 +4821,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/APIResponse_UnifiedRagResponse_"
+                  "$ref": "#/components/schemas/APIResponse_RagSearchResponse_"
                 }
               }
             }
@@ -5028,6 +5028,146 @@
             }
           }
         }
+      }
+    },
+    "/api/v2/search/ingest": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Ingest Document",
+        "operationId": "ingest_document_api_v2_search_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_SearchIngestResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v2/search/ingest/{task_id}": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Get Ingest Status",
+        "operationId": "get_ingest_status_api_v2_search_ingest__task_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_SearchTaskStatusResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/search/hybrid": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Hybrid Search",
+        "operationId": "hybrid_search_api_v2_search_hybrid_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HybridSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/app__kernel__result__APIResponse_SearchResponse___2"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v2/plans": {
@@ -6230,7 +6370,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/APIResponse_list_InvoiceResponse__"
+                  "$ref": "#/components/schemas/APIResponse_InvoiceListResponse_"
                 }
               }
             }
@@ -7492,6 +7632,54 @@
         ],
         "title": "APIResponse[ImpersonateResponse]"
       },
+      "APIResponse_InvoiceListResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "title": "Statuscode",
+            "default": 200
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestMeta"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvoiceListResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "title": "APIResponse[InvoiceListResponse]"
+      },
       "APIResponse_InvoiceResponse_": {
         "properties": {
           "success": {
@@ -7870,6 +8058,54 @@
         ],
         "title": "APIResponse[ProrationCalculation]"
       },
+      "APIResponse_RagSearchResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "title": "Statuscode",
+            "default": 200
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestMeta"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RagSearchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "title": "APIResponse[RagSearchResponse]"
+      },
       "APIResponse_RefundResponse_": {
         "properties": {
           "success": {
@@ -7918,7 +8154,7 @@
         ],
         "title": "APIResponse[RefundResponse]"
       },
-      "APIResponse_SearchResponse_": {
+      "APIResponse_SearchIngestResponse_": {
         "properties": {
           "success": {
             "type": "boolean",
@@ -7941,7 +8177,7 @@
           "data": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SearchResponse"
+                "$ref": "#/components/schemas/SearchIngestResponse"
               },
               {
                 "type": "null"
@@ -7964,7 +8200,55 @@
         "required": [
           "request"
         ],
-        "title": "APIResponse[SearchResponse]"
+        "title": "APIResponse[SearchIngestResponse]"
+      },
+      "APIResponse_SearchTaskStatusResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "title": "Statuscode",
+            "default": 200
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestMeta"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchTaskStatusResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "title": "APIResponse[SearchTaskStatusResponse]"
       },
       "APIResponse_SelfInfoDTO_": {
         "properties": {
@@ -8499,58 +8783,6 @@
           "request"
         ],
         "title": "APIResponse[dict[str, str]]"
-      },
-      "APIResponse_list_InvoiceResponse__": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "statusCode": {
-            "type": "integer",
-            "title": "Statuscode",
-            "default": 200
-          },
-          "request": {
-            "$ref": "#/components/schemas/RequestMeta"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "default": "Success"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/InvoiceResponse"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Data"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ErrorDetail"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "request"
-        ],
-        "title": "APIResponse[list[InvoiceResponse]]"
       },
       "APIResponse_list_PaymentResponse__": {
         "properties": {
@@ -9675,7 +9907,7 @@
           "url"
         ],
         "title": "CrawlRequest",
-        "description": "Request to crawl a URL."
+        "description": "Command to crawl a URL."
       },
       "CrawlResultItem": {
         "properties": {
@@ -10679,6 +10911,18 @@
             "minimum": 0.0,
             "title": "Relationships Succeeded",
             "default": 0
+          },
+          "relationships_invalid_span": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Relationships Invalid Span",
+            "default": 0
+          },
+          "relationships_dropped": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Relationships Dropped",
+            "default": 0
           }
         },
         "additionalProperties": false,
@@ -10830,6 +11074,57 @@
         ],
         "title": "HealthStatus",
         "description": "Health status of a dependency."
+      },
+      "HybridSearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "candidate_limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 200.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Limit"
+          },
+          "metadata_filter": {
+            "$ref": "#/components/schemas/app__features__search__api__http__dto__SearchMetadataFilter"
+          },
+          "bypass_cache": {
+            "type": "boolean",
+            "title": "Bypass Cache",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "HybridSearchRequest",
+        "description": "Hybrid retrieval request."
       },
       "ImpersonateResponse": {
         "properties": {
@@ -11065,6 +11360,38 @@
         ],
         "title": "InvoiceLineItemDTO",
         "description": "Single line item on an invoice."
+      },
+      "InvoiceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "InvoiceListResponse",
+        "description": "Paginated list of invoices \u2014 the same envelope subscriptions uses (F11)."
       },
       "InvoiceResponse": {
         "properties": {
@@ -12096,54 +12423,100 @@
         ],
         "title": "QualityWarningDTO"
       },
-      "RagContextSectionResponse": {
+      "RagSearchRequest": {
         "properties": {
-          "document_id": {
+          "query": {
             "type": "string",
-            "title": "Document Id"
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Query"
           },
-          "contract_index": {
+          "limit": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 1.0
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Contract Index"
+            "title": "Limit"
           },
-          "title": {
-            "type": "string",
-            "title": "Title"
+          "candidate_limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 200.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Limit"
           },
-          "content": {
-            "type": "string",
-            "title": "Content"
+          "metadata_filter": {
+            "$ref": "#/components/schemas/app__features__search__api__http__dto__SearchMetadataFilter"
           },
-          "chunk_indices": {
-            "items": {
-              "type": "integer"
-            },
-            "type": "array",
-            "title": "Chunk Indices"
+          "bypass_cache": {
+            "type": "boolean",
+            "title": "Bypass Cache",
+            "default": false
           },
-          "chunk_metadata": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Chunk Metadata"
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 20000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "document_id",
-          "title",
-          "content",
-          "chunk_indices",
-          "chunk_metadata"
+          "query"
         ],
-        "title": "RagContextSectionResponse"
+        "title": "RagSearchRequest",
+        "description": "Hybrid retrieval plus RAG context assembly request."
+      },
+      "RagSearchResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/app__features__search__api__http__dto__SearchResultItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "context": {
+            "items": {
+              "$ref": "#/components/schemas/app__features__search__api__http__dto__RagContextSectionResponse"
+            },
+            "type": "array",
+            "title": "Context"
+          },
+          "cache_hit": {
+            "type": "boolean",
+            "title": "Cache Hit",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "context"
+        ],
+        "title": "RagSearchResponse",
+        "description": "Hybrid hits plus assembled RAG context."
       },
       "RateLimitInfo": {
         "properties": {
@@ -12392,21 +12765,54 @@
         "title": "SchemaType",
         "description": "Predefined schema types."
       },
-      "SearchMetadataFilter": {
+      "SearchIngestRequest": {
         "properties": {
-          "metadata_": {
+          "title": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 1000000,
+            "minLength": 1,
+            "title": "Content"
+          },
+          "source_uri": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Uri"
+          },
+          "doc_metadata": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Metadata"
+            "title": "Doc Metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "content"
+        ],
+        "title": "SearchIngestRequest",
+        "description": "Request body for async search ingestion."
+      },
+      "SearchIngestResponse": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
           },
-          "document_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Document Ids"
-          },
-          "document_kind": {
+          "task_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -12415,81 +12821,38 @@
                 "type": "null"
               }
             ],
-            "title": "Document Kind"
+            "title": "Task Id"
           },
-          "jurisdiction": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Jurisdiction"
+          "status": {
+            "type": "string",
+            "title": "Status"
           },
-          "contract_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Contract Type"
-          },
-          "contract_index": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Contract Index"
-          },
-          "parties": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Parties"
-          },
-          "clause_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Clause Type"
-          },
-          "require_graphiti_verified": {
+          "duplicate": {
             "type": "boolean",
-            "title": "Require Graphiti Verified",
+            "title": "Duplicate",
             "default": false
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "SearchMetadataFilter"
+        "required": [
+          "document_id",
+          "status"
+        ],
+        "title": "SearchIngestResponse",
+        "description": "Queued or duplicate-ingest response."
       },
-      "SearchResponse": {
+      "SearchTaskStatusResponse": {
         "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success"
-          },
-          "query": {
+          "task_id": {
             "type": "string",
-            "title": "Query"
+            "title": "Task Id"
           },
-          "answer": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "document_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -12498,50 +12861,21 @@
                 "type": "null"
               }
             ],
-            "title": "Answer"
+            "title": "Document Id"
           },
-          "results": {
-            "items": {
-              "$ref": "#/components/schemas/SearchResultItem"
-            },
-            "type": "array",
-            "title": "Results"
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
           },
-          "total_results": {
-            "type": "integer",
-            "title": "Total Results"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "success",
-          "query",
-          "results",
-          "total_results"
-        ],
-        "title": "SearchResponse",
-        "description": "Response from search operation."
-      },
-      "SearchResultItem": {
-        "properties": {
-          "url": {
-            "type": "string",
-            "title": "Url"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "content": {
-            "type": "string",
-            "title": "Content"
-          },
-          "score": {
-            "type": "number",
-            "title": "Score"
-          },
-          "published_date": {
+          "error": {
             "anyOf": [
               {
                 "type": "string"
@@ -12550,19 +12884,17 @@
                 "type": "null"
               }
             ],
-            "title": "Published Date"
+            "title": "Error"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "url",
-          "title",
-          "content",
-          "score"
+          "task_id",
+          "status"
         ],
-        "title": "SearchResultItem",
-        "description": "Single search result."
+        "title": "SearchTaskStatusResponse",
+        "description": "Normalized ingestion task status payload.\n\n``status`` is the Celery result state, except that a staged-but-undispatched\ntask (known via the enqueue-time ownership record) reports ``QUEUED`` \u2014\nCelery's ``PENDING`` means \"never seen this task\", not \"waiting\"."
       },
       "SelfInfoDTO": {
         "properties": {
@@ -13189,7 +13521,7 @@
             "default": 50
           },
           "metadata_filter": {
-            "$ref": "#/components/schemas/SearchMetadataFilter"
+            "$ref": "#/components/schemas/app__features__documents__api__http__dto__SearchMetadataFilter"
           },
           "bypass_cache": {
             "type": "boolean",
@@ -13222,7 +13554,7 @@
           },
           "context": {
             "items": {
-              "$ref": "#/components/schemas/RagContextSectionResponse"
+              "$ref": "#/components/schemas/app__features__documents__api__http__dto__RagContextSectionResponse"
             },
             "type": "array",
             "title": "Context"
@@ -13263,7 +13595,7 @@
             "default": 50
           },
           "metadata_filter": {
-            "$ref": "#/components/schemas/SearchMetadataFilter"
+            "$ref": "#/components/schemas/app__features__documents__api__http__dto__SearchMetadataFilter"
           },
           "bypass_cache": {
             "type": "boolean",
@@ -13595,6 +13927,91 @@
         "title": "VoidInvoiceDTO",
         "description": "Void an issued invoice, optionally reissuing it."
       },
+      "app__features__crawler__application__contracts__SearchResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/app__features__crawler__application__contracts__SearchResultItem"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "total_results": {
+            "type": "integer",
+            "title": "Total Results"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "success",
+          "query",
+          "results",
+          "total_results"
+        ],
+        "title": "SearchResponse",
+        "description": "Result of a search operation."
+      },
+      "app__features__crawler__application__contracts__SearchResultItem": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "published_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "url",
+          "title",
+          "content",
+          "score"
+        ],
+        "title": "SearchResultItem",
+        "description": "Single search result."
+      },
       "app__features__documents__api__http__dto__DocumentUploadResponse": {
         "properties": {
           "doc_id": {
@@ -13675,6 +14092,142 @@
         ],
         "title": "DocumentUploadResponse"
       },
+      "app__features__documents__api__http__dto__RagContextSectionResponse": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "contract_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Index"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "chunk_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Chunk Indices"
+          },
+          "chunk_metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Chunk Metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "title",
+          "content",
+          "chunk_indices",
+          "chunk_metadata"
+        ],
+        "title": "RagContextSectionResponse"
+      },
+      "app__features__documents__api__http__dto__SearchMetadataFilter": {
+        "properties": {
+          "metadata_": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "document_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Document Ids"
+          },
+          "document_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Kind"
+          },
+          "jurisdiction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jurisdiction"
+          },
+          "contract_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Type"
+          },
+          "contract_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Index"
+          },
+          "parties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parties"
+          },
+          "clause_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clause Type"
+          },
+          "require_graphiti_verified": {
+            "type": "boolean",
+            "title": "Require Graphiti Verified",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SearchMetadataFilter"
+      },
       "app__features__documents__ingestion__legacy_dto__DocumentUploadResponse": {
         "properties": {
           "doc_id": {
@@ -13686,19 +14239,47 @@
             "title": "Status"
           },
           "entity_count": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Entity Count"
           },
           "clause_count": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Clause Count"
           },
           "relationship_count": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Relationship Count"
           },
           "dropped_entity_count": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Dropped Entity Count"
           },
           "error": {
@@ -13716,13 +14297,136 @@
         "type": "object",
         "required": [
           "doc_id",
-          "status",
-          "entity_count",
-          "clause_count",
-          "relationship_count",
-          "dropped_entity_count"
+          "status"
         ],
-        "title": "DocumentUploadResponse"
+        "title": "DocumentUploadResponse",
+        "description": "Deprecated upload contract (F2).\n\nThe legacy graph path still populates the four extraction counts; the canonical\n`POST /documents/upload` command service \u2014 which this route now delegates to \u2014 queues the\ndocument and answers before any extraction runs, so it cannot know them. The counts are\ntherefore optional with explicit deprecation defaults: `None` means \"not computed on this\npath\", which is truthful for a queued document and keeps the response model satisfiable\n(before the fix FastAPI raised `ResponseValidationError` AFTER the document was persisted,\nso clients saw a 500 while state had mutated and the deprecation headers never shipped)."
+      },
+      "app__features__search__api__http__dto__RagContextSectionResponse": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "chunk_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Chunk Indices"
+          },
+          "chunk_metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Chunk Metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "document_id",
+          "title",
+          "content",
+          "chunk_indices",
+          "chunk_metadata"
+        ],
+        "title": "RagContextSectionResponse",
+        "description": "Ordered context section for RAG consumers."
+      },
+      "app__features__search__api__http__dto__SearchMetadataFilter": {
+        "properties": {
+          "chunk_metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Chunk Metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SearchMetadataFilter",
+        "description": "JSONB containment filter for search chunks."
+      },
+      "app__features__search__api__http__dto__SearchResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/app__features__search__api__http__dto__SearchResultItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "cache_hit": {
+            "type": "boolean",
+            "title": "Cache Hit",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SearchResponse",
+        "description": "Hybrid search response."
+      },
+      "app__features__search__api__http__dto__SearchResultItem": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "chunk_index": {
+            "type": "integer",
+            "title": "Chunk Index"
+          },
+          "chunk_metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Chunk Metadata"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "document_id",
+          "title",
+          "content",
+          "chunk_index",
+          "chunk_metadata",
+          "score",
+          "rank"
+        ],
+        "title": "SearchResultItem",
+        "description": "Ranked hybrid search hit."
       },
       "app__kernel__result__APIResponse_DocumentUploadResponse___1": {
         "properties": {
@@ -13819,6 +14523,102 @@
           "request"
         ],
         "title": "APIResponse[DocumentUploadResponse]"
+      },
+      "app__kernel__result__APIResponse_SearchResponse___1": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "title": "Statuscode",
+            "default": 200
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestMeta"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__features__crawler__application__contracts__SearchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "title": "APIResponse[SearchResponse]"
+      },
+      "app__kernel__result__APIResponse_SearchResponse___2": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "statusCode": {
+            "type": "integer",
+            "title": "Statuscode",
+            "default": 200
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestMeta"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__features__search__api__http__dto__SearchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request"
+        ],
+        "title": "APIResponse[SearchResponse]"
       }
     },
     "securitySchemes": {
