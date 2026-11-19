@@ -431,3 +431,21 @@ are genuinely non-terminal and old; re-drive is the quota-window resume).
 Greptile 76 findings dispositioned (review complete, remediation ~30/76 across two waves);
 ~30 conventional commits pushed; F5 dead for good; the journal talks; the DLQ exists; beat
 runs; the money-path reaches business rules.
+
+## ADDENDUM 5 — 2026-11-20 (origin/main @ 32a38be0+)
+
+- Wave-3 COMPLETE: all 76 Greptile comments dispositioned (32 fixed, 38 verified
+  already-fixed, 6 owner decisions APPLIED, 6 file-locked residuals, 1 not-reproducible).
+  Commit 86c444d5. Owner decisions: 1-3 deferred, 4 keep-50MiB-until-benchmarked, 5
+  already-resolved (spec audit), 6 signed off.
+- Remaining-endpoints sweep COMPLETE: 120/138 operations probed across 4 rounds; v2 surface
+  100%; billing lifecycle evidenced to its true boundary (H3: reconcile by
+  notes.subscription_id binding id AND checkout URL; H4: error-code consistency — queued).
+- Crawler: H1/H2 fixed and live-proven (post-fix probe settles terminal failed truthfully —
+  the "pending" scare was a timeline misattribution); boot-reconcile signal-registration
+  diagnosis with the crew (round-3); egress boundary deployed (local proxy.py deny-private
+  unit) and FIVE boundary layers walked — the last layer (Redis mTLS relay) is H5
+  owner-gated infrastructure (options recorded in the smoke doc).
+- CodeRabbit auth done by owner; fix-batch review running.
+- Owner-gated remains: Resend domain, crawler proxy (or a production relay), Phase 7 go,
+  staging, 7.3, quota-window go.
