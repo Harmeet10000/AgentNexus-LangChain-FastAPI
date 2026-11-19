@@ -13,6 +13,7 @@ Design rules:
 import hashlib
 import operator
 import re
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Annotated, Any, Final, TypedDict, get_args, get_origin, get_type_hints
 
@@ -823,13 +824,48 @@ def legacy_resume_update(state: dict[str, Any]) -> dict[str, Any]:
 #
 # Reducers:
 #   messages           → add_messages   (deduplicates by ID, handles trim)
-#   segments           → operator.add   (parallel Send fan-out accumulation)
-#   extracted_entities → operator.add   (parallel fan-out result accumulation)
-#   relationships      → operator.add   (parallel fan-out result accumulation)
+#   segments           → merge_segments           (keyed by clause_id)
+#   extracted_entities → merge_entities           (keyed by entity_id)
+#   relationships      → merge_relationships      (keyed by edge_id)
 #   errors             → operator.add   (append-only audit log)
+#
+# The three keyed reducers exist because operator.add is not idempotent:
+# a retried or replayed Send re-appends its whole batch, so duplicates
+# accumulate with no way to converge. Keyed merge keeps insertion order,
+# updates an existing entry in place on a true replay (last-write-wins),
+# and appends only genuinely-new identities. ``errors`` stays append-only:
+# it is an audit trail where a replayed entry is an honest record, not a
+# duplicate to collapse.
 #
 # All other fields: last-write-wins (standard LangGraph default).
 # ---------------------------------------------------------------------------
+
+
+def _merge_by_key[ItemT](key: Any) -> Callable[[list[ItemT], list[ItemT]], list[ItemT]]:
+    """Build a LangGraph channel reducer that merges items by an identity key.
+
+    Insertion order is preserved; a replayed identity updates its entry in
+    place (last-write-wins) instead of appending a duplicate.
+    """
+
+    def reducer(existing: list[ItemT], incoming: list[ItemT]) -> list[ItemT]:
+        seen = {key(item): index for index, item in enumerate(existing)}
+        result = list(existing)
+        for item in incoming:
+            identity = key(item)
+            if identity in seen:
+                result[seen[identity]] = item
+            else:
+                seen[identity] = len(result)
+                result.append(item)
+        return result
+
+    return reducer
+
+
+merge_segments = _merge_by_key(lambda segment: segment.clause_id)
+merge_entities = _merge_by_key(lambda entity: entity.entity_id)
+merge_relationships = _merge_by_key(lambda relationship: relationship.edge_id)
 
 
 class LegalAgentState(TypedDict):
@@ -878,9 +914,9 @@ class LegalAgentState(TypedDict):
 
     # --- Processing pipeline outputs ---
     normalized_document: NormalizedDocument | None
-    segments: Annotated[list[ClauseSegment], operator.add]
-    extracted_entities: Annotated[list[CitedEntity], operator.add]
-    relationships: Annotated[list[LegalRelationship], operator.add]
+    segments: Annotated[list[ClauseSegment], merge_segments]
+    extracted_entities: Annotated[list[CitedEntity], merge_entities]
+    relationships: Annotated[list[LegalRelationship], merge_relationships]
 
     # --- Analysis ---
     risk_analysis: RiskAnalysisOutput | None

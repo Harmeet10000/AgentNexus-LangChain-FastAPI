@@ -701,7 +701,7 @@ class Settings(BaseSettings):
     # corpus's largest real contract (SRC-04) is 37 MB — the live corpus is the
     # measurement the harden-2.4 limit was required to be data-informed by.
     MAX_UPLOAD_SIZE: int = Field(default=10 * 1024 * 1024, gt=0, le=64 * 1024 * 1024)
-    DOCUMENT_EXTRACTION_TIMEOUT_SECONDS: float = Field(default=120.0, gt=0, le=900.0)
+    DOCUMENT_EXTRACTION_TIMEOUT_SECONDS: float = Field(default=120.0, gt=0, le=1800.0)
     DOCUMENT_EXTRACTION_MAX_PAGES: int = Field(default=250, ge=1, le=2_000)
     # Stuck-age safety net (harden 3.11): a document sitting in a non-terminal
     # ingestion status longer than this is logged at the worker boundary, so a
