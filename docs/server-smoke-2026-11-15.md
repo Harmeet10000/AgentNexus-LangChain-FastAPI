@@ -883,3 +883,175 @@ to "Expanded Sweep Tester"; principal refresh family deliberately poisoned by th
 then re-login (current principal tokens left UNREVOKED for the orchestrator). Admin sessions
 left active. Redis left in the G8 saturated state — **needs a unit restart by the
 orchestrator**. No commits, no branch switches, no source/`.env` modifications.
+
+## Remaining-endpoints sweep (2026-11-19)
+
+Fourth sweep on main @ `2a7c9f66` (one commit past `32a38be0`: the billing
+dead-create→cancelled fix, G10). All four units active at pre-flight
+(uvicorn + default + ingestion + crawler); `GET /health` 200 with all 7 deps
+healthy; the uvicorn journal NOW carries structured app output (request lines,
+SQL traces — F12c observability for the API unit materially improved since
+round 3). Identities: principal (`testing@live-measurement.dev`) + admin
+(`testing-admin@live-measurement.dev`). Evidence: curl status + jq'd bodies +
+unit journals + source reads (no edits). No commits, no branch switches, no
+source/`.env` edits, no unit restarts.
+
+**Scope note: v1 routes skipped per owner instruction (deprecated; v2 is the
+supported surface).** Mid-sweep the owner amended the scope to /api/v2 only;
+probes already run against /api/v1 before the amendment are kept below but
+marked **[v1-deprecated]**.
+
+### Untested-set enumeration (deduplication)
+
+Method: live inventory from `GET /swagger.json` (138 operations, recounted)
+minus the union of every method+path row and named sub-probe in the three
+sweep tables above, minus the excluded sets (agent_saul: 4 ops; OAuth/SSO
+authorize/callback/link/confirm/token routes: 12 ops) → **122 in-scope ops,
+105 already probed across rounds 1–3, 17 untested after deduplication**.
+
+The 17 decompose as:
+
+- **2 untested /api/v2 operations** (the real v2-coverage gap):
+  `DELETE /api/v2/auth/sessions` (revoke-all) and
+  `DELETE /api/v2/users/{user_id}`. A third candidate,
+  `POST /api/v2/crawler/crawl/{id}/cancel`, turned out to be a dedup
+  false-positive (probed in rounds 2+3).
+- **15 v1 duals** of already-probed v2 operations. 13 of them were probed
+  pre-amendment and are kept as [v1-deprecated] rows; the remaining 2
+  (`GET /api/v1/crawler/crawl/{id}/chunks/search`,
+  `POST /api/v1/profile/change-password`) were **skipped per owner
+  instruction** (their v2 equivalents were probed in rounds 1–3).
+
+Everything the brief listed as "expected untested candidates" (avatar,
+dunning config GET, credits admin surfaces, health sub-endpoints, search
+hybrid/ingest/task-status, invoices detail, plan archive, webhook GETs,
+impersonate/activate/deactivate, session revoke variants on v2) was verified
+against the live spec and found already covered by round 3 — the residue is
+exactly the set above.
+
+### Per-endpoint results
+
+| Method + path | Status | Observed behavior | Required backend piece |
+|---|---|---|---|
+| DELETE /api/v2/auth/sessions?keep_current=false | 200 | "All sessions revoked"; the calling admin token → 401 `UNAUTHORIZED` "Session expired or revoked" on the next request (revocation propagates immediately); admin re-login → 200 restores full access | Mongo session store + Redis revocation stream |
+| DELETE /api/v2/users/{user_id} (admin) | 200 | "User permanently deleted"; follow-up `GET /api/v2/users/{id}` → 404 `USER_NOT_FOUND` (hard delete, no remnant) | Postgres |
+| DELETE /api/v2/auth/sessions/{revoked-sid} (sub-probe) | 404 | typed **`SESSION_NOT_FOUND`** "Session not found" | Mongo |
+| DELETE /api/v2/auth/sessions/{bogus-oid} (sub-probe) | 404 | typed **`SESSION_NOT_FOUND`** — **the round-3 mislabel (bogus sid → `USER_NOT_FOUND`) is silently FIXED on current main** | Mongo |
+| POST /api/v2/crawler/crawl/{id}/cancel on **PENDING** job (state-variant sub-probe) | 200 | "Crawler cancellation requested"; status `pending` → **`cancelling`** and never settles to a terminal state (see H1 — worker-side finalize blocked) | Redis job store (API-side write OK) + crawler worker (finalize broken) |
+| [v1-deprecated] POST /api/v1/auth/register (fresh) | 201 | same contract as v2; unverified signup, canned message (F7 gate unchanged) | none |
+| [v1-deprecated] POST /api/v1/auth/login (principal) | 200 | bearer, `expiresIn` 900 | none |
+| [v1-deprecated] POST /api/v1/auth/refresh | 200 | rotation OK, new pair issued | none |
+| [v1-deprecated] POST /api/v1/auth/logout | 200 | "Logged out successfully"; re-presenting the logged-out refresh token → 401 `INVALID_CREDENTIALS` "Session expired or revoked" (revocation propagates) | none |
+| [v1-deprecated] POST /api/v1/auth/forgot-password | 200 | canned 200 — BUT the enqueued `auth.send_verification_email`/reset task ran for real: Resend **rejected** the example.com recipient (`email_send_failed`, status 4xx; typed `email_delivery_invalid`) and the task took the poison path `reject requeue=False` → `tasks.dlx` (see positives below) | Resend + RabbitMQ DLX |
+| [v1-deprecated] POST /api/v1/auth/resend-verification | 200 | canned 200; same real-send rejection downstream | Resend |
+| [v1-deprecated] PATCH /api/v1/users/{id}/role (admin) | 200 | role user→moderator persisted, "User role updated" | Postgres |
+| [v1-deprecated] PATCH /api/v1/users/{id}/role (role=user) | 403 | `FORBIDDEN` "Missing required permission: users:write" | none |
+| [v1-deprecated] POST /api/v1/users/{id}/impersonate (admin) | 200 | "Impersonation token issued" — `accessToken`, `expiresIn`, `impersonatingUserId` | Postgres |
+| [v1-deprecated] POST /api/v1/users/{id}/impersonate (role=user) | 403 | `FORBIDDEN` "Insufficient role for this operation" (distinct typed message from the permission denial — two correct authz layers) | none |
+| [v1-deprecated] PATCH /api/v1/users/{id}/deactivate (admin) | 200 | "User deactivated", `isActive:false` | Postgres |
+| [v1-deprecated] PATCH /api/v1/users/{id}/activate (admin) | 200 | "User activated", `isActive:true` | Postgres |
+| [v1-deprecated] GET /api/v1/auth/sessions (admin) | 200 | 14 sessions listed with sessionId/ip/ua/isCurrent (F9 fix holds) | Mongo |
+| [v1-deprecated] DELETE /api/v1/auth/sessions/{non-current sid} | 200 | "Session revoked"; re-revoke of the same sid → 404 `SESSION_NOT_FOUND` (idempotency semantics clean) | Mongo |
+| [v1-deprecated] DELETE /api/v1/auth/sessions (keep_current default TRUE) | 200 | "All other sessions revoked"; calling token stays valid (`/auth/me` 200) — the keep_current parameter works as documented | Mongo |
+| [v1-deprecated] POST /api/v1/crawler/crawl | 202 | "Crawler job accepted", `status:pending` at the API — **but the job NEVER reaches a terminal state (H1)**; task `2f6404af…` received by the crawler worker within 1 s (routing to the crawler queue is correct), capability provisioning fails closed, task retries ×5, final failure, terminal write fails, job left zombie | crawler worker + `CRAWLER_EGRESS_PROXY_URL` |
+
+Skipped per owner instruction (v1 deprecated; v2 equivalent probed in earlier
+rounds): `GET /api/v1/crawler/crawl/{crawl_id}/chunks/search`,
+`POST /api/v1/profile/change-password`.
+
+### New defects
+
+- **H1 (P1): crawler jobs can never reach a terminal state on current main —
+  one missing env var (`CRAWLER_EGRESS_PROXY_URL`) breaks BOTH the crawl
+  capability AND the terminal-failure write, leaving zombie `pending`/`cancelling`
+  jobs.** Lifecycle (journal, `agentnexus-celery-crawler`, task
+  `2f6404af-5630-4225-92f4-b9b6dbc89f2b`, crawl `288a07df…`): published →
+  received in <1 s (crawler-queue routing is CORRECT, contra hint 2) →
+  capability owner `_ensure_crawler_worker` fails with
+  `ServiceUnavailableException 503: "Crawler egress boundary is misconfigured:
+  CRAWLER_EGRESS_PROXY_URL must be configured" (capability: crawler_egress)`
+  → ResilientTask retries ×5 (backoff 2 s → 6 s; `retry_count=5`) → final
+  failure → the best-effort terminal write (`_mark_failed_sync`,
+  `src/app/worker/jobs/crawler.py:146`) ALSO dies because
+  `_create_worker_redis()` resolves the same egress policy
+  (`egress.py:319` requires the proxy URL; settings default `None` not set in
+  `.env.development`) and raises BEFORE any store call → job stays `pending`
+  forever. API-side cancel (correctly) flips it to `cancelling`, but the
+  worker-side finalize to `cancelled` is blocked by the same root cause —
+  a second zombie state. G2's crawl4ai geolocation error is GONE (fix landed);
+  this is a NEW, config-class root cause that REGRESSES the round-2/3
+  behavior ("terminal `failed`, truthful reason") to "never terminal". The
+  brief's money-path instruction applies: do NOT force; the fix is
+  `CRAWLER_EGRESS_PROXY_URL` (+ relay cert files if a relay is declared) in
+  the worker's environment, then re-probe.
+- **H2 (P2, observability): the crawler terminal-write failure swallows its
+  exception.** `crawler.py:151` logs `crawler_failure_write_failed` as a bare
+  WARNING — the structured journal record carries `exception: null`, and the
+  inner `logger.exception("Could not persist crawler failure")` never fires
+  (the raise happens in `_create_worker_redis()`, outside `_mark_terminal`'s
+  try). Root cause was recoverable only by reading source. Minor: the
+  `retry_count=5` task-failure line reads like 5 real attempts at the crawl;
+  all 5 were rejected at the egress boundary before any crawl work.
+
+### Positive / silent-fix findings (verified this sweep)
+
+- **Session-404 mislabel fixed**: bogus/revoked session DELETE now returns
+  typed `SESSION_NOT_FOUND` (round 3 saw `USER_NOT_FOUND` — G-batch fix
+  confirmed live).
+- **DLX topology now declared**: default-worker boot logs "Dead-letter
+  topology declared at worker boot | exchange='tasks.dlx'" (22:22:27 IST) —
+  round-3 G6's absent DLX is addressed at declaration level. End-to-end
+  retention (queue binding + a rejected message actually landing) is
+  unobservable from this host (Railway broker, no rabbitmqctl access) —
+  hypothesis-level only. The poison path IS exercised live: the
+  [v1-deprecated] resend probe caused `auth.send_verification_email` → Resend
+  4xx → `email_delivery_invalid` → `reject requeue=False` (the
+  `ResilientTask` poison route ran end to end).
+- **Task-time worker logging is visible for the crawler** (received/started/
+  retry/failed lines with structured task_id/crawl_id fields) — round-3 G7
+  materially improved at least on the crawler role.
+- **Revoke-all semantics are exactly as documented** (keep_current default
+  TRUE preserves the caller; FALSE kills the caller's session immediately,
+  re-login restores).
+- **Impersonation on v1 minted a correctly-scoped token**; both authz
+  negatives produce distinct typed 403s (permission-denied vs role-denied).
+
+### Counts
+
+| Metric | Count |
+|---|---|
+| Live operations (swagger recount) | 138 |
+| Excluded (owner instruction) | 16 — agent_saul (4) + OAuth/SSO (12) |
+| In-scope operations | 122 |
+| Already probed in rounds 1–3 (dedup) | 105 |
+| Untested after deduplication | 17 (2 v2 + 15 v1) |
+| Probed this sweep (untested-set members) | 15 (2 v2 + 13 v1 pre-amendment) |
+| PASS (status/envelope/state correct at the API) | 15 |
+| FAIL (backend round-trip wrong) | 1 — the crawl job zombie (H1); API-level 202/accept itself is correct |
+| BLOCKED | 0 |
+| SKIPPED per owner instruction (v1 deprecated) | 2 (v2 equivalents probed in earlier rounds) |
+| Unexpected 5xx | 0 |
+| 429s | 0 (all limiter classes paced within budget; no class exhausted) |
+| Cross-tenant/privilege leaks | 0 (both authz negatives correctly denied) |
+
+### Final coverage statement
+
+**120 of 138 live operations probed across all four rounds** (120 of the 122
+in-scope operations). Excluded per owner instruction: agent_saul router (4)
+and OAuth/SSO routes (12). Skipped per owner instruction: 2 v1-only
+operations whose v2 equivalents are probed. Every /api/v2 operation in the
+live spec except the excluded sets has now been probed at least once.
+
+### Cleanup
+
+Test data left in infra: users `sweep4-20261119@example.com` (unverified),
+`sweep4-agent@example.com` (registered → moderator → **deleted** via the
+DELETE /api/v2/users probe); crawl `288a07df…` left in zombie `cancelling`
+(terminal unreachable, H1 — do not treat as data corruption; it is the
+reproducible evidence); admin sessions: 1 non-current session revoked
+individually, 13 others revoked via keep_current=true, then a full
+keep_current=false revoke — admin was re-logged-in afterward and holds one
+fresh session; **principal tokens/sessions untouched and verified valid at
+sweep end** (`/auth/me` 200). One Resend-verification task poisoned to the
+DLX route (typed rejection, by design). No commits, no branch switches, no
+source or `.env.development` modifications, no unit restarts by the tester.
