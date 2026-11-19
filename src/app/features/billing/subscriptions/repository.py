@@ -173,7 +173,12 @@ if TYPE_CHECKING:
 
 # Requirement 4.1-4.6: allowed state transitions.
 _ALLOWED_TRANSITIONS: dict[SubscriptionStatus, set[SubscriptionStatus]] = {
-    SubscriptionStatus.CREATED: {SubscriptionStatus.AUTHENTICATED},
+    # CREATED -> CANCELLED is the dead-create local finalization: a row whose
+    # provider create returned permanent_failure has no provider binding and
+    # no money moved, so nothing can be cancelled remotely and no refund is
+    # owed. The service gates this transition on remote_sync == permanent_failure
+    # (a mere pending create must reconcile, never terminalize blind).
+    SubscriptionStatus.CREATED: {SubscriptionStatus.AUTHENTICATED, SubscriptionStatus.CANCELLED},
     SubscriptionStatus.AUTHENTICATED: {SubscriptionStatus.ACTIVE},
     SubscriptionStatus.ACTIVE: {
         SubscriptionStatus.PAST_DUE,

@@ -876,6 +876,30 @@ class SubscriptionService:
                 return refreshed
             recovered = refreshed.unwrap() or subscription
             return Success(_subscription_to_response(recovered, plan=plan_result.unwrap()))
+        if (
+            subscription.status == SubscriptionStatus.CREATED.value
+            and subscription.remote_sync == RemoteSyncState.PERMANENT_FAILURE
+            and not subscription.razorpay_subscription_id
+        ):
+            # Dead-create local finalization: the provider create permanently
+            # failed, so there is no provider binding to cancel, no money
+            # moved, and no refund is owed. Without this branch the row is
+            # unreachable by ANY transition (created -> cancelled is the only
+            # exit) and permanently blocks the user's subscription for the
+            # plan. Local-only: the coordinator's provider cancel requires a
+            # binding this row never had.
+            finalized = await self.subscriptions.update_status(
+                subscription,
+                SubscriptionStatus.CANCELLED,
+                expected_version=subscription.version,
+                extra_values={"remote_sync": RemoteSyncState.PERMANENT_FAILURE.value},
+            )
+            if isinstance(finalized, Failure):
+                return finalized
+            plan_result = await self._load_plan(subscription.plan_id)
+            if isinstance(plan_result, Failure):
+                return plan_result
+            return Success(_subscription_to_response(finalized.unwrap(), plan=plan_result.unwrap()))
         if subscription.status not in {
             SubscriptionStatus.ACTIVE.value,
             SubscriptionStatus.PAUSED.value,
