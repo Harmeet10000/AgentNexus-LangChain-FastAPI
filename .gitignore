@@ -250,3 +250,8 @@ graphify-out/
 .testing-credentials.json
 .live-ingestion-mapping.json
 .zcode/
+
+# Compiled bytecode must never be tracked — 666 .pyc files were committed
+# at some point and every run dirties the tree.
+__pycache__/
+*.pyc
