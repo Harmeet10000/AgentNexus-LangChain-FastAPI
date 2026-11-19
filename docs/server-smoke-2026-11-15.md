@@ -1150,3 +1150,26 @@ cannot dispatch on one code. Cosmetic but contract-level.
 | Unexpected 5xx | 0 |
 | New defects | H3 (P2, reconciliation no-self-heal + lost payment_url), H4 (P3, error-code inconsistency) |
 | Residue | subscription `f0547bed…` left `created`/`synced`/inert (pause requested by owner is unreachable without forcing — state machine forbids `created → paused`; recorded, not forced) |
+
+## Crawler egress resolution (2026-11-20) — H5 (P2, owner-gated infrastructure)
+
+F8/G2 status: the crawl4ai geolocation bug is gone (runtime rebuilt); the hardened crawler now
+fail-closes through FOUR validated layers, each resolved in sequence this session:
+
+1. ~~egress proxy unset~~ → local proxy.py boundary deployed (`agentnexus-egress-proxy` unit,
+   port 8899): public probe forwards (exit 49.36.192.128), loopback probe denied with the exact
+   marker body the preflight requires — both probes PASS.
+2. ~~egress env absent~~ → `CRAWLER_EGRESS_PROXY_URL` + `CRAWLER_EGRESS_PUBLIC_PROBE_URL` wired
+   in `.env.development` (the earlier edit was a silent no-op — the replace targeted a line that
+   never existed; lesson recorded).
+3. ~~Redis route~~ → BLOCKED BY DESIGN: `_validate_redis_route` requires external Redis to use
+   the fixed-destination mTLS relay; `CRAWLER_EGRESS_NO_PROXY` bypass accepts only single-label
+   service names and non-public IPs — the Redis Cloud dotted public host cannot bypass, and the
+   relay needs mTLS cert material + a single-label hostname (owner infrastructure).
+
+The crawl task now reaches the boundary validation and terminalizes truthfully
+(`failed`, "external crawler Redis requires the fixed-destination mTLS relay"). Owner options:
+(a) stand up the mTLS relay topology (relay host + certs + single-label DNS — needs sudo),
+(b) a per-role Redis URL code change so the crawler worker uses a local Redis in dev
+(design change, needs spec decision), (c) accept crawler-unavailable-in-dev (typed 503 is
+truthful; production deployment with the relay topology is unaffected).
