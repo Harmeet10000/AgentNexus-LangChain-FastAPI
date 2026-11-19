@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess  # noqa: S404 — trusted local interpreter bootstrap probe
+import sys
 from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -415,3 +417,67 @@ def test_boot_reconcile_failure_never_raises(monkeypatch: pytest.MonkeyPatch) ->
     record = records[0]
     assert record["extra"]["error_type"] == "RedisError"
     assert "redis unreachable at boot" in str(record["extra"]["error"])
+
+
+_CRAWLER_BOOT_REGISTRATION_SCRIPT = """
+import sys
+from unittest.mock import patch
+
+from celery.signals import worker_ready
+
+from app.worker.celery.app import CatalogValidatingWorker, create_worker_celery_app
+from app.worker.celery.profiles import profile_for_role
+
+profile = profile_for_role("crawler")
+app = create_worker_celery_app("crawler")
+assert "app.worker.jobs.crawler" in (app.conf.include or ()), app.conf.include
+
+# Worker construction must import the role's task modules through celery's
+# include machinery (loader.init_worker), which is where the boot reconcile
+# connects itself to worker_ready — before the consumer dispatches ready.
+worker = CatalogValidatingWorker(
+    app=app,
+    queues=[profile.queue],
+    pool=profile.pool,
+    concurrency=1,
+    hostname="crawler-recon-probe@probe",
+    loglevel="info",
+)
+assert "app.worker.jobs.crawler" in sys.modules
+
+import app.worker.jobs.crawler as crawler_jobs  # noqa: PLC0415
+
+fired: list[str] = []
+
+
+async def _stub() -> int:
+    fired.append("handler")
+    return 0
+
+
+with patch.object(crawler_jobs, "_reconcile_orphaned_cancellations", _stub):
+    worker_ready.send(sender=object())
+
+assert fired == ["handler"], "worker_ready dispatch did not reach the boot reconcile"
+print("registration-ok")
+"""
+
+
+def test_boot_reconcile_is_registered_on_crawler_worker_construction() -> None:
+    """The reconcile must ride the real bootstrap, not a direct invocation.
+
+    The 2026-11-20 hand-back: unit tests invoked the hook directly and passed
+    while the live boot was declared silent. This pins the actual chain in a
+    fresh process — the crawler role's ``include`` lists the task module,
+    constructing the role worker imports it (connecting the ``worker_ready``
+    receiver), and a ready dispatch reaches the handler.
+    """
+    result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
+        [sys.executable, "-c", _CRAWLER_BOOT_REGISTRATION_SCRIPT],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "registration-ok" in result.stdout
