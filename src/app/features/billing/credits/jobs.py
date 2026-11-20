@@ -6,8 +6,8 @@ from returns.result import Failure
 from sqlalchemy import select
 
 from app.connections.postgres import init_db
-from app.features.audit.models import AuditLog
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.module import build_audit_recorder
+from app.features.audit.public import RecordAuditEntryInput
 from app.features.billing.credits.models import UserCredit
 from app.features.billing.credits.repository import ConsumptionRepository, CreditRepository
 from app.features.billing.credits.service import CreditService
@@ -22,7 +22,7 @@ async def expire_credits_job() -> dict[str, int]:
                 session,
                 credit_repo=CreditRepository(session),
                 consumptions=ConsumptionRepository(session),
-                audit=AuditLogRepository(session),
+                audit=build_audit_recorder(session),
             )
             try:
                 count = await service.expire_credits()
@@ -42,7 +42,7 @@ async def reconcile_credits_job() -> dict[str, int]:
     try:
         async with session_local() as session:
             consumption_repo = ConsumptionRepository(session)
-            audit = AuditLogRepository(session)
+            audit = build_audit_recorder(session)
 
             statement = select(UserCredit).where(UserCredit.deleted_at.is_(None))
             result = await session.execute(statement)
@@ -78,8 +78,8 @@ async def reconcile_credits_job() -> dict[str, int]:
                     operation="credits.reconcile",
                     discrepancy_count=len(discrepancies),
                 ).error("Ledger discrepancies detected")
-                await audit.create(
-                    AuditLog(
+                await audit.record(
+                    RecordAuditEntryInput(
                         entity_type="system",
                         entity_id="credits",
                         action="credit.reconciliation_discrepancy",

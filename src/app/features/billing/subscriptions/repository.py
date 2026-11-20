@@ -13,7 +13,8 @@ from returns.result import Failure, Success
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.features.audit.models import AuditLog
+from app.features.audit.module import build_audit_recorder
+from app.features.audit.public import RecordAuditEntryInput
 from app.features.billing.providers import (
     CancelSubscriptionOperation,
     ChangeSubscriptionPlanOperation,
@@ -163,7 +164,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.selectable import Select
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.providers import ProviderError, ProviderOperation
 
     from .coordinator import LifecycleCoordinatorResult
@@ -702,11 +703,11 @@ class SqlAlchemyLifecyclePersistence(SubscriptionRepository, LifecyclePersistenc
 
     _COMMAND_KIND = "__lifecycle_command__"
 
-    def __init__(self, session: AsyncSession, *, audit: AuditLogRepository | None = None) -> None:
+    def __init__(self, session: AsyncSession, *, audit: AuditRecorder | None = None) -> None:
         super().__init__(session)
-        # Kept as an explicit dependency for the production composition root;
-        # stage writes directly with the shared session to preserve atomicity.
-        self.audit = audit
+        # The recorder is bound to this same session, so its flush participates
+        # in the lifecycle transaction and cannot commit independently.
+        self.audit = audit or build_audit_recorder(session)
 
     @override
     async def load(self, subscription_id: str) -> LifecycleCoordinatorResult[LifecycleRecord]:
@@ -930,19 +931,21 @@ class SqlAlchemyLifecyclePersistence(SubscriptionRepository, LifecyclePersistenc
                 )
             audit_payload = [_effect_payload(effect) for effect in audit_effects]
             # Audit rows are part of the same transaction as the optimistic
-            # snapshot and operation ledger.  Keep this write direct rather
-            # than going through AuditLogRepository, whose error path rolls
-            # back the whole session and would violate the savepoint rule.
+            # snapshot and operation ledger.  The session-bound recorder
+            # flushes into this transaction and never commits independently.
             audit_rows = audit_effects or (None,)
             for effect in audit_rows:
+                changes: dict[str, object]
                 if effect is None:
                     action = "subscription.lifecycle.staged"
-                    changes = {"command_idempotency_key": idempotency_key}
+                    changes = cast(
+                        "dict[str, object]", {"command_idempotency_key": idempotency_key}
+                    )
                 else:
                     action = f"subscription.lifecycle.{effect.operation}"[:64]
                     changes = _effect_payload(effect)
-                self.session.add(
-                    AuditLog(
+                audit_result = await self.audit.record(
+                    RecordAuditEntryInput(
                         entity_type="subscription",
                         entity_id=str(updated.id),
                         action=action,
@@ -954,7 +957,10 @@ class SqlAlchemyLifecyclePersistence(SubscriptionRepository, LifecyclePersistenc
                         },
                     )
                 )
-            await self.session.flush()
+                if isinstance(audit_result, Failure):
+                    return Failure(
+                        _coordinator_failure("stage", audit_result.failure().message).failure()
+                    )
             for intent in intents:
                 operation = ProviderOperationRecord(
                     subscription_id=updated.id,

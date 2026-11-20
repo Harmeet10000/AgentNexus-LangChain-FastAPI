@@ -181,7 +181,7 @@ class _InvoiceRepo:
 
 
 class _AuditRepo:
-    async def create(self, _entry: object):
+    async def record(self, _entry: object):
         return Success(None)
 
 
@@ -290,7 +290,7 @@ async def test_payment_captured_renewal_applies_credits_once_through_public_webh
         plans=SimpleNamespace(
             find_by_id=AsyncMock(return_value=Success(SimpleNamespace(id=uuid4())))
         ),
-        audit=SimpleNamespace(create=AsyncMock(return_value=Success(None))),
+        audit=SimpleNamespace(record=AsyncMock(return_value=Success(None))),
         payment_service=SimpleNamespace(
             record_payment=AsyncMock(return_value=Success(payment)),
         ),
@@ -396,7 +396,7 @@ async def test_subscription_downgrade_passes_captured_payment_invoice_as_source(
         subscriptions,  # type: ignore[arg-type]
         plans,  # type: ignore[arg-type]
         payments,  # type: ignore[arg-type]
-        SimpleNamespace(create=AsyncMock(return_value=Success(None))),  # type: ignore[arg-type]
+        SimpleNamespace(record=AsyncMock(return_value=Success(None))),  # type: ignore[arg-type]
         SimpleNamespace(),  # type: ignore[arg-type]
         coordinator,  # type: ignore[arg-type]
         credit_service,  # type: ignore[arg-type]

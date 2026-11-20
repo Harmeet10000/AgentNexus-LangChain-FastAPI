@@ -237,7 +237,7 @@ def _cancel_service(
         update_with_lock=AsyncMock(return_value=Success(subscription)),
     )
     plans = SimpleNamespace(find_by_id=AsyncMock(return_value=Success(plan)))
-    audit = SimpleNamespace(create=AsyncMock(return_value=Success(None)))
+    audit = SimpleNamespace(record=AsyncMock(return_value=Success(None)))
     return SubscriptionService(
         object(),
         subscriptions,  # type: ignore[arg-type]
@@ -588,7 +588,7 @@ async def test_cancel_receipt_mismatch_requires_manual_review_without_projection
     assert result.failure().details["manual_review"] is True
     assert result.failure().details["requires_reconciliation"] is True
     assert payments.update_status.await_count == 0
-    assert service.audit.create.await_count == 0  # type: ignore[attr-defined]
+    assert service.audit.record.await_count == 0  # type: ignore[attr-defined]
     assert subscription.remote_sync == "pending"
     assert payment.refund_amount == Decimal(0)
     assert payment.metadata_ == {}
@@ -1609,7 +1609,7 @@ async def test_reconciliation_retries_existing_payment_while_upgrade_is_pending(
     monkeypatch.setattr(
         jobs,
         "_audit_repo",
-        lambda _session: SimpleNamespace(create=AsyncMock(return_value=Success(None))),
+        lambda _session: SimpleNamespace(record=AsyncMock(return_value=Success(None))),
     )
     monkeypatch.setattr(jobs, "independent_session", _independent_session)
     monkeypatch.setattr(
@@ -1709,7 +1709,7 @@ async def test_post_capture_credit_settlement_refunds_once_and_preserves_invoice
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     service = PaymentService(
         payments=_Payments(),  # type: ignore[arg-type]
-        audit=SimpleNamespace(create=AsyncMock(return_value=Success(None))),  # type: ignore[arg-type]
+        audit=SimpleNamespace(record=AsyncMock(return_value=Success(None))),  # type: ignore[arg-type]
         lifecycle_coordinator=coordinator,  # type: ignore[arg-type]
     )
 

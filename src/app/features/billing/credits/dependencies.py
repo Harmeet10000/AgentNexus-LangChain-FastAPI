@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.connections import get_postgres_db
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.module import build_audit_recorder
 from app.features.billing.invoices.repository import InvoiceRepository
 
 from .apply import ApplyCreditsToInvoice
@@ -21,7 +21,7 @@ async def get_credit_service(
         session,
         credit_repo=CreditRepository(session),
         consumptions=ConsumptionRepository(session),
-        audit=AuditLogRepository(session),
+        audit=build_audit_recorder(session),
     )
 
 
@@ -39,7 +39,7 @@ async def get_apply_credits_operation(
         credit_repo_factory=CreditRepository,
         consumptions_factory=ConsumptionRepository,
         invoices_factory=InvoiceRepository,
-        audit_factory=AuditLogRepository,
+        audit_factory=build_audit_recorder,
     )
 
 

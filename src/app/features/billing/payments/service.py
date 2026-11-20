@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from returns.result import Failure, Success
 
-from app.features.audit.models import AuditAction, AuditLog
+from app.features.audit.public import AuditAction, RecordAuditEntryInput
 from app.features.billing.money import paisa_to_rupees
 from app.features.billing.providers import CreateRefundOperation, ProviderReceipt
 from app.observability.logging import logger, trace_layer
@@ -32,7 +32,7 @@ from .models import Payment, PaymentStatus
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.payments.repository import PaymentRepository
     from app.features.billing.subscriptions.coordinator import SubscriptionLifecycleCoordinator
     from app.features.billing.subscriptions.models import Subscription
@@ -98,7 +98,7 @@ class PaymentService:
     def __init__(
         self,
         payments: PaymentRepository,
-        audit: AuditLogRepository,
+        audit: AuditRecorder,
         *,
         lifecycle_coordinator: SubscriptionLifecycleCoordinator | None = None,
         razorpay: object | None = None,
@@ -340,8 +340,8 @@ class PaymentService:
             return result
         updated = result.unwrap()
 
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="payment",
                 entity_id=str(updated.id),
                 action=AuditAction.REFUND_ISSUED.value,
@@ -537,8 +537,8 @@ class PaymentService:
         if isinstance(update, Failure):
             return update
         updated = update.unwrap()
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="payment",
                 entity_id=str(updated.id),
                 action=AuditAction.REFUND_PROCESSED.value,
@@ -578,8 +578,8 @@ class PaymentService:
         if isinstance(update, Failure):
             return update
         updated = update.unwrap()
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="payment",
                 entity_id=str(updated.id),
                 action=AuditAction.CHARGEBACK.value,

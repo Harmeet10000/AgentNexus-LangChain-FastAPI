@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.features.audit.models import AuditAction, AuditLog
+from app.features.audit.public import AuditAction, RecordAuditEntryInput
 from app.features.billing.providers import CreatePlanOperation, ProviderPlan
 from app.features.billing.subscriptions.models import (
     ProviderOperationRecord,
@@ -32,7 +32,7 @@ from .models import Plan
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.plans.repository import PlanRepository
     from app.features.billing.subscriptions.coordinator import SubscriptionLifecycleCoordinator
 
@@ -75,7 +75,7 @@ class PlanService:
         self,
         session: AsyncSession,
         plans: PlanRepository,
-        audit: AuditLogRepository,
+        audit: AuditRecorder,
         *,
         lifecycle_coordinator: SubscriptionLifecycleCoordinator | None = None,
         razorpay: object | None = None,
@@ -271,8 +271,8 @@ class PlanService:
                 return synced
             created = synced.unwrap()
 
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="plan",
                 entity_id=str(created.id),
                 action=AuditAction.PLAN_CREATED.value,
@@ -412,8 +412,8 @@ class PlanService:
             if isinstance(updated_result, Failure):
                 return updated_result
             updated = updated_result.unwrap()
-            audit_result = await self.audit.create(
-                AuditLog(
+            audit_result = await self.audit.record(
+                RecordAuditEntryInput(
                     entity_type="plan",
                     entity_id=str(plan.id),
                     action=AuditAction.PLAN_UPDATED.value,
@@ -487,8 +487,8 @@ class PlanService:
                 return synced
             created = synced.unwrap()
 
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="plan",
                 entity_id=str(created.id),
                 action=AuditAction.PLAN_UPDATED.value,
@@ -523,8 +523,8 @@ class PlanService:
                     plan_id=plan_id,
                 )
             )
-        audit_result = await self.audit.create(
-            entry=AuditLog(
+        audit_result = await self.audit.record(
+            entry=RecordAuditEntryInput(
                 entity_type="plan",
                 entity_id=str(plan.id),
                 action=AuditAction.PLAN_ARCHIVED.value,

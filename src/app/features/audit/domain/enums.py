@@ -1,0 +1,37 @@
+"""Audit vocabulary owned by the audit domain."""
+
+from enum import StrEnum
+
+
+class AuditAction(StrEnum):
+    """Stable action names written to the append-only audit trail."""
+
+    SUBSCRIPTION_CREATED = "subscription.created"
+    SUBSCRIPTION_ACTIVATED = "subscription.activated"
+    SUBSCRIPTION_CANCELLED = "subscription.cancelled"
+    SUBSCRIPTION_HALTED = "subscription.halted"
+    PLAN_CHANGED = "plan.changed"
+    PLAN_CREATED = "plan.created"
+    PLAN_UPDATED = "plan.updated"
+    PLAN_ARCHIVED = "plan.archived"
+    PAYMENT_CAPTURED = "payment.captured"
+    PAYMENT_FAILED = "payment.failed"
+    PAYMENT_RECEIVED = "payment.received"
+    REFUND_ISSUED = "refund.issued"
+    INVOICE_GENERATED = "invoice.generated"
+    INVOICE_VOIDED = "invoice.voided"
+    INVOICE_REISSUED = "invoice.reissued"
+    TRIAL_EXTENSION_REQUESTED = "trial_extension.requested"
+    TRIAL_EXTENSION_APPROVED = "trial_extension.approved"
+    TRIAL_EXTENSION_REJECTED = "trial_extension.rejected"
+    BATCH_INVOICE_GENERATED = "batch.invoice_generated"
+    EMAIL_SENT = "email.sent"
+    REPORT_GENERATED = "report.generated"
+    RECONCILIATION_RUN = "reconciliation.run"
+    SUBSCRIPTION_AUTHENTICATED = "subscription.authenticated"
+    SUBSCRIPTION_PAUSED = "subscription.paused"
+    SUBSCRIPTION_RESUMED = "subscription.resumed"
+    REFUND_PROCESSED = "refund.processed"
+    CHARGEBACK = "payment.dispute.created"
+    WEBHOOK_REPLAYED = "webhook.replayed"
+    PLAN_VERSIONED = "plan.versioned"

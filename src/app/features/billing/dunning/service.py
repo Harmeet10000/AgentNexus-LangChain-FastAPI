@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.features.audit.models import AuditLog
+from app.features.audit.public import RecordAuditEntryInput
 from app.features.billing.providers import (
     CreatePaymentLinkOperation,
     ObserveSubscriptionOperation,
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.plans.repository import PlanRepository
     from app.features.billing.providers import BillingProvider
     from app.features.billing.subscriptions.models import Subscription as SubscriptionModel
@@ -60,7 +60,7 @@ class DunningService:
         session: AsyncSession,
         subscriptions: SubscriptionRepository,
         plans: PlanRepository,
-        audit: AuditLogRepository,
+        audit: AuditRecorder,
         provider: BillingProvider | None = None,
         lifecycle_coordinator: SubscriptionLifecycleCoordinator | None = None,
     ) -> None:
@@ -354,8 +354,8 @@ class DunningService:
             retry_count=updated.retry_count,
             next_retry_at=next_retry_at.isoformat(),
         ).info("Dunning retry executed")
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="subscription",
                 entity_id=str(updated.id),
                 action="dunning.retry",

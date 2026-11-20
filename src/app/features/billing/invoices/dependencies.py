@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connections import get_postgres_db
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.module import build_audit_recorder
 from app.features.billing.payments.repository import PaymentRepository
 from app.features.billing.plans.repository import PlanRepository
 from app.features.billing.subscriptions.repository import SubscriptionRepository
@@ -30,7 +30,7 @@ async def get_invoice_service(
         subscriptions=SubscriptionRepository(session),
         plans=PlanRepository(session),
         payments=PaymentRepository(session),
-        audit=AuditLogRepository(session),
+        audit=build_audit_recorder(session),
         storage=storage,
     )
 

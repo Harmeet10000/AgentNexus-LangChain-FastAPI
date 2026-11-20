@@ -6,7 +6,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connections import get_postgres_db
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.module import build_audit_recorder
 from app.features.billing.credits.dependencies import ApplyCreditsToInvoiceDep
 from app.features.billing.invoices.dependencies import get_invoice_service
 from app.features.billing.invoices.service import InvoiceService
@@ -36,7 +36,7 @@ async def get_webhook_service(
         webhooks=WebhookEventRepository(session),
         subscriptions=SubscriptionRepository(session),
         plans=PlanRepository(session),
-        audit=AuditLogRepository(session),
+        audit=build_audit_recorder(session),
         payment_service=payment_service,
         invoice_service=invoice_service,
         credit_apply=credit_apply,

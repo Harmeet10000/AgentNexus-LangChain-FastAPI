@@ -10,8 +10,8 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.connections.postgres import independent_session, init_db
-from app.features.audit.models import AuditAction, AuditLog
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.module import build_audit_recorder
+from app.features.audit.public import AuditAction, RecordAuditEntryInput
 from app.features.billing.dunning.service import DunningService
 from app.features.billing.invoices.receipt import PaymentReceipt
 from app.features.billing.invoices.repository import InvoiceRepository
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.providers import BillingProvider
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -74,8 +75,8 @@ def _invoice_repo(session) -> InvoiceRepository:
     return InvoiceRepository(session)
 
 
-def _audit_repo(session) -> AuditLogRepository:
-    return AuditLogRepository(session)
+def _audit_repo(session) -> AuditRecorder:
+    return build_audit_recorder(session)
 
 
 def _invoice_service(session) -> InvoiceService:
@@ -85,7 +86,7 @@ def _invoice_service(session) -> InvoiceService:
         SubscriptionRepository(session),
         PlanRepository(session),
         PaymentRepository(session),
-        AuditLogRepository(session),
+        build_audit_recorder(session),
     )
 
 
@@ -200,8 +201,8 @@ async def renewal_job(
                 error=str(exc),
             ).warning("renewal reconcile failed")
 
-    await audit.create(
-        AuditLog(
+    await audit.record(
+        RecordAuditEntryInput(
             entity_type="system",
             entity_id="billing",
             action=AuditAction.RECONCILIATION_RUN.value,
@@ -222,7 +223,7 @@ async def dunning_job(
         session,
         SubscriptionRepository(session),
         PlanRepository(session),
-        AuditLogRepository(session),
+        build_audit_recorder(session),
         provider=provider,
     )
     due_result = await service.find_due_for_retry(limit=200)
@@ -243,7 +244,7 @@ async def dunning_job(
                 item_session,
                 subscriptions=SubscriptionRepository(item_session),
                 plans=PlanRepository(item_session),
-                audit=AuditLogRepository(item_session),
+                audit=build_audit_recorder(item_session),
                 provider=provider,
             )
             updated_result = await item_service.execute_retry(subscription)
@@ -287,7 +288,7 @@ async def plan_recovery_job(
     service = PlanService(
         session,
         plans=PlanRepository(session),
-        audit=AuditLogRepository(session),
+        audit=build_audit_recorder(session),
         lifecycle_coordinator=coordinator,
     )
     result = await service.recover_pending_provider_plans()
@@ -496,7 +497,7 @@ async def reconciliation_job(  # noqa: PLR0912, PLR0914, PLR0915 — typed facts
     provider: BillingProvider | None = None,
 ) -> dict[str, int]:
     """Daily Razorpay reconciliation: fetch captured payments and align local records."""
-    service = PaymentService(PaymentRepository(session), AuditLogRepository(session))
+    service = PaymentService(PaymentRepository(session), build_audit_recorder(session))
     subscriptions = _subscription_repo(session)
     provider = provider or build_billing_provider()
     lookback_days = get_settings().BILLING_RECONCILIATION_LOOKBACK_DAYS
@@ -581,7 +582,7 @@ async def reconciliation_job(  # noqa: PLR0912, PLR0914, PLR0915 — typed facts
             except ValueError:
                 method = None
             item_service = PaymentService(
-                PaymentRepository(item_session), AuditLogRepository(item_session)
+                PaymentRepository(item_session), build_audit_recorder(item_session)
             )
             if existing_payment is None:
                 recorded = await item_service.record_payment(
@@ -628,8 +629,8 @@ async def reconciliation_job(  # noqa: PLR0912, PLR0914, PLR0915 — typed facts
                 continue
             reconciled += 1
 
-    await _audit_repo(session).create(
-        AuditLog(
+    await _audit_repo(session).record(
+        RecordAuditEntryInput(
             entity_type="system",
             entity_id="billing",
             action=AuditAction.RECONCILIATION_RUN.value,
