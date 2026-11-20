@@ -182,7 +182,7 @@ async def test_both_surfaces_agree_for_the_same_state() -> None:
 
 
 def test_the_psutil_memory_field_is_not_collided_with() -> None:
-    from app.features.health.dto import HealthChecksDTO
+    from app.features.health.application.dto.aggregate import HealthChecksDTO
 
     fields = set(HealthChecksDTO.model_fields)
     assert "memory" in fields

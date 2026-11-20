@@ -35,7 +35,7 @@ from app.features.documents.application.queries.documents import (
     _BranchInput,
     retrieve_fused,
 )
-from app.features.health.health_check import ALL_PROBES
+from app.features.health.module import build_startup_probes
 from app.lifecycle.lifespan import (
     STARTUP_POLICIES,
     StartupPolicy,
@@ -292,7 +292,10 @@ async def _demo_startup_policy() -> Result[None, str]:
     result = _check(bool(linked), "startup policies must link dependency probes")
     if isinstance(result, Failure):
         return result
-    result = _check(all(probe in ALL_PROBES for probe in linked), "linked probes must be canonical")
+    canonical_probes = build_startup_probes()
+    result = _check(
+        all(probe in canonical_probes for probe in linked), "linked probes must be canonical"
+    )
     if isinstance(result, Failure):
         return result
 

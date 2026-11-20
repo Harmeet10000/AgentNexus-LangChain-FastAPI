@@ -69,4 +69,27 @@ def get_health_service(request: Any) -> Any:
     )
 
 
+def build_startup_probes() -> tuple[Any, ...]:
+    """Return the canonical dependency inventory consulted by startup policies."""
+    from .adapters.outbound.mongodb.probe import check_mongodb
+    from .adapters.outbound.neo4j.probe import (
+        check_cognee,
+        check_graphiti,
+        check_neo4j,
+        check_neo4j_plugins,
+    )
+    from .adapters.outbound.postgres.probe import check_postgres
+    from .adapters.outbound.redis.probe import check_redis
+
+    return (
+        check_postgres,
+        check_redis,
+        check_mongodb,
+        check_neo4j,
+        check_neo4j_plugins,
+        check_graphiti,
+        check_cognee,
+    )
+
+
 MODULE = Module(name="health", routes=(_routes,))

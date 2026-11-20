@@ -24,8 +24,8 @@ from app.observability.logging import logger, setup_logging
 
 from .api import v1_router, v2_router
 from .config import get_settings
-from .features.health.build_info import resolve_git_sha
-from .features.health.router import deep_health_router
+from .features.health.adapters.inbound.http.build_info import resolve_git_sha
+from .features.health.adapters.inbound.http.router import deep_health_router
 from .lifecycle import lifespan
 from .middleware import (
     ApiDeprecationMiddleware,

@@ -52,7 +52,8 @@ from app.features.auth.application.token_audit_log import TokenAuditLog
 from app.features.auth.domain.user import User
 from app.features.billing.providers import RazorpayBillingProvider
 from app.features.documents.application.evidence.service import build_evidence_service
-from app.features.health.health_check import ALL_PROBES, check_cognee, check_graphiti
+from app.features.health.adapters.outbound.neo4j.probe import check_cognee, check_graphiti
+from app.features.health.module import build_startup_probes
 from app.lifecycle.graphs import (
     graphiti_service,
     provide_langgraph_checkpointer,
@@ -193,7 +194,7 @@ class StartupPolicy(NamedTuple):
     of boot; `degrade_on` types are reported via `report` and land
     `state_attr` on None. `probe` links the policies whose dependency maps 1:1
     to a deep-health probe to that same function object in
-    `health_check.ALL_PROBES` (the canonical dependency inventory) instead of
+    `health.module.build_startup_probes()` (the canonical inventory) instead of
     restating the name; policies with no 1:1 probe leave it None.
     """
 
@@ -528,7 +529,7 @@ STARTUP_POLICIES: tuple[StartupPolicy, ...] = (
 )
 
 _POLICY_PROBES = frozenset(policy.probe for policy in STARTUP_POLICIES if policy.probe is not None)
-if not _POLICY_PROBES.issubset(ALL_PROBES):
+if not _POLICY_PROBES.issubset(build_startup_probes()):
     msg = "STARTUP_POLICIES probes must be members of health_check.ALL_PROBES"
     raise RuntimeError(msg)
 
