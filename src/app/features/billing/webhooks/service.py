@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.features.audit.models import AuditAction, AuditLog
+from app.features.audit.public import AuditAction, RecordAuditEntryInput
 from app.features.billing.invoices.receipt import PaymentReceipt
 from app.features.billing.invoices.repository import InvoiceRepository
 from app.features.billing.payments.currency import CurrencyCode
@@ -62,7 +62,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.credits.apply import ApplyCreditsToInvoice
     from app.features.billing.invoices.service import InvoiceService
     from app.features.billing.payments.exceptions import PaymentResult
@@ -168,7 +168,7 @@ class WebhookService:
         webhooks: WebhookEventRepository,
         subscriptions: SubscriptionRepository,
         plans: PlanRepository,
-        audit: AuditLogRepository,
+        audit: AuditRecorder,
         payment_service: PaymentService,
         invoice_service: InvoiceService,
         lifecycle_coordinator: SubscriptionLifecycleCoordinator | None = None,
@@ -1407,8 +1407,8 @@ class WebhookService:
 
     async def _audit(self, entity: object, action: str) -> WebhookResult[None]:
         entity_type = type(entity).__name__.lower()
-        result = await self.audit.create(
-            AuditLog(
+        result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type=entity_type,
                 entity_id=str(getattr(entity, "id", "")),
                 action=action,

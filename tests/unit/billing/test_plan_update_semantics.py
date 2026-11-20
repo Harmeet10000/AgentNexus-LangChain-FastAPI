@@ -21,7 +21,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.features.audit.models import AuditAction
+from app.features.audit.public import AuditAction
 from app.features.billing.plans.dto import PlanUpdateDTO
 from app.features.billing.plans.models import Plan
 from app.features.billing.plans.service import PlanService
@@ -29,7 +29,7 @@ from app.features.billing.plans.service import PlanService
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.features.audit.models import AuditLog
+    from app.features.audit.public import RecordAuditEntryInput
 
 pytestmark = pytest.mark.unit
 
@@ -91,9 +91,9 @@ class _FakePlanRepository:
 
 class _FakeAuditRepository:
     def __init__(self) -> None:
-        self.entries: list[AuditLog] = []
+        self.entries: list[RecordAuditEntryInput] = []
 
-    async def create(self, entry: AuditLog, **_: Any) -> object:
+    async def record(self, entry: RecordAuditEntryInput, **_: Any) -> object:
         self.entries.append(entry)
         from returns.result import Success
 

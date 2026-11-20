@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from returns.result import Failure, Success
 
-from app.features.audit.models import AuditLog
+from app.features.audit.public import RecordAuditEntryInput
 from app.features.billing.credits.exceptions import (
     CreditAmountError,
     CreditCollaboratorError,
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.credits.repository import (
         ConsumptionRepository,
         CreditRepository,
@@ -72,7 +72,7 @@ class CreditService:
         session: AsyncSession,
         credit_repo: CreditRepository,
         consumptions: ConsumptionRepository,
-        audit: AuditLogRepository,
+        audit: AuditRecorder,
     ) -> None:
         self.session = session
         self.credit_repo = credit_repo
@@ -115,8 +115,8 @@ class CreditService:
             return result
         created = result.unwrap()
 
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="user_credit",
                 entity_id=str(created.id),
                 action="credit.granted",
@@ -269,8 +269,8 @@ class CreditService:
 
         cash_due_paisa = max(remaining_due, 0)
 
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="user_credit",
                 entity_id=user_id,
                 action="credit.consumed",
@@ -306,8 +306,8 @@ class CreditService:
         expired = result.unwrap()
 
         for credit in expired:
-            audit_result = await self.audit.create(
-                AuditLog(
+            audit_result = await self.audit.record(
+                RecordAuditEntryInput(
                     entity_type="user_credit",
                     entity_id=str(credit.id),
                     action="credit.expired",
@@ -441,8 +441,8 @@ class CreditService:
         note_result = await self.credit_repo.create_credit_note(note)
         if isinstance(note_result, Failure):
             return note_result
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="user_credit",
                 entity_id=str(credit.id),
                 action="credit.granted",

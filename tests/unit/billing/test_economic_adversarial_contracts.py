@@ -547,7 +547,7 @@ async def test_repeated_invoice_application_is_idempotent() -> None:
         lambda _session: credit_repo,  # type: ignore[arg-type]
         lambda _session: consumption_repo,  # type: ignore[arg-type]
         lambda _session: invoice_repo,  # type: ignore[arg-type]
-        lambda _session: SimpleNamespace(create=_success_none),  # type: ignore[arg-type]
+        lambda _session: SimpleNamespace(record=_success_none),  # type: ignore[arg-type]
     )
 
     first = await command.execute(invoice.id, "user-1")
@@ -583,7 +583,7 @@ async def test_downgrade_credit_requires_source_invoice_and_links_credit_note_to
         find_by_id=lambda _credit_id: _success_async(credit_rows[-1] if credit_rows else None),
         find_credit_notes_for_consumption=lambda _user_id: _success_async([]),
     )
-    audit = SimpleNamespace(create=lambda _audit: _success_none())
+    audit = SimpleNamespace(record=lambda _audit: _success_none())
     service = CreditService(session, credit_repo, SimpleNamespace(), audit)  # type: ignore[arg-type]
 
     result = await service.grant_credit_on_downgrade(
@@ -622,7 +622,7 @@ async def test_credit_note_and_user_credit_share_operation_and_amount() -> None:
         session,
         credit_repo,
         SimpleNamespace(),
-        SimpleNamespace(create=lambda _audit: _success_none()),
+        SimpleNamespace(record=lambda _audit: _success_none()),
     )  # type: ignore[arg-type]
 
     result = await service.grant_credit_on_downgrade(

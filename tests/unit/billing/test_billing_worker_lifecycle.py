@@ -109,7 +109,7 @@ async def test_renewal_provider_observation_is_forwarded_to_coordinator(
             )
         )
     )
-    audit = SimpleNamespace(create=AsyncMock())
+    audit = SimpleNamespace(record=AsyncMock())
     provider = SimpleNamespace(
         execute=AsyncMock(
             return_value=Success(

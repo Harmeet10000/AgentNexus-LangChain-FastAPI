@@ -274,7 +274,7 @@ async def test_failed_activation_replay_skips_already_active_subscription() -> N
             return_value=Success(_subscription(status=SubscriptionStatus.ACTIVE.value, version=9))
         )
     )
-    audit = AsyncMock()
+    audit = SimpleNamespace(record=AsyncMock())
     service = _webhook_service(webhooks=webhooks, subscriptions=subscriptions, audit=audit)
 
     result = await service.replay("event-row-1")
@@ -284,7 +284,7 @@ async def test_failed_activation_replay_skips_already_active_subscription() -> N
         WebhookEventStatus.PROCESSING.value,
         WebhookEventStatus.SKIPPED.value,
     ]
-    audit.create.assert_not_awaited()
+    audit.record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -302,7 +302,7 @@ async def test_webhook_audit_failure_is_reported_and_event_is_failed() -> None:
         ),
     )
     audit = SimpleNamespace(
-        create=AsyncMock(
+        record=AsyncMock(
             return_value=Failure(WebhookCollaboratorError(message="audit unavailable", details={}))
         )
     )

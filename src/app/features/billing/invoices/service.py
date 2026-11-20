@@ -9,7 +9,7 @@ from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.features.audit.models import AuditAction, AuditLog
+from app.features.audit.public import AuditAction, RecordAuditEntryInput
 from app.features.billing.money import (
     paisa_to_rupees,
     split_tax_for_gst,
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.invoices.repository import InvoiceRepository
     from app.features.billing.payments.models import Payment
     from app.features.billing.payments.repository import PaymentRepository
@@ -123,7 +123,7 @@ class InvoiceService:
         subscriptions: SubscriptionRepository,
         plans: PlanRepository,
         payments: PaymentRepository,
-        audit: AuditLogRepository,
+        audit: AuditRecorder,
         storage: StorageService | None = None,
     ) -> None:
         self.session = session
@@ -258,8 +258,8 @@ class InvoiceService:
                 return update_result
             created.pdf_url = pdf_url
 
-        audit_result = await self.audit.create(
-            AuditLog(
+        audit_result = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="invoice",
                 entity_id=str(created.id),
                 action=AuditAction.INVOICE_GENERATED.value,
@@ -450,8 +450,8 @@ class InvoiceService:
             return void_result
         voided: Invoice = void_result.unwrap()
 
-        audit_void = await self.audit.create(
-            AuditLog(
+        audit_void = await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="invoice",
                 entity_id=str(voided.id),
                 action=AuditAction.INVOICE_VOIDED.value,
@@ -490,8 +490,8 @@ class InvoiceService:
             if isinstance(reissued_result, Failure):
                 return reissued_result
             reissued = reissued_result.unwrap()
-            audit_reissue = await self.audit.create(
-                AuditLog(
+            audit_reissue = await self.audit.record(
+                RecordAuditEntryInput(
                     entity_type="invoice",
                     entity_id=str(reissued.id),
                     action=AuditAction.INVOICE_REISSUED.value,

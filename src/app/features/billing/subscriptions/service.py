@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from returns.result import Failure, Success
 
-from app.features.audit.models import AuditAction, AuditLog
+from app.features.audit.public import AuditAction, RecordAuditEntryInput
 from app.features.billing.exceptions import (
     LifecycleCoordinatorProviderError,
     LifecycleCoordinatorVersionConflictError,
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.credits.service import CreditService
     from app.features.billing.exceptions import LifecycleCoordinatorError
     from app.features.billing.payments.clients.razorpay_client import RazorpayClient
@@ -131,7 +131,7 @@ class SubscriptionService:
         subscriptions: SubscriptionRepository,
         plans: PlanRepository,
         payments: PaymentRepository,
-        audit: AuditLogRepository,
+        audit: AuditRecorder,
         payment_service: PaymentService,
         lifecycle_coordinator: SubscriptionLifecycleCoordinator,
         credit_service: CreditService | None = None,
@@ -504,8 +504,8 @@ class SubscriptionService:
                 message="Refund receipt is durable but local payment projection failed",
                 details={"manual_review": True, "provider_refund_id": receipt.provider_refund_id},
             )
-        await self.audit.create(
-            AuditLog(
+        await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="payment",
                 entity_id=str(payment.id),
                 action=AuditAction.REFUND_ISSUED.value,
@@ -757,8 +757,8 @@ class SubscriptionService:
         if refreshed.unwrap() is not None:
             created = refreshed.unwrap()
 
-        await self.audit.create(
-            AuditLog(
+        await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="subscription",
                 entity_id=str(created.id),
                 action=AuditAction.SUBSCRIPTION_CREATED.value,
@@ -958,8 +958,8 @@ class SubscriptionService:
         if isinstance(refreshed, Failure):
             return refreshed
         subscription = refreshed.unwrap() or subscription
-        await self.audit.create(
-            AuditLog(
+        await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="subscription",
                 entity_id=str(subscription.id),
                 action=AuditAction.SUBSCRIPTION_CANCELLED.value,
@@ -1020,8 +1020,8 @@ class SubscriptionService:
         if isinstance(refreshed, Failure):
             return refreshed
         subscription = refreshed.unwrap() or subscription
-        await self.audit.create(
-            AuditLog(
+        await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="subscription",
                 entity_id=str(subscription.id),
                 action="subscription.paused",
@@ -1082,8 +1082,8 @@ class SubscriptionService:
         if isinstance(refreshed, Failure):
             return refreshed
         subscription = refreshed.unwrap() or subscription
-        await self.audit.create(
-            AuditLog(
+        await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="subscription",
                 entity_id=str(subscription.id),
                 action="subscription.resumed",
@@ -1219,8 +1219,8 @@ class SubscriptionService:
         if isinstance(refreshed, Failure):
             return refreshed
         subscription = refreshed.unwrap() or subscription
-        await self.audit.create(
-            AuditLog(
+        await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="subscription",
                 entity_id=str(subscription.id),
                 action=AuditAction.PLAN_CHANGED.value,
@@ -1294,8 +1294,8 @@ class SubscriptionService:
                     operation="request_trial_extension",
                 )
             )
-        await self.audit.create(
-            AuditLog(
+        await self.audit.record(
+            RecordAuditEntryInput(
                 entity_type="subscription",
                 entity_id=str(subscription.id),
                 action=AuditAction.TRIAL_EXTENSION_REQUESTED.value,

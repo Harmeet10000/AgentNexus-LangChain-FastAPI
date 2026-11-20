@@ -9,7 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 from returns.result import Failure, Success
 
-from app.features.audit.models import AuditLog
+from app.features.audit.public import RecordAuditEntryInput
 from app.features.billing.credits.exceptions import (
     CreditAuthorizationError,
     CreditCollaboratorError,
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from app.features.audit.repository import AuditLogRepository
+    from app.features.audit.public import AuditRecorder
     from app.features.billing.credits.exceptions import CreditResult
     from app.features.billing.credits.repository import ConsumptionRepository, CreditRepository
     from app.features.billing.invoices.repository import InvoiceRepository
@@ -121,7 +121,7 @@ class ApplyCreditsToInvoice:
         credit_repo_factory: Callable[[AsyncSession], CreditRepository],
         consumptions_factory: Callable[[AsyncSession], ConsumptionRepository],
         invoices_factory: Callable[[AsyncSession], InvoiceRepository],
-        audit_factory: Callable[[AsyncSession], AuditLogRepository],
+        audit_factory: Callable[[AsyncSession], AuditRecorder],
     ) -> None:
         self._session_factory = session_factory
         self._credit_repo_factory = credit_repo_factory
@@ -612,8 +612,8 @@ class ApplyCreditsToInvoice:
         if isinstance(invoice_update, Failure):
             error = invoice_update.failure()
             return Failure(CreditCollaboratorError(message=error.message, details=error.details))
-        audit_result = await audit.create(
-            AuditLog(
+        audit_result = await audit.record(
+            RecordAuditEntryInput(
                 entity_type="invoice",
                 entity_id=str(invoice_id),
                 action="credit.consumed",

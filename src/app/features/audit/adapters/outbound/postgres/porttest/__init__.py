@@ -1,0 +1,1 @@
+"""Audit adapter contract proofs."""

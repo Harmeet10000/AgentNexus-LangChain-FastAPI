@@ -1,33 +1,17 @@
-"""Audit feature typed errors."""
+"""Compatibility imports for pre-Phase-1 audit error consumers."""
 
-from enum import StrEnum
-from typing import ClassVar, assert_never
+from .domain.errors import (
+    AuditCode,
+    AuditError,
+    AuditInfrastructureError,
+    AuditResult,
+    audit_error_to_http_status,
+)
 
-from returns.result import Result
-
-from app.kernel.errors import ErrorKind, FeatureError
-from app.kernel.result import http_status_for_kind
-
-
-class AuditCode(StrEnum):
-    DATABASE_ERROR = "AUDIT_DATABASE_ERROR"
-
-
-class AuditInfrastructureError(FeatureError):
-    kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
-    code: ClassVar[AuditCode] = AuditCode.DATABASE_ERROR
-    retryable: ClassVar[bool] = False
-
-    operation: str
-
-
-type AuditError = AuditInfrastructureError
-type AuditResult[T] = Result[T, AuditError]
-
-
-def audit_error_to_http_status(error: AuditError) -> int:
-    match error:
-        case AuditInfrastructureError():
-            return http_status_for_kind(error.kind, retryable=error.retryable)
-        case _ as unreachable:
-            assert_never(unreachable)
+__all__ = [
+    "AuditCode",
+    "AuditError",
+    "AuditInfrastructureError",
+    "AuditResult",
+    "audit_error_to_http_status",
+]

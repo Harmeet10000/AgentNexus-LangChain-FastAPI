@@ -72,7 +72,7 @@ class _FakeAudit:
     def __init__(self) -> None:
         self.create_calls = 0
 
-    async def create(self, entry: object) -> Any:
+    async def record(self, entry: object) -> Any:
         self.create_calls += 1
         return Success(entry)
 

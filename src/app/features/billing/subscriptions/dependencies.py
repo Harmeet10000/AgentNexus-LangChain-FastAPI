@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connections import get_postgres_db
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.module import build_audit_recorder
 from app.features.billing.credits.dependencies import get_credit_service
 from app.features.billing.credits.service import CreditService
 from app.features.billing.payments.dependencies import get_payment_service
@@ -42,7 +42,7 @@ async def get_subscription_service(
     provider: Annotated[BillingProvider, Depends(get_billing_provider)],
     credit_service: Annotated[CreditService, Depends(get_credit_service)],
 ) -> SubscriptionService:
-    audit = AuditLogRepository(session)
+    audit = build_audit_recorder(session)
     lifecycle_persistence = SqlAlchemyLifecyclePersistence(session, audit=audit)
     return SubscriptionService(
         session,

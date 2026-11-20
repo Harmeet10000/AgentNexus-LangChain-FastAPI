@@ -6,7 +6,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connections import get_postgres_db
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.module import build_audit_recorder
 from app.features.billing.plans.repository import PlanRepository
 from app.features.billing.providers import BillingProvider
 from app.features.billing.providers.dependencies import get_lifespan_billing_provider
@@ -30,7 +30,7 @@ async def get_dunning_service(
         session,
         subscriptions=SubscriptionRepository(session),
         plans=PlanRepository(session),
-        audit=AuditLogRepository(session),
+        audit=build_audit_recorder(session),
         provider=provider,
         lifecycle_coordinator=coordinator,
     )
