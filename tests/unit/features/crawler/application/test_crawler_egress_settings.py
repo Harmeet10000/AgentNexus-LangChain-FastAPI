@@ -32,7 +32,7 @@ _VALID: dict[str, object] = {
 
 def _settings(**overrides: object) -> Settings:
     values = {**_VALID, **overrides}
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 def test_valid_configuration_loads_the_resolved_policy() -> None:
