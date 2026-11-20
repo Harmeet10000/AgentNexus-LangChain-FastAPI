@@ -13,6 +13,7 @@ on.
 from __future__ import annotations
 
 import asyncio
+import importlib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -21,7 +22,6 @@ import pytest
 from app.config import Settings
 from app.utils import ServiceUnavailableException
 from app.worker.capabilities.owner import CapabilityUsageError
-from app.worker.jobs import crawler as crawler_jobs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -41,6 +41,11 @@ def _run_at_task_boundary(
     asyncio.run(_invoke())
 
 
+def _current_crawler_jobs():
+    """Return the module instance left by worker-isolation reload tests."""
+    return importlib.import_module("app.worker.jobs.crawler")
+
+
 def test_crawl_job_hands_the_boundary_provisioned_browser_into_the_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -51,9 +56,10 @@ def test_crawl_job_hands_the_boundary_provisioned_browser_into_the_job(
     boundary; the coroutine receives the browser and never touches the owner's
     sync interface.
     """
+    jobs = _current_crawler_jobs()
     resources = SimpleNamespace(browser=object())
-    monkeypatch.setattr(crawler_jobs, "get_crawler_worker_resources", lambda: resources)
-    monkeypatch.setattr(crawler_jobs, "run_on_crawler_worker_loop", _run_at_task_boundary)
+    monkeypatch.setattr(jobs, "get_crawler_worker_resources", lambda: resources)
+    monkeypatch.setattr(jobs, "run_on_crawler_worker_loop", _run_at_task_boundary)
 
     seen: dict[str, Any] = {}
 
@@ -68,12 +74,12 @@ def test_crawl_job_hands_the_boundary_provisioned_browser_into_the_job(
         seen["final_attempt"] = final_attempt
         seen["browser"] = browser
 
-    monkeypatch.setattr(crawler_jobs, "_run_crawl_job", _stub)
+    monkeypatch.setattr(jobs, "_run_crawl_job", _stub)
 
     # `crawl_job` is a bound Celery task (PromiseProxy) with autoretry wrapping;
     # `_orig_run` is the underlying bound function. Outside a task context
     # `self.request.retries` defaults to 0, so `final_attempt` is False.
-    result = crawler_jobs.crawl_job._orig_run(
+    result = jobs.crawl_job._orig_run(
         crawl_id="crawl-f8",
         request_payload={"url": "https://example.com"},
     )
@@ -104,22 +110,23 @@ def test_terminal_preflight_failure_marks_the_job_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A provisioning failure on the last retry must not strand PENDING state."""
+    jobs = _current_crawler_jobs()
     settings = Settings(CELERY_RETRY_MAX_RETRIES=0)
     recorded: list[tuple[str, str]] = []
 
     def unavailable() -> None:
         raise ServiceUnavailableException(detail="crawler egress unavailable")
 
-    monkeypatch.setattr(crawler_jobs, "get_settings", lambda: settings)
-    monkeypatch.setattr(crawler_jobs, "get_crawler_worker_resources", unavailable)
+    monkeypatch.setattr(jobs, "get_settings", lambda: settings)
+    monkeypatch.setattr(jobs, "get_crawler_worker_resources", unavailable)
     monkeypatch.setattr(
-        crawler_jobs,
+        jobs,
         "_mark_failed_sync",
         lambda crawl_id, message: recorded.append((crawl_id, message)),
     )
 
     with pytest.raises(ServiceUnavailableException):
-        crawler_jobs.crawl_job._orig_run(
+        jobs.crawl_job._orig_run(
             crawl_id="crawl-preflight-failure",
             request_payload={"url": "https://example.com"},
         )
