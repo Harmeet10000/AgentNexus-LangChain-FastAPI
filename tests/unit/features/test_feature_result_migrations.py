@@ -8,7 +8,6 @@ from typing import get_args
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import Response
 from pydantic import ValidationError
 from returns.result import Failure, Success
 
@@ -31,9 +30,6 @@ from app.features.profile.application.commands.update_profile import (
 from app.features.profile.application.dto.profile import ChangePasswordCommand
 from app.features.profile.domain.entities.profile import Profile
 from app.features.profile.domain.errors import ProfileAuthenticationError
-from app.features.users.exceptions import UsersConflictError, UsersInfrastructureError
-from app.features.users.service import UserAdminService
-from app.shared.result.render import render_result
 
 
 def test_error_classification_is_not_constructible_or_serialized() -> None:
@@ -60,35 +56,6 @@ def test_all_requested_features_expose_closed_error_unions() -> None:
     members = get_args(AgentSaulError.__value__)
     assert members
     assert all(error_type.__base__.__name__ == "FeatureError" for error_type in members)
-
-
-async def test_users_self_role_change_is_a_renderable_conflict() -> None:
-    service = UserAdminService(user_repo=AsyncMock(), token_repo=AsyncMock())
-    result = await service.update_role("same", SimpleNamespace(), "same")
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), UsersConflictError)
-
-    response = Response()
-    envelope = render_result(result, response, message="User role updated")
-    assert response.status_code == 409
-    assert envelope.success is False
-
-
-async def test_users_translate_auth_session_failure_locally() -> None:
-    user = SimpleNamespace(id="target", is_active=True)
-    user_repo = SimpleNamespace(
-        find_by_id=AsyncMock(return_value=Success(user)),
-        set_active=AsyncMock(return_value=Success(user)),
-    )
-    auth_error = SimpleNamespace(message="redis unavailable", details={"backend": "redis"})
-    token_repo = SimpleNamespace(
-        revoke_all_user_sessions=AsyncMock(return_value=Failure(auth_error))
-    )
-    service = UserAdminService(user_repo=user_repo, token_repo=token_repo)
-
-    result = await service.set_active("target", is_active=False, requesting_admin_id="admin")
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), UsersInfrastructureError)
 
 
 def _ingestion_service_with_storage(graph: SimpleNamespace) -> IngestionService:

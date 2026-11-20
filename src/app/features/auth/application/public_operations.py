@@ -57,6 +57,7 @@ class _Account(Protocol):
     role_revision: int
     legal_roles: object
     permissions: object
+    oauth_providers: object
 
 
 class AccountReader(Protocol):
@@ -177,7 +178,7 @@ def _account_read(account: _Account) -> AccountRead:
         id=str(account.id),
         email=account.email,
         display_name=account.full_name,
-        avatar_url=account.avatar_url,
+        avatar_url=getattr(account, "avatar_url", None),
         locale=getattr(account, "locale", None),
         role=_role_value(account.role),
         is_verified=account.is_verified,
@@ -187,6 +188,9 @@ def _account_read(account: _Account) -> AccountRead:
         permissions=frozenset(_string_values(permissions)),
         legal_roles=_string_values(getattr(account, "legal_roles", ())),
         role_revision=max(0, int(getattr(account, "role_revision", 0))),
+        oauth_providers=tuple(
+            str(provider) for provider in getattr(account, "oauth_providers", ())
+        ),
     )
 
 
@@ -354,12 +358,19 @@ async def revoke_all_sessions(
 ) -> AuthResult[SessionRevocation]:
     """Revoke all sessions for an account, optionally retaining one session."""
 
-    revoked = await session_port.revoke_all_user_sessions(
-        user_id=account_id,
-        except_session_id=except_session_id,
-        reason=reason,
-        authz_revision=authz_revision,
-    )
+    if except_session_id is None:
+        revoked = await session_port.revoke_all_user_sessions(
+            user_id=account_id,
+            reason=reason,
+            authz_revision=authz_revision,
+        )
+    else:
+        revoked = await session_port.revoke_all_user_sessions(
+            user_id=account_id,
+            except_session_id=except_session_id,
+            reason=reason,
+            authz_revision=authz_revision,
+        )
     if isinstance(revoked, Failure):
         return Failure(revoked.failure())
     return Success(SessionRevocation(session_ids=tuple(revoked.unwrap())))

@@ -10,6 +10,9 @@ from app.features.agent_saul.domain.errors import (
     agent_saul_error_to_http_status,
 )
 from app.features.auth.domain.errors import (
+    AuthAdminAuthorizationError,
+    AuthAdminConflictError,
+    AuthAdminInfrastructureError,
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
@@ -72,18 +75,14 @@ from app.features.profile.domain.errors import (
     ProfileStorageError,
     profile_error_to_http_status,
 )
-from app.features.users.exceptions import (
-    UsersAuthorizationError,
-    UsersConflictError,
-    UsersInfrastructureError,
-    UsersNotFoundError,
-    UsersValidationError,
-    users_error_to_http_status,
-)
 from app.kernel.errors import FeatureError
 
 type Classifier = Callable[[object], int]
-_USER_OPERATION_ERRORS = {UsersConflictError, UsersAuthorizationError, UsersInfrastructureError}
+_AUTH_ADMIN_OPERATION_ERRORS = {
+    AuthAdminConflictError,
+    AuthAdminAuthorizationError,
+    AuthAdminInfrastructureError,
+}
 _PROFILE_OPERATION_ERRORS = {ProfileConflictError, ProfileInfrastructureError}
 
 
@@ -123,23 +122,6 @@ def _error(error_type: type[FeatureError], **fields: object) -> FeatureError:
                     DocumentEmbeddingWidthError,
                     DocumentGraphWriteError,
                 ]
-            ],
-        ),
-        (
-            users_error_to_http_status,
-            [
-                _error(error_type, user_id="u")
-                if error_type is UsersNotFoundError
-                else _error(error_type, operation="test")
-                if error_type in _USER_OPERATION_ERRORS
-                else _error(error_type)
-                for error_type in (
-                    UsersValidationError,
-                    UsersNotFoundError,
-                    UsersConflictError,
-                    UsersAuthorizationError,
-                    UsersInfrastructureError,
-                )
             ],
         ),
         (

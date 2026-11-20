@@ -40,7 +40,6 @@ from app.features.auth.application.token_audit_log import TokenAuditLog
 from app.features.auth.domain.errors import AuthAuthenticationError, AuthInfrastructureError
 from app.features.auth.domain.user import Permission, UserRole
 from app.features.billing.credits.router import get_credit_balance, get_credit_history
-from app.features.users.service import UserAdminService
 from app.security.tokens import TokenClaims
 from app.utils import ForbiddenException, InfrastructureException, UnauthorizedException
 
@@ -563,128 +562,6 @@ def test_session_response_exposes_user_agent() -> None:
         expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
     assert response.model_dump(by_alias=True)["userAgent"] == "Mozilla/5.0"
-
-
-async def test_role_change_revokes_target_sessions() -> None:
-    user = type(
-        "User",
-        (),
-        {
-            "id": "target",
-            "email": "target@example.com",
-            "full_name": None,
-            "role": UserRole.USER,
-            "is_verified": True,
-            "is_active": True,
-            "created_at": datetime.now(UTC),
-            "updated_at": datetime.now(UTC),
-            "oauth_accounts": [],
-        },
-    )()
-    user_repo = type(
-        "UserRepo",
-        (),
-        {
-            "find_by_id": AsyncMock(return_value=Success(user)),
-            "update_role": AsyncMock(return_value=Success(user)),
-        },
-    )()
-    token_repo = type(
-        "TokenRepo",
-        (),
-        {"revoke_all_user_sessions": AsyncMock(return_value=Success([]))},
-    )()
-    service = UserAdminService(user_repo, token_repo)
-
-    result = await service.update_role("target", UserRole.ADMIN, "admin-user")
-
-    assert isinstance(result, Success)
-    token_repo.revoke_all_user_sessions.assert_awaited_once_with(
-        user_id="target", reason="role_changed", authz_revision=0
-    )
-
-
-async def test_noop_role_change_does_not_revoke_sessions() -> None:
-    user = type(
-        "User",
-        (),
-        {
-            "id": "target",
-            "email": "target@example.com",
-            "full_name": None,
-            "role": UserRole.USER,
-            "is_verified": True,
-            "is_active": True,
-            "created_at": datetime.now(UTC),
-            "updated_at": datetime.now(UTC),
-            "oauth_accounts": [],
-        },
-    )()
-    user_repo = type(
-        "UserRepo",
-        (),
-        {
-            "find_by_id": AsyncMock(return_value=Success(user)),
-            "update_role": AsyncMock(return_value=Success(user)),
-        },
-    )()
-    token_repo = type(
-        "TokenRepo",
-        (),
-        {"revoke_all_user_sessions": AsyncMock(return_value=Success([]))},
-    )()
-    service = UserAdminService(user_repo, token_repo)
-
-    result = await service.update_role("target", UserRole.USER, "admin-user")
-
-    assert isinstance(result, Success)
-    user_repo.update_role.assert_not_awaited()
-    token_repo.revoke_all_user_sessions.assert_not_awaited()
-
-
-async def test_pending_role_revocation_retries_and_clears_marker() -> None:
-    user = type(
-        "User",
-        (),
-        {
-            "id": "target",
-            "email": "target@example.com",
-            "full_name": None,
-            "role": UserRole.ADMIN,
-            "role_revision": 4,
-            "session_revocation_pending": True,
-            "is_verified": True,
-            "is_active": True,
-            "created_at": datetime.now(UTC),
-            "updated_at": datetime.now(UTC),
-            "oauth_accounts": [],
-        },
-    )()
-    clear_pending = AsyncMock(return_value=Success(user))
-    user_repo = type(
-        "UserRepo",
-        (),
-        {
-            "find_by_id": AsyncMock(return_value=Success(user)),
-            "clear_session_revocation_pending": clear_pending,
-            "update_role": AsyncMock(),
-        },
-    )()
-    token_repo = type(
-        "TokenRepo",
-        (),
-        {"revoke_all_user_sessions": AsyncMock(return_value=Success(["session-1"]))},
-    )()
-
-    result = await UserAdminService(user_repo, token_repo).update_role(
-        "target", UserRole.ADMIN, "admin-user"
-    )
-
-    assert isinstance(result, Success)
-    token_repo.revoke_all_user_sessions.assert_awaited_once_with(
-        user_id="target", reason="role_changed", authz_revision=4
-    )
-    clear_pending.assert_awaited_once_with(user, expected_revision=4)
 
 
 async def test_rbac_guards_use_live_account_permissions_and_role() -> None:

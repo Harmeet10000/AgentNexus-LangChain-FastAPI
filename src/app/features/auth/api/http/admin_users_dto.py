@@ -1,3 +1,5 @@
+"""HTTP DTOs for the auth administrative account projection."""
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -6,8 +8,6 @@ from app.features.auth.domain.user import UserRole
 
 
 class PaginatedData[T](BaseModel):
-    """Generic pagination envelope — promoted to shared if used outside users feature."""
-
     model_config = ConfigDict(frozen=True, populate_by_name=True, serialize_by_alias=True)
 
     items: list[T]
@@ -47,3 +47,11 @@ class ImpersonateResponse(BaseModel):
     token_type: str = Field(default="bearer", serialization_alias="tokenType")
     expires_in: int = Field(serialization_alias="expiresIn")
     impersonating_user_id: str = Field(serialization_alias="impersonatingUserId")
+
+
+__all__ = [
+    "ImpersonateResponse",
+    "PaginatedData",
+    "UpdateUserRoleRequest",
+    "UserAdminResponse",
+]

@@ -23,9 +23,9 @@ from returns.result import Failure
 
 from app.connections.mongodb import close_mongo_client, create_mongo_client
 from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.admin_accounts import AdminAccountRepository
 from app.features.auth.application.token_audit_log import TokenAuditLog
 from app.features.auth.domain.user import User
-from app.features.users.repository import UserAdminRepository
 from app.kernel.models import ConfigModel, StrictModel
 from app.observability.logging import logger
 
@@ -38,7 +38,6 @@ if TYPE_CHECKING:
 
     from app.config import Settings
     from app.features.auth.domain.errors import AuthError
-    from app.features.users.exceptions import UsersError
 
 
 class _UserLike(Protocol):
@@ -49,7 +48,7 @@ class _UserLike(Protocol):
     session_revocation_pending_at: datetime | None
 
 
-type UserResult = Result[_UserLike, AuthError | UsersError]
+type UserResult = Result[_UserLike, AuthError]
 type ListUsers = Callable[[int, int], Awaitable[list[_UserLike]]]
 type GetUser = Callable[[str], Awaitable[_UserLike | None]]
 type RevokeSessions = Callable[[str, int], Awaitable[UserResult]]
@@ -562,7 +561,7 @@ class PendingRevocationReconciler:
         self,
         retry_key: str,
         state: RetryState,
-        error: AuthError | UsersError,
+        error: AuthError,
         *,
         lease_key: str,
         lease_token: str,
@@ -734,7 +733,7 @@ async def build_production_reconciler(
     async def clear(user: _UserLike, revision: int) -> UserResult:
         return cast(
             "UserResult",
-            await UserAdminRepository.clear_session_revocation_pending(
+            await AdminAccountRepository.clear_session_revocation_pending(
                 cast("User", user), expected_revision=revision
             ),
         )

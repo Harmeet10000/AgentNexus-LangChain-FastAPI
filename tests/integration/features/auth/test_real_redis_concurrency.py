@@ -39,16 +39,19 @@ from app.features.auth.application.revocation.pending import (
     PendingRevocationConfig,
     PendingRevocationReconciler,
 )
+from app.features.auth.application.commands.admin_accounts import AdminAccounts
 from app.features.auth.application.revocation.websocket import (
     REVOCATION_STREAM_KEY,
     new_event,
     publish_event,
     publish_user_revocation_events,
 )
-from app.features.auth.domain.errors import AuthAuthenticationError, AuthInfrastructureError
+from app.features.auth.domain.errors import (
+    AuthAdminInfrastructureError,
+    AuthAuthenticationError,
+    AuthInfrastructureError,
+)
 from app.features.auth.domain.user import UserRole
-from app.features.users.exceptions import UsersInfrastructureError
-from app.features.users.service import UserAdminService
 from app.security.tokens import TokenClaims, derive_refresh_token_material
 from app.utils import UnauthorizedException
 
@@ -826,16 +829,16 @@ async def test_pending_marker_survives_redis_outage_and_clears_after_recovery(
         retry_on_timeout=False,
     )
     try:
-        failed_service = UserAdminService(UserRepo(), RefreshTokenRepository(refused))
+        failed_service = AdminAccounts(UserRepo(), RefreshTokenRepository(refused))
         failed = await failed_service.update_role(user_id, UserRole.MODERATOR, "admin-id")
     finally:
         await refused.aclose()
     assert isinstance(failed, Failure)
-    assert isinstance(failed.failure(), UsersInfrastructureError)
+    assert isinstance(failed.failure(), AuthAdminInfrastructureError)
     assert failed.failure().retryable is True
     assert user.session_revocation_pending is True
 
-    recovered_service = UserAdminService(UserRepo(), recovered_store)
+    recovered_service = AdminAccounts(UserRepo(), recovered_store)
     recovered = await recovered_service.update_role(user_id, UserRole.MODERATOR, "admin-id")
     assert isinstance(recovered, Success)
     assert user.session_revocation_pending is False

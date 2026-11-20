@@ -30,6 +30,7 @@ class AccountRead(BaseModel):
     permissions: frozenset[str] = frozenset()
     legal_roles: tuple[str, ...] = ()
     role_revision: int = Field(default=0, ge=0)
+    oauth_providers: tuple[str, ...] = ()
 
 
 class ProfileMutation(BaseModel):

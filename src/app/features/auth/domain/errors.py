@@ -1,7 +1,7 @@
 """Authentication feature typed errors."""
 
 from enum import StrEnum
-from typing import ClassVar, assert_never, cast
+from typing import ClassVar, assert_never, cast, override
 
 from pydantic import model_validator
 from returns.result import Result
@@ -22,6 +22,12 @@ class AuthCode(StrEnum):
     # Correct credentials for an account whose authoritative SQL tenant/membership
     # does not exist yet.  Retryable by design: never report invalid credentials.
     ACCOUNT_PROVISIONING_PENDING = "ACCOUNT_PROVISIONING_PENDING"
+    # Administrative account projection codes are retained verbatim while the
+    # old users bounded context is folded into auth.
+    SELF_ROLE_CHANGE = "SELF_ROLE_CHANGE"
+    IMPERSONATION_FORBIDDEN = "IMPERSONATION_FORBIDDEN"
+    USERS_PERSISTENCE_ERROR = "USERS_PERSISTENCE_ERROR"
+    SESSION_REVOCATION_ERROR = "SESSION_REVOCATION_ERROR"
 
 
 class AuthValidationError(FeatureError):
@@ -112,6 +118,34 @@ class AuthProvisioningPendingError(FeatureError):
     retryable: ClassVar[bool] = True
 
 
+class AuthAdminConflictError(AuthConflictError):
+    """An administrator attempted a forbidden self-mutation."""
+
+    code: ClassVar[AuthCode] = AuthCode.SELF_ROLE_CHANGE
+    operation: str | None = None
+
+
+class AuthAdminAuthorizationError(AuthAuthorizationError):
+    """An administrator attempted an invalid impersonation."""
+
+    code: ClassVar[AuthCode] = AuthCode.IMPERSONATION_FORBIDDEN
+    operation: str | None = None
+
+
+class AuthAdminInfrastructureError(AuthInfrastructureError):
+    """An administrative account or session operation could not complete."""
+
+    code: ClassVar[AuthCode] = AuthCode.USERS_PERSISTENCE_ERROR
+    operation: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    @override
+    def _sanitize_details(cls, value: object) -> object:
+        """Retain the legacy users projection's diagnostic payload exactly."""
+        return value
+
+
 type AuthError = (
     AuthValidationError
     | AuthNotFoundError
@@ -122,6 +156,9 @@ type AuthError = (
     | AuthAuthorizationError
     | AuthInfrastructureError
     | AuthProvisioningPendingError
+    | AuthAdminConflictError
+    | AuthAdminAuthorizationError
+    | AuthAdminInfrastructureError
 )
 type AuthResult[T] = Result[T, AuthError]
 
