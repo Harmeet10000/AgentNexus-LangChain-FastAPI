@@ -348,7 +348,7 @@ forbidden_modules = ["app.features", "app.worker", "app.connections"]
 | Agent | Owns (exclusive) | Wave |
 |---|---|---|
 | **L5 — integration owner** | `src/app/api/**`, `src/app/main.py`, `src/app/server.py`, `src/app/entrypoints/**`, `src/app/lifecycle/**`, `src/app/lifespan/**`, `src/database/**` (registry + seeders), `src/alembic/env.py`, `tests/conftest.py`, `tests/integration/conftest.py`, root/integration/deployment/property tests, `pyproject.toml`, `.ast-grep/**`, `src/app/shared/module.py`, `src/app/shared/jobs/catalog.py`, `src/app/worker/celery/{app,cli,signals,task,observability,registration,schedules,profiles,completeness}.py`, `src/app/worker/{jobs,operations,capabilities}/**` **except auth-owned files**, cross-slice rewiring, Phase 0 | 1 + serial landing |
-| **L1 — audit** | `src/app/features/audit/**`, `tests/unit/features/audit/**` | 1 |
+| **L1 — audit** | `src/app/features/audit/**`, `src/app/features/billing/**` (audit imports + recorder injection only), `tests/unit/features/audit/**` | 1 |
 | **L2 — health** | `src/app/features/health/**`, `tests/unit/features/health/**` | 1 |
 | **L3 — auth seam** | `src/app/features/auth/{public.py,application/**,domain/**}`, `tests/unit/features/auth/**` | 1 |
 | **L4 — profile structure** | `src/app/features/profile/**`, `tests/unit/features/profile/**` | 1 |
