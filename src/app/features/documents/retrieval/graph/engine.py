@@ -54,12 +54,19 @@ class RetrievalEngine:
         self._grader = grader
         self._reranker = reranker
         # Compile once, at provisioning time — never per request.
-        self.graph: CompiledStateGraph[Any] = build_retrieval_graph()
+        self.graph: CompiledStateGraph[Any, RetrievalGraphContext] = (
+            build_retrieval_graph()
+        )
 
     @asynccontextmanager
     async def invocation(
         self,
-    ) -> AsyncIterator[tuple[CompiledStateGraph[Any], RetrievalGraphContext]]:
+    ) -> AsyncIterator[
+        tuple[
+            CompiledStateGraph[Any, RetrievalGraphContext],
+            RetrievalGraphContext,
+        ]
+    ]:
         """One graph invocation's compiled graph and request-scoped context."""
         # Local import (noqa: PLC0415): the engine composes the persistence
         # adapter at invocation time, keeping the graph package free of it.

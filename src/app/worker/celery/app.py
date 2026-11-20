@@ -7,7 +7,7 @@ imports never load task modules.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, cast, override
 
 from celery.apps.beat import Beat
 from celery.apps.worker import Worker
@@ -25,6 +25,8 @@ from app.worker.celery.schedules import BEAT_SCHEDULE
 from app.worker.celery.task import ResilientTask
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from celery import Celery
 
     from app.worker.celery.profiles import WorkerRole

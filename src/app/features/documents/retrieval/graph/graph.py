@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from typing import Any
 
 
-def build_retrieval_graph() -> CompiledStateGraph[Any]:
+def build_retrieval_graph() -> CompiledStateGraph[Any, RetrievalGraphContext]:
     """Build the process-scoped retrieval graph over unified chunks.
 
     There is deliberately no ``embedding_fn`` parameter. It was annotated ``Any``, which erased

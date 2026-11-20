@@ -460,6 +460,12 @@ def make_source_identifier_node() -> Callable[[RetrievalState, Any], Awaitable[d
     ) -> dict[str, object]:
         context = _invocation_context(runtime)
         document_class = _state_document_class(state)
+        repo = context.repo
+        if repo is None:
+            return {
+                "query_plan": state["query_plan"],
+                **_stage_usage(STAGE_SOURCE_IDENTIFIER, 0),
+            }
         refusals = _charge_stage(context, STAGE_SOURCE_IDENTIFIER, document_class)
         if refusals:
             return {
@@ -473,7 +479,7 @@ def make_source_identifier_node() -> Callable[[RetrievalState, Any], Awaitable[d
             result = await _identify_sources(
                 state,
                 _structured(context.llm, SourceCriteria),
-                context.repo,
+                repo,
                 context=context,
                 document_class=document_class,
             )

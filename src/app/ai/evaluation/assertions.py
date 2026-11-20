@@ -28,10 +28,13 @@ import json
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import aiofiles
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from typing import Any
 
 ASSERTIONS_VERSION = "metric_assertions_v1"
 

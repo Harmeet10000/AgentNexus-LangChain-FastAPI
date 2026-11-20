@@ -242,8 +242,8 @@ class IngestionService:
             )
         )
 
+    @staticmethod
     async def _store_raw_bytes(
-        self,
         *,
         object_store: StorageService,
         raw_bytes: bytes,
