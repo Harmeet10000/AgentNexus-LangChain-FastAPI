@@ -9,7 +9,7 @@ naming itself.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from returns.result import Failure, Success
@@ -23,6 +23,8 @@ from app.features.documents.ingestion.workflow import DocumentIngestionState
 from app.utils.storage import StorageValidationError
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from app.utils.storage import StorageService
 
 pytestmark = pytest.mark.unit
@@ -89,7 +91,8 @@ async def test_the_legacy_path_places_every_key_and_none_are_undeclared() -> Non
     assert graph.state["tenant_id"] == "personal:user-1"
     assert graph.state["object_uri"] == store.uri
     assert "raw_bytes" not in graph.state
-    assert store.calls and store.calls[0]["data"] == b"clause text"
+    assert store.calls
+    assert store.calls[0]["data"] == b"clause text"
     assert graph.config is not None
     assert set(graph.config["configurable"]) == {"thread_id", "source", "jurisdiction"}
 

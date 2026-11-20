@@ -13,19 +13,22 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING
 
-import pytest
-from returns.result import Failure, Success
+from returns.result import Success
 
 from app.features.billing.subscriptions import service as subscription_service_module
-from app.features.billing.subscriptions.service import SubscriptionService
 from app.features.billing.subscriptions.dto import SubscriptionCancelDTO
 from app.features.billing.subscriptions.exceptions import (
     SubscriptionInvalidTransitionError,
 )
-from app.features.billing.subscriptions.lifecycle import RemoteSyncState
 from app.features.billing.subscriptions.models import Subscription
+from app.features.billing.subscriptions.service import SubscriptionService
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    import pytest
 
 PLAN_ID = "00000000-0000-0000-0000-00000000000c"
 
@@ -70,7 +73,7 @@ def _make_service(
     monkeypatch.setattr(
         subscription_service_module,
         "_subscription_to_response",
-        lambda *args, **kwargs: SimpleNamespace(
+        lambda *_args, **_kwargs: SimpleNamespace(
             status=finalized.status, remote_sync=finalized.remote_sync
         ),
     )

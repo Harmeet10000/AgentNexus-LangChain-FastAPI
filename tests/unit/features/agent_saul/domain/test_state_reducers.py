@@ -10,18 +10,20 @@ entry is an honest record.
 
 from __future__ import annotations
 
-from app.retrieval.graphiti.schemas import RelationshipType
+import pytest
+
 from app.features.agent_saul.domain.state import (
     Citation,
+    CitedEntity,
     ClauseSegment,
     ClauseType,
-    CitedEntity,
     EntityType,
     LegalRelationship,
     merge_entities,
     merge_relationships,
     merge_segments,
 )
+from app.retrieval.graphiti.schemas import RelationshipType
 
 _CLAIM = Citation(claim="test claim", source="SRC-01:p1:c1", confidence=0.9)
 
@@ -92,4 +94,4 @@ def test_relationship_merge_keys_on_edge_id_and_replay_wins() -> None:
     merged = merge_relationships([_relationship("edge-1")], [_relationship("edge-1", 0.7)])
 
     assert len(merged) == 1
-    assert merged[0].citation.confidence == 0.7
+    assert merged[0].citation.confidence == pytest.approx(0.7)

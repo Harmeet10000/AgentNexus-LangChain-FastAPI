@@ -10,7 +10,6 @@ dependency overrides away from exact.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
@@ -25,6 +24,7 @@ from app.middleware import register_exception_handlers
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from typing import Any
 
 pytestmark = pytest.mark.unit

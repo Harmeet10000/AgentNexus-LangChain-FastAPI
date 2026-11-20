@@ -35,7 +35,6 @@ from app.features.documents.application.queries.documents import (
 )
 from app.features.documents.retrieval.graph import (
     RetrievalEngine,
-    RetrievalGraphContext,
     build_retrieval_graph,
 )
 from app.features.documents.retrieval.graph.nodes import (

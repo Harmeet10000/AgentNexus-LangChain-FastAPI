@@ -16,7 +16,7 @@ Three layers are pinned here:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -35,6 +35,9 @@ from app.features.agent_saul.graph.nodes import (
 )
 from app.features.auth.domain.tenancy import LegalRole
 from app.features.auth.domain.user import Permission
+
+if TYPE_CHECKING:
+    from typing import Any
 
 pytestmark = pytest.mark.unit
 

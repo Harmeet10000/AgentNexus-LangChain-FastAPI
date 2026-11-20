@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import (  # noqa: TC003 — LangChain @tool evaluates annotations at decoration time
+    TYPE_CHECKING,
+    Any,
+)
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.features.agent_saul.domain.budget import BudgetLedger, BudgetLimits
-from app.features.agent_saul.domain.state import AgentError, WorkflowStatus
+from app.features.agent_saul.domain.state import WorkflowStatus
 from app.features.agent_saul.graph.nodes import make_qna_node
 from app.features.agent_saul.graph.prompts import (
     _COMPLIANCE_SYSTEM_PROMPT,
@@ -33,6 +36,8 @@ from app.features.documents.retrieval.graph.state import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from app.features.agent_saul.domain.state import AgentError
 
 pytestmark = pytest.mark.unit
 
