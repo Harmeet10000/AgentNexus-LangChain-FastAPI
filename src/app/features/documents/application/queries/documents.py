@@ -51,12 +51,12 @@ from app.features.documents.retrieval.graph import (
     RetrievalGraphContext,
 )
 from app.features.documents.retrieval.graph.budgets import build_stage_budget_tracker
-from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from app.retrieval.graphiti.retrieval_branch import fetch_ranked_chunk_ids
 from app.retrieval.structural_navigator import navigate_tree
 from app.retrieval.token_counter import count_tokens as default_count_tokens
+from app.shared.result.logging import log_expected_failure
 from app.utils import InfrastructureException, ServiceUnavailableException, to_sorted_key_bytes
 
 if TYPE_CHECKING:

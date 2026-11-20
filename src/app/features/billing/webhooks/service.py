@@ -47,8 +47,8 @@ from app.features.billing.webhooks.models import (
     WebhookEventStatus,
     WebhookEventType,
 )
-from app.kernel.result import add_database_error_note
 from app.observability.logging import logger, trace_layer
+from app.shared.db.postgres.diagnostics import add_database_error_note
 
 from .exceptions import (
     WebhookCollaboratorError,

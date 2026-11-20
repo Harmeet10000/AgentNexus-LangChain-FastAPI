@@ -12,10 +12,9 @@ from app.features.auth.application.personal_tenant_provisioning import (
 )
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import AuthAuthenticationError, AuthValidationError
-from app.kernel.result import render_result
 from app.security.tokens import OAUTH_STATE_COOKIE
 from app.shared.rate_limit import get_rate_limiter
-from app.utils import APIResponse, http_response
+from app.shared.result.render import APIResponse, http_response, render_result
 
 from .dependencies import (
     AuthServiceDep,

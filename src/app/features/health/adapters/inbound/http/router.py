@@ -12,14 +12,16 @@ from app.config import get_settings
 from app.features.health.application.dto.aggregate import (
     HealthDataDTO,  # noqa: TC001 — FastAPI response annotation
 )
-from app.features.health.application.service import (
-    HealthService,  # noqa: TC001 — FastAPI dependency annotation
-)
-from app.kernel.result import (
-    APIResponse,  # noqa: TC001 — FastAPI response annotation
+from app.features.health.application.dto.result import (
     DependencyHealth,
     HealthResponse,
     HealthStatus,
+)
+from app.features.health.application.service import (
+    HealthService,  # noqa: TC001 — FastAPI dependency annotation
+)
+from app.shared.result.render import (
+    APIResponse,  # noqa: TC001 — FastAPI response annotation
     render_result,
 )
 

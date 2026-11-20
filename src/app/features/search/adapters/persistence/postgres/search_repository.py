@@ -33,8 +33,8 @@ from app.features.search.domain.errors import (
     SearchConflictError,
     SearchInfrastructureError,
 )
-from app.kernel.result import add_database_error_note
 from app.retrieval.fusion import RankedResultRow
+from app.shared.db.postgres.diagnostics import add_database_error_note
 from app.utils.sql_binds import uuid_any, uuid_param
 
 if TYPE_CHECKING:

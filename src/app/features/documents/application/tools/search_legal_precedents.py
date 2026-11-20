@@ -33,12 +33,12 @@ from app.features.documents.domain.constants import (
     RRF_K,
     TRIGRAM_SIMILARITY_THRESHOLD,
 )
-from app.kernel.result import add_database_error_note
 from app.observability.degradation import GRAPHITI_UNAVAILABLE, record_degradation
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
 from app.retrieval.fusion import RankedResultRow, reciprocal_rank_fusion
 from app.retrieval.graphiti.schemas import GraphitiAvailability, GraphitiSearchOutcome
+from app.shared.db.postgres.diagnostics import add_database_error_note
 from app.utils.sql_binds import uuid_any
 
 from .authorization import trusted_tool_context

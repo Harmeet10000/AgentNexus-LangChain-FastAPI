@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from neo4j.exceptions import DriverError, Neo4jError
 
-from app.kernel.result import DependencyHealth, HealthStatus
+from app.features.health.application.dto.result import DependencyHealth, HealthStatus
 
 from ....application.dto.result import AgentMemoryCheck, ComponentCheck
 

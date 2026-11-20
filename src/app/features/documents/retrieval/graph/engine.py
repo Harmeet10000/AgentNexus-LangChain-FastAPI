@@ -54,9 +54,7 @@ class RetrievalEngine:
         self._grader = grader
         self._reranker = reranker
         # Compile once, at provisioning time — never per request.
-        self.graph: CompiledStateGraph[Any, RetrievalGraphContext] = (
-            build_retrieval_graph()
-        )
+        self.graph: CompiledStateGraph[Any, RetrievalGraphContext] = build_retrieval_graph()
 
     @asynccontextmanager
     async def invocation(

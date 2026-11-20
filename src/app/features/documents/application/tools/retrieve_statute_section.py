@@ -25,9 +25,9 @@ from sqlalchemy import String, cast, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.features.documents.domain.chunk import UnifiedChunk
-from app.kernel.result import add_database_error_note
 from app.observability.logging import logger
 from app.resilience.idempotency import IdempotencyGuard, ToolResult
+from app.shared.db.postgres.diagnostics import add_database_error_note
 from app.utils.sql_binds import uuid_any
 
 from .authorization import trusted_tool_context

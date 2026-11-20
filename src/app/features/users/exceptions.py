@@ -6,7 +6,7 @@ from typing import ClassVar, assert_never
 from returns.result import Result
 
 from app.kernel.errors import ErrorKind, FeatureError
-from app.kernel.result import http_status_for_kind
+from app.shared.result.render import http_status_for_kind
 
 
 class UsersCode(StrEnum):

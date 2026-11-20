@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, assert_never
 from returns.result import Result
 
 from app.kernel.errors import ErrorKind, FeatureError
-from app.kernel.result import http_status_for_kind
+from app.shared.result.render import http_status_for_kind
 
 if TYPE_CHECKING:
     from typing import ClassVar

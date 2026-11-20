@@ -49,8 +49,8 @@ from app.features.billing.providers import (
     ProviderUnexpectedError,
     ResumeSubscriptionOperation,
 )
-from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
+from app.shared.db.postgres.diagnostics import add_database_error_note
 
 from ..exceptions import (
     LifecycleCoordinatorPersistenceError,

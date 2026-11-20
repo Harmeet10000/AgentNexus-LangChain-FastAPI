@@ -17,8 +17,8 @@ from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
-from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
+from app.shared.result.logging import log_expected_failure
 from app.utils import ValidationException
 
 if TYPE_CHECKING:

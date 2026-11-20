@@ -6,7 +6,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
-from app.kernel.result import HealthStatus
+from app.features.health.application.dto.result import HealthStatus
 
 from .dto.aggregate import HealthChecksDTO, HealthDataDTO, HealthResultDTO
 from .dto.result import AgentMemoryCheck, ComponentCheck

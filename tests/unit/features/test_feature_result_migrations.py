@@ -33,7 +33,7 @@ from app.features.profile.domain.entities.profile import Profile
 from app.features.profile.domain.errors import ProfileAuthenticationError
 from app.features.users.exceptions import UsersConflictError, UsersInfrastructureError
 from app.features.users.service import UserAdminService
-from app.kernel.result import render_result
+from app.shared.result.render import render_result
 
 
 def test_error_classification_is_not_constructible_or_serialized() -> None:

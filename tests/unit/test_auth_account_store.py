@@ -21,7 +21,7 @@ from app.features.auth.domain.errors import (
     AuthValidationError,
 )
 from app.features.auth.domain.user import LegalRole, UserRole
-from app.kernel.result import render_result
+from app.shared.result.render import render_result
 
 pytestmark = pytest.mark.unit
 

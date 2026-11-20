@@ -23,11 +23,10 @@ from app.features.documents.api.http.dependencies import (
 from app.features.documents.ingestion.legacy_dto import DocumentUploadResponse
 from app.features.documents.ingestion.legacy_errors import IngestionValidationError
 from app.features.documents.ingestion.legacy_service import IngestionService
-from app.kernel.result import render_result
 from app.observability.logging import logger
 from app.shared.rate_limit import get_rate_limiter
+from app.shared.result.render import APIResponse, render_result
 from app.shared.upload_validation import read_bounded_upload, upload_issue_details
-from app.utils import APIResponse
 
 if TYPE_CHECKING:
     from typing import Any

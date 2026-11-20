@@ -9,7 +9,7 @@ import pytest
 
 from app.features.health.application.dto.result import AgentMemoryCheck, ComponentCheck
 from app.features.health.application.service import HealthService
-from app.kernel.result import HealthStatus
+from app.features.health.application.dto.result import HealthStatus
 
 if TYPE_CHECKING:
     from app.features.health.application.ports.probes import Probe

@@ -18,7 +18,7 @@ from app.features.billing.subscriptions.exceptions import (
 )
 from app.features.billing.subscriptions.repository import SubscriptionRepository
 from app.features.billing.subscriptions.service import SubscriptionService
-from app.kernel.result import render_result
+from app.shared.result.render import render_result
 
 
 def _permanent_error() -> SubscriptionInfrastructureError:

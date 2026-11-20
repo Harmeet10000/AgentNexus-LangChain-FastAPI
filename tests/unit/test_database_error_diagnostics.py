@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.kernel.result import add_database_error_note
+from app.shared.db.postgres.diagnostics import add_database_error_note
 
 
 def test_integrity_error_note_includes_constraint_context_and_traceback() -> None:

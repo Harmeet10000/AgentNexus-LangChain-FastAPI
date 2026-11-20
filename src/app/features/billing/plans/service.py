@@ -17,8 +17,8 @@ from app.features.billing.subscriptions.models import (
     ProviderOperationRecord,
     ProviderOperationState,
 )
-from app.kernel.result import add_database_error_note
 from app.observability.logging import logger, trace_layer
+from app.shared.db.postgres.diagnostics import add_database_error_note
 
 from .dto import PlanResponse
 from .exceptions import (

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from app.features.health.adapters.outbound.neo4j.probe import AgentMemoryProbe, check_cognee
 from app.features.health.application.dto.result import ComponentCheck
 from app.features.health.module import get_health_service
-from app.kernel.result import HealthStatus
+from app.features.health.application.dto.result import HealthStatus
 
 if TYPE_CHECKING:
     from typing import Any

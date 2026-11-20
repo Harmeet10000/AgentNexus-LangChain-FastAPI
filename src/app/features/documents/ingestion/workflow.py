@@ -12,8 +12,8 @@ from returns.result import Failure
 from app.ai.embeddings import EmbeddingQuotaExhaustedError
 from app.events import with_terminal_outbox
 from app.features.documents.api.http.dto import IngestionJob, IngestionRuntime
-from app.kernel.result import log_expected_failure
 from app.observability.logging import logger
+from app.shared.result.logging import log_expected_failure
 from app.utils import ServiceUnavailableException
 
 if TYPE_CHECKING:

@@ -5,9 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Response
 from returns.result import Failure, Success
 
-from app.kernel.result import render_result
 from app.shared.rate_limit import get_rate_limiter
-from app.utils import APIResponse
+from app.shared.result.render import APIResponse, render_result
 
 from .dependencies import (
     TenantMembershipServiceDep,

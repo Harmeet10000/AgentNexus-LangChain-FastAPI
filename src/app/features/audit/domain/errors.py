@@ -1,12 +1,11 @@
 """Typed failures raised by audit application ports."""
 
 from enum import StrEnum
-from typing import ClassVar, assert_never
+from typing import ClassVar
 
 from returns.result import Result
 
 from app.kernel.errors import ErrorKind, FeatureError
-from app.kernel.result import http_status_for_kind
 
 
 class AuditCode(StrEnum):
@@ -23,11 +22,3 @@ class AuditInfrastructureError(FeatureError):
 
 type AuditError = AuditInfrastructureError
 type AuditResult[T] = Result[T, AuditError]
-
-
-def audit_error_to_http_status(error: AuditError) -> int:
-    match error:
-        case AuditInfrastructureError():
-            return http_status_for_kind(error.kind, retryable=error.retryable)
-        case _ as unreachable:
-            assert_never(unreachable)

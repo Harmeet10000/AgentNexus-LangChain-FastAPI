@@ -10,9 +10,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Response, status
 
-from app.kernel.result import render_result
 from app.shared.rate_limit import get_rate_limiter
-from app.utils import APIResponse
+from app.shared.result.render import APIResponse, render_result
 
 from .dependencies import SearchAuthorizationDep, SearchServiceDep
 from .dto import (

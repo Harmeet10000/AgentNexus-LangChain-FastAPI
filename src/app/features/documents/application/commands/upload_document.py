@@ -105,12 +105,12 @@ from app.features.documents.ingestion.enrichment.legal_metadata import (
     extract_legal_metadata,
 )
 from app.features.documents.ingestion.parsing.parser import parse_document
-from app.kernel.result import log_expected_failure
 from app.observability.degradation import STUCK_DOCUMENTS, record_degradation
 from app.observability.logging import logger, trace_layer
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
 from app.retrieval.graphiti.write_clause_episodes import write_clause_episodes_to_graphiti
 from app.shared.jobs.names import DOCUMENTS_INGEST
+from app.shared.result.logging import log_expected_failure
 from app.utils.storage import build_s3_key, key_from_s3_uri
 
 _GRAPHITI_TRANSPORT_ERRORS = (GraphitiError, Neo4jError, AsyncTimeoutError, OSError)

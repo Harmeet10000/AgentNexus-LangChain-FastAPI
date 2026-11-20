@@ -6,7 +6,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.kernel.result import APIResponse
+from app.shared.result.render import APIResponse
 from app.utils.exceptions import ValidationException
 
 

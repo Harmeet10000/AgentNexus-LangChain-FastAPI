@@ -22,7 +22,7 @@ from app.features.billing.invoices.models import Invoice
 from app.features.billing.invoices.router import router as invoices_router
 from app.features.billing.invoices.service import InvoiceService
 from app.features.billing.subscriptions.dto import SubscriptionListResponse
-from app.kernel.result import APIResponse
+from app.shared.result.render import APIResponse
 
 if TYPE_CHECKING:
     from app.features.billing.invoices.models import Invoice as InvoiceModel

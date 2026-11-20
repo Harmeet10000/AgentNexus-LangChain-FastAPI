@@ -27,8 +27,8 @@ from app.features.billing.subscriptions.lifecycle import (
 )
 from app.features.billing.subscriptions.models import Subscription, SubscriptionStatus
 from app.features.billing.subscriptions.repository import SqlAlchemyLifecyclePersistence
-from app.kernel.result import add_database_error_note
 from app.observability.logging import logger, trace_layer
+from app.shared.db.postgres.diagnostics import add_database_error_note
 
 from .exceptions import DunningExternalServiceError, DunningInfrastructureError
 

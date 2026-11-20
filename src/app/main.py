@@ -16,11 +16,11 @@ from fastapi.responses import Response
 from guard import SecurityMiddleware
 from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 from redis_fastapi import FastAPIRedis
-from returns.result import Failure, Success
+from returns.result import Success
 
-from app.kernel.result import APIResponse, NotFoundError, render_result
 from app.observability import setup_otel
 from app.observability.logging import logger, setup_logging
+from app.shared.result.render import APIResponse, http_error, render_result
 
 from .api import v1_router, v2_router
 from .config import get_settings
@@ -180,17 +180,16 @@ def create_app() -> FastAPI:
             path_name=path_name,
         ).warning("404 Not Found")
 
-        return render_result(
-            Failure(
-                inner_value=NotFoundError(
-                    message=f"Can't find {request.url.path} on this server",
-                    details={
-                        "path": request.url.path,
-                        "correlation_id": correlation_id,
-                    },
-                )
-            ),
-            response,
+        response.status_code = status.HTTP_404_NOT_FOUND
+        return http_error(
+            message=f"Can't find {request.url.path} on this server",
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            data={
+                "path": request.url.path,
+                "correlation_id": correlation_id,
+            },
+            correlation_id=correlation_id,
         )
 
     return app

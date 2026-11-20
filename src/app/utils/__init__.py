@@ -1,21 +1,5 @@
 """Utility modules for the application."""
 
-# Keep kernel.result below logger exports to avoid package-init recursion.
-# ruff: noqa: I001
-
-from .exceptions import (
-    APIException,
-    ConflictException,
-    DatabaseException,
-    ExternalServiceException,
-    ForbiddenException,
-    InfrastructureException,
-    NotFoundException,
-    ServiceUnavailableException,
-    TooManyRequestsException,
-    UnauthorizedException,
-    ValidationException,
-)
 from .cache import (
     RedisGuardAdapter,
     add_to_bloom_filter,
@@ -48,6 +32,19 @@ from .cache import (
 )
 from .codes import Environment, ErrorCode
 from .embedding import normalize_embedding
+from .exceptions import (
+    APIException,
+    ConflictException,
+    DatabaseException,
+    ExternalServiceException,
+    ForbiddenException,
+    InfrastructureException,
+    NotFoundException,
+    ServiceUnavailableException,
+    TooManyRequestsException,
+    UnauthorizedException,
+    ValidationException,
+)
 from .json_serializer import (
     from_json,
     from_json_float_list,
@@ -57,42 +54,24 @@ from .json_serializer import (
     to_json_str,
     to_sorted_key_bytes,
 )
-from app.kernel.result import (
-    APIResponse,
-    DependencyHealth,
-    ErrorDetail,
-    HealthResponse,
-    HealthStatus,
-    RequestMeta,
-    http_error,
-    http_response,
-)
 
-__all__ = [  # noqa: RUF022
+__all__ = [
     "APIException",
-    "APIResponse",
     "ConflictException",
     "DatabaseException",
-    "DependencyHealth",
     "Environment",
     "ErrorCode",
-    "ErrorDetail",
     "ExternalServiceException",
     "ForbiddenException",
     "InfrastructureException",
     "NotFoundException",
     "RedisGuardAdapter",
-    "RequestMeta",
     "ServiceUnavailableException",
     "TooManyRequestsException",
     "UnauthorizedException",
     "ValidationException",
-    "HealthResponse",
-    "HealthStatus",
     "from_json",
     "from_json_float_list",
-    "http_error",
-    "http_response",
     "normalize_embedding",
     "to_float_list_bytes",
     "to_float_list_str",

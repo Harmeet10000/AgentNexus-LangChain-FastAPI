@@ -6,9 +6,8 @@ from fastapi import APIRouter, Depends, Header, Path, Query, Response, status
 
 from app.features.auth.api.http.dependencies import AuthorizationContext, require_role
 from app.features.auth.domain.user import UserRole
-from app.kernel.result import render_result
 from app.shared.rate_limit import get_rate_limiter
-from app.utils import APIResponse
+from app.shared.result.render import APIResponse, render_result
 
 from .dependencies import PlanServiceDep
 from .dto import PlanCreateDTO, PlanResponse, PlanUpdateDTO

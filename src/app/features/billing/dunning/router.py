@@ -8,8 +8,7 @@ from returns.result import Failure, Success
 from app.config import get_settings
 from app.features.auth.api.http.dependencies import require_role
 from app.features.auth.domain.user import UserRole
-from app.kernel.result import render_result
-from app.utils import APIResponse, http_response
+from app.shared.result.render import APIResponse, http_response, render_result
 
 from .dependencies import DunningServiceDep
 from .dto import DunningConfigResponse

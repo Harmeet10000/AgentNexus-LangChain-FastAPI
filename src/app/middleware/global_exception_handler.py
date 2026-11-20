@@ -6,9 +6,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.kernel.result import render_exception
 from app.observability.logging import execution_path, logger
 from app.shared.jobs.errors import CircuitBreakerOpenError, IdempotencyLockError
+from app.shared.result.render import render_exception
 from app.utils import APIException, ErrorCode
 
 
@@ -18,7 +18,7 @@ def _correlation_id_from_scope(request: Request) -> str | None:
     ``RequestStateLoggingMiddleware`` copies it into ``scope["state"]`` precisely because the
     ``request_state`` ContextVar it also sets is reset in its ``finally`` block before
     ``ServerErrorMiddleware`` (which owns the catch-all branch) invokes this handler — the
-    ContextVar read inside :func:`app.kernel.result._build_request_meta` therefore comes back
+    ContextVar read inside :func:`app.shared.result.render._build_request_meta` therefore comes back
     empty and the envelope's ``request.correlationId`` was ``null`` on every 500 (F1).
     """
     state = request.scope.get("state") or {}
@@ -37,7 +37,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> Response
     # handler `ServerErrorMiddleware` called to render the error. Starlette does not catch
     # that, so the client received a bodiless 500: the catch-all branch was registered but
     # could never emit its envelope. Same reasoning covers `request_state` in
-    # `app.kernel.result._build_request_meta`.
+    # `app.shared.result.render._build_request_meta`.
     current_flow = " -> ".join(execution_path.get([]))
 
     # ────────────────────────────────────────────────

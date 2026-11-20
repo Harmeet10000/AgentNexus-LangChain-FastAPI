@@ -5,7 +5,6 @@ from .domain.errors import (
     AuditError,
     AuditInfrastructureError,
     AuditResult,
-    audit_error_to_http_status,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     "AuditError",
     "AuditInfrastructureError",
     "AuditResult",
-    "audit_error_to_http_status",
 ]

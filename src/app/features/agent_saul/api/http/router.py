@@ -33,10 +33,9 @@ from app.features.agent_saul.application.service import AgentSaulService
 from app.features.agent_saul.application.transcript.export import ExportTranscript
 from app.features.auth.api.http.dependencies import CurrentAuthorizationContext, CurrentClaims
 from app.features.documents.api.http.dependencies import DocumentAuthorizationDep
-from app.kernel.result import render_result
 from app.observability.logging import logger
 from app.shared.rate_limit import get_rate_limiter
-from app.utils import APIResponse
+from app.shared.result.render import APIResponse, render_result
 
 if TYPE_CHECKING:
     from app.features.agent_saul.application.transcript.export import PreparedTranscriptExport

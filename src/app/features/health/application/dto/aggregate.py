@@ -6,9 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.kernel.result import HealthStatus
-
-from .result import AgentMemoryCheck, ComponentCheck
+from .result import AgentMemoryCheck, ComponentCheck, HealthStatus
 
 
 class HealthChecksDTO(BaseModel):

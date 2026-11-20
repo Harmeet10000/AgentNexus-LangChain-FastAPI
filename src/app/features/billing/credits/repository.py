@@ -17,7 +17,7 @@ from app.features.billing.credits.models import (
     CreditStatus,
     UserCredit,
 )
-from app.kernel.result import add_database_error_note
+from app.shared.db.postgres.diagnostics import add_database_error_note
 
 from .exceptions import (
     CreditConflictError,

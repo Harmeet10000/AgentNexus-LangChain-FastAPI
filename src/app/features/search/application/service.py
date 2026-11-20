@@ -37,13 +37,13 @@ from app.features.search.domain.models import (
     TASK_OWNER_CACHE_KEY,
     SearchDocumentStatus,
 )
-from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, reciprocal_rank_fusion
 from app.shared.jobs import AggregateRef, is_transaction_scope
 from app.shared.jobs.catalog import JOB_CATALOG
 from app.shared.jobs.names import SEARCH_INGEST
 from app.shared.jobs.payloads import SearchIngestPayload
+from app.shared.result.logging import log_expected_failure
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 if TYPE_CHECKING:

@@ -21,10 +21,9 @@ from app.features.profile.application.dto.profile import (
 )
 from app.features.profile.domain.errors import ProfileValidationError
 from app.features.profile.module import ProfileApplication, build_profile_application
-from app.kernel.result import render_result
 from app.security.tokens import TokenClaims
 from app.shared.rate_limit import get_rate_limiter
-from app.utils import APIResponse, http_response
+from app.shared.result.render import APIResponse, http_response, render_result
 
 # Per-IP GCRA guards, one class per sensitivity: password changes are
 # auth-critical (tight, mirroring forgot-password), profile edits are routine,

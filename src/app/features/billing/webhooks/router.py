@@ -8,9 +8,8 @@ from returns.result import Failure, Success
 
 from app.features.auth.api.http.dependencies import require_role
 from app.features.auth.domain.user import UserRole
-from app.kernel.result import render_result
 from app.observability.logging import logger
-from app.utils import APIResponse
+from app.shared.result.render import APIResponse, render_result
 
 from .dependencies import WebhookServiceDep
 from .dto import WebhookPayload

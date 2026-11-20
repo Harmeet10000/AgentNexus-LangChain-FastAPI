@@ -14,7 +14,7 @@ import pytest
 from app.config import get_settings
 from app.features.health.adapters.inbound.http import build_info
 from app.features.health.adapters.inbound.http.build_info import resolve_git_sha
-from app.kernel.result import DependencyHealth
+from app.features.health.application.dto.result import DependencyHealth
 
 pytestmark = pytest.mark.unit
 

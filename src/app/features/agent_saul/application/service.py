@@ -90,8 +90,8 @@ from app.features.auth.api.websocket.security import (
     WebSocketSecurityViolation,
 )
 from app.features.auth.domain.tenancy import LegalRole
-from app.kernel.result import log_expected_failure
 from app.observability.logging import logger, trace_layer
+from app.shared.result.logging import log_expected_failure
 
 if TYPE_CHECKING:
     from collections.abc import Callable

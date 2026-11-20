@@ -27,14 +27,13 @@ from app.features.crawler.api.http.dto import (
 from app.features.crawler.application.service import CrawlerService
 from app.features.crawler.domain.constants import CRAWLER_PREFIX, CRAWLER_TAG
 from app.features.crawler.domain.models import CrawlJob, CrawlJobStatus
-from app.kernel.result import http_response, render_result
 from app.shared.jobs import JobBus
 from app.shared.jobs.catalog import JOB_CATALOG
 from app.shared.jobs.names import CRAWLER_CRAWL
 from app.shared.jobs.payloads import CrawlerJobPayload
 from app.shared.rate_limit import RateLimiter, RateLimitScope
+from app.shared.result.render import APIResponse, http_response, render_result
 from app.utils import (
-    APIResponse,
     NotFoundException,
     ServiceUnavailableException,
     TooManyRequestsException,

@@ -53,6 +53,7 @@ from app.features.auth.domain.user import User
 from app.features.billing.providers import RazorpayBillingProvider
 from app.features.documents.application.evidence.service import build_evidence_service
 from app.features.health.adapters.outbound.neo4j.probe import check_cognee, check_graphiti
+from app.features.health.application.dto.result import DependencyHealth
 from app.features.health.module import build_startup_probes
 from app.lifecycle.graphs import (
     graphiti_service,
@@ -68,7 +69,7 @@ from app.observability import shutdown_otel
 from app.observability.logging import logger
 from app.resilience.circuit_breaker import CircuitBreakerService, RedisCircuitBreakerStore
 from app.shared.jobs import JobBus
-from app.utils import DependencyHealth, ServiceUnavailableException
+from app.utils import ServiceUnavailableException
 from app.utils.storage import create_object_store
 
 if TYPE_CHECKING:

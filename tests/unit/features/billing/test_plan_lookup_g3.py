@@ -20,7 +20,7 @@ from app.features.billing.plans.exceptions import (
     PlanNotFoundError,
 )
 from app.features.billing.plans.repository import PlanRepository
-from app.kernel.result import render_result
+from app.shared.result.render import render_result
 
 pytestmark = pytest.mark.unit
 

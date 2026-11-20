@@ -2,14 +2,56 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.kernel.result import HealthStatus
-
 if TYPE_CHECKING:
     from typing import Self
+
+
+class HealthStatus(StrEnum):
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+    WARNING = "warning"
+    UNKNOWN = "unknown"
+
+
+class DependencyHealth(BaseModel):
+    """Health status returned by one outward dependency probe."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, serialize_by_alias=True)
+
+    name: str
+    status: HealthStatus
+    latency_ms: float = 0.0
+    message: str | None = None
+
+    @classmethod
+    def ok(cls, name: str, latency_ms: float = 0.0) -> Self:
+        return cls(name=name, status=HealthStatus.HEALTHY, latency_ms=latency_ms)
+
+    @classmethod
+    def fail(cls, name: str, message: str, latency_ms: float = 0.0) -> Self:
+        return cls(name=name, status=HealthStatus.UNHEALTHY, latency_ms=latency_ms, message=message)
+
+    @classmethod
+    def degraded(cls, name: str, message: str, latency_ms: float = 0.0) -> Self:
+        return cls(name=name, status=HealthStatus.DEGRADED, latency_ms=latency_ms, message=message)
+
+
+class HealthResponse(BaseModel):
+    """Response body for the deep health endpoint."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, serialize_by_alias=True)
+
+    status: HealthStatus
+    version: str = "1.0.0"
+    git_sha: str = "unknown"
+    build_date: str = "unknown"
+    dependencies: list[DependencyHealth] = Field(default_factory=list)
 
 
 class ComponentCheck(BaseModel):

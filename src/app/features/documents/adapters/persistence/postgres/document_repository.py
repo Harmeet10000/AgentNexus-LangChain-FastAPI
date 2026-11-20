@@ -53,8 +53,8 @@ from app.features.documents.domain.errors import (
     DocumentStatusNotFoundError,
     DocumentValidationError,
 )
-from app.kernel.result import add_database_error_note
 from app.observability.logging import trace_layer
+from app.shared.db.postgres.diagnostics import add_database_error_note
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 from app.utils.sql_binds import uuid_any, uuid_param
 
@@ -170,8 +170,7 @@ def _metadata_has_failure_reason(metadata: dict[str, object] | None) -> bool:
     if not isinstance(metadata, dict):
         return False
     return any(
-        key in metadata and _has_content(metadata[key])
-        for key in FAILURE_REASON_METADATA_KEYS
+        key in metadata and _has_content(metadata[key]) for key in FAILURE_REASON_METADATA_KEYS
     )
 
 

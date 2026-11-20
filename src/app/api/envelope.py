@@ -7,7 +7,7 @@ from typing import get_origin, override
 from fastapi import APIRouter
 
 from app.config import get_settings
-from app.utils import APIResponse
+from app.shared.result.render import APIResponse
 
 
 class StrictEnvelopeAPIRouter(APIRouter):

@@ -9,10 +9,6 @@ from app.features.agent_saul.domain.errors import (
     AgentSaulValidationError,
     agent_saul_error_to_http_status,
 )
-from app.features.audit.domain.errors import (
-    AuditInfrastructureError,
-    audit_error_to_http_status,
-)
 from app.features.auth.domain.errors import (
     AuthAuthenticationError,
     AuthAuthorizationError,
@@ -192,7 +188,6 @@ def _error(error_type: type[FeatureError], **fields: object) -> FeatureError:
             crawler_error_to_http_status,
             [_error(CrawlerValidationError), _error(CrawlerSearchError)],
         ),
-        (audit_error_to_http_status, [_error(AuditInfrastructureError, operation="test")]),
         (
             dunning_error_to_http_status,
             [

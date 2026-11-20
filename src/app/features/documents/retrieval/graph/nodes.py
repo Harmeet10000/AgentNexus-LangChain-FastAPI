@@ -24,7 +24,6 @@ from app.config import get_settings
 from app.features.documents.retrieval import row_hydration
 from app.features.documents.retrieval.reranking.reranker import get_configured_reranker
 from app.features.documents.retrieval.service import _is_graphiti_branch_failure
-from app.kernel.result import log_expected_failure
 from app.observability.degradation import GRADER_FALLBACK, GRAPHITI_UNAVAILABLE, record_degradation
 from app.observability.logging import logger
 from app.retrieval.edge_expansion import EdgeSeedChunk, expand_along_edges
@@ -32,6 +31,7 @@ from app.retrieval.graphiti.client import fetch_relationship_edges
 from app.retrieval.graphiti.grouping import GraphitiDocumentScope, fanout_graphiti_group_ids
 from app.retrieval.token_counter import count_tokens as default_count_tokens
 from app.shared.langchain_layer import render_prompt_sections, serialize_to_toon
+from app.shared.result.logging import log_expected_failure
 from app.utils import InfrastructureException, to_sorted_key_bytes
 
 from .budgets import (

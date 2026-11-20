@@ -2,7 +2,7 @@
 
 from fastapi import Response
 
-from app.kernel.result import APIResponse, http_response
+from app.shared.result.render import APIResponse, http_response
 
 from ....application.dto.aggregate import (
     HealthDataDTO,

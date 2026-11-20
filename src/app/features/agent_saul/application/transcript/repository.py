@@ -58,8 +58,8 @@ from app.features.agent_saul.application.transcript.projection import (
     TurnRow,
     TurnRows,
 )
-from app.kernel.result import add_database_error_note
 from app.observability.logging import logger, trace_layer
+from app.shared.db.postgres.diagnostics import add_database_error_note
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

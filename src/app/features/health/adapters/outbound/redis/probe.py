@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from redis import RedisError
 
-from app.kernel.result import DependencyHealth
+from app.features.health.application.dto.result import DependencyHealth
 
 from ....application.dto.result import ComponentCheck
 
