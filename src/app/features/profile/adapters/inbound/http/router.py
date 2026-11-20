@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from returns.result import Failure
 
 from app.features.auth.api.http.dependencies import CurrentVerifiedUser
-from app.features.auth.api.http.dto import UserResponse
 from app.features.profile.adapters.inbound.http.dto import (
     AvatarResponse,
     ChangePasswordRequest,
+    ProfileResponse,
     UpdateProfileRequest,
 )
 from app.features.profile.adapters.inbound.http.presenters import present_profile
@@ -45,7 +45,7 @@ async def get_profile(
     user: CurrentVerifiedUser,
     request: Request,
     response: Response,
-) -> APIResponse[UserResponse]:
+) -> APIResponse[ProfileResponse]:
     application = await build_profile_application(request)
     result = await _profile_for_user(application, str(user.id))
     if isinstance(result, Failure):
@@ -66,7 +66,7 @@ async def update_profile(
     user: CurrentVerifiedUser,
     request: Request,
     response: Response,
-) -> APIResponse[UserResponse]:
+) -> APIResponse[ProfileResponse]:
     application = await build_profile_application(request)
     result = await _profile_for_user(application, str(user.id))
     if isinstance(result, Failure):
@@ -137,7 +137,9 @@ async def upload_avatar(
 ) -> APIResponse[AvatarResponse]:
     if not file.content_type:
         return render_result(
-            Failure(ProfileValidationError(message="Content-Type header is required for file upload")),
+            Failure(
+                ProfileValidationError(message="Content-Type header is required for file upload")
+            ),
             response,
         )
 

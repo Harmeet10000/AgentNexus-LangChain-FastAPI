@@ -18,7 +18,6 @@ class Profile(BaseModel):
     id: str
     email: str
     full_name: str | None
-    password_hash: str | None
     is_active: bool
     is_verified: bool
     role: str

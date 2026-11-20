@@ -22,12 +22,11 @@ from app.features.profile.module import MODULE
 _PROFILE_ROOT = Path(__file__).parents[4] / "src/app/features/profile"
 
 
-def _profile(*, avatar_url: str | None = None, password_hash: str | None = None) -> Profile:
+def _profile(*, avatar_url: str | None = None) -> Profile:
     return Profile(
         id="507f1f77bcf86cd799439011",
         email="user@example.com",
         full_name="Ada Lovelace",
-        password_hash=password_hash or "stored-hash",
         is_active=True,
         is_verified=True,
         role="user",
@@ -52,8 +51,13 @@ def test_domain_and_application_are_transport_and_adapter_free() -> None:
 async def test_invalid_password_is_returned_as_profile_authentication_error() -> None:
     handler = UpdateProfileCommandHandler(
         AsyncMock(),
-        password_hasher=SimpleNamespace(verify=lambda _hash, _password: False),
-        session_revoker=AsyncMock(),
+        credentials=SimpleNamespace(
+            change_password=AsyncMock(
+                return_value=Failure(
+                    ProfileAuthenticationError(message="Current password is incorrect")
+                )
+            )
+        ),
         storage=None,
         logger=SimpleNamespace(),
     )
@@ -78,7 +82,9 @@ async def test_query_resolves_private_avatar_through_the_storage_port() -> None:
     )
     storage = SimpleNamespace(
         bucket="bucket",
-        uri_to_location=lambda uri: Success(SimpleNamespace(bucket="bucket", key=uri.rsplit("/", 1)[1])),
+        uri_to_location=lambda uri: Success(
+            SimpleNamespace(bucket="bucket", key=uri.rsplit("/", 1)[1])
+        ),
         get_signed_get_url=AsyncMock(return_value=Success("https://signed.example/avatar")),
     )
     handler = GetProfileQueryHandler(repository, storage=storage)

@@ -159,8 +159,13 @@ async def test_plan_duplicate_is_returned_without_calling_create() -> None:
 async def test_profile_invalid_current_password_is_typed() -> None:
     service = UpdateProfileCommandHandler(
         AsyncMock(),
-        password_hasher=SimpleNamespace(verify=lambda _hash, _password: False),
-        session_revoker=AsyncMock(),
+        credentials=SimpleNamespace(
+            change_password=AsyncMock(
+                return_value=Failure(
+                    ProfileAuthenticationError(message="Current password is incorrect")
+                )
+            )
+        ),
         storage=None,
         logger=SimpleNamespace(),
     )
@@ -168,7 +173,6 @@ async def test_profile_invalid_current_password_is_typed() -> None:
         id="507f1f77bcf86cd799439011",
         email="user@example.com",
         full_name=None,
-        password_hash="not-a-valid-hash",
         is_active=True,
         is_verified=True,
         role=UserRole.USER,

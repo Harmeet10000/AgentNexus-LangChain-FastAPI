@@ -24,14 +24,6 @@ class ProfileRepository(Protocol):
         """Persist profile-owned fields and return the refreshed projection."""
         ...
 
-    async def replace_password_hash(
-        self,
-        user_id: str,
-        password_hash: str,
-    ) -> Result[None, ProfileError]:
-        """Persist a password hash through the existing account store."""
-        ...
-
     async def set_avatar_url(
         self,
         user_id: str,

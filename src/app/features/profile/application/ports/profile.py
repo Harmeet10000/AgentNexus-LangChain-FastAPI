@@ -5,30 +5,10 @@ from typing import Any, Protocol
 from returns.result import Result
 
 
-class PasswordHasher(Protocol):
-    """Password verification and hashing capability."""
+class CredentialChanger(Protocol):
+    """Auth-owned credential use case as consumed by profile."""
 
-    def verify(self, password_hash: str, password: str) -> bool:
-        """Return whether a clear-text password matches a stored hash."""
-        ...
-
-    def hash(self, password: str) -> str:
-        """Hash a clear-text password for persistence."""
-        ...
-
-
-class SessionRevoker(Protocol):
-    """Auth-owned session revocation capability."""
-
-    async def revoke_all_user_sessions(
-        self,
-        *,
-        user_id: str,
-        except_session_id: str | None,
-        reason: str,
-    ) -> Result[Any, Any]:
-        """Revoke all sessions except the current one when requested."""
-        ...
+    async def change_password(self, command: Any) -> Result[None, Any]: ...
 
 
 class AvatarStorage(Protocol):
@@ -47,11 +27,8 @@ class AvatarStorage(Protocol):
         data: bytes,
         content_type: str,
         metadata: dict[str, str],
-    ) -> Result[str, Any]:
-        ...
+    ) -> Result[str, Any]: ...
 
-    async def delete_object(self, *, key: str) -> Result[None, Any]:
-        ...
+    async def delete_object(self, *, key: str) -> Result[None, Any]: ...
 
-    async def get_signed_get_url(self, *, key: str) -> Result[str, Any]:
-        ...
+    async def get_signed_get_url(self, *, key: str) -> Result[str, Any]: ...

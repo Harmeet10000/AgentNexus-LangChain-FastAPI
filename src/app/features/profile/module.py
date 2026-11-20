@@ -40,6 +40,9 @@ async def build_profile_application(request: Any) -> ProfileApplication:
         get_account_store,
         get_refresh_token_repository,
     )
+    from app.features.profile.adapters.outbound.auth.credentials import (  # noqa: PLC0415
+        AuthCredentialGateway,
+    )
     from app.features.profile.adapters.outbound.mongodb.repository import (  # noqa: PLC0415
         MongoProfileRepository,
     )
@@ -92,8 +95,7 @@ async def build_profile_application(request: Any) -> ProfileApplication:
     queries = GetProfileQueryHandler(repository, storage=storage_port)
     commands = UpdateProfileCommandHandler(
         repository,
-        password_hasher=_PasswordHasher(),
-        session_revoker=token_repo,
+        credentials=AuthCredentialGateway(account_store, token_repo, _PasswordHasher()),
         storage=storage_port,
         logger=logger,
     )
