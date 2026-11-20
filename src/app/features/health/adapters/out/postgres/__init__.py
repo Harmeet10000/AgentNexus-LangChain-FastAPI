@@ -1,0 +1,1 @@
+"""PostgreSQL health adapter."""

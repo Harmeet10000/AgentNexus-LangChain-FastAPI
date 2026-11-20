@@ -11,9 +11,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from app.features.health.dependencies import get_health_service
-from app.features.health.dto import ComponentCheck
-from app.features.health.health_check import check_cognee
+from app.features.health.adapters.out.neo4j.probe import AgentMemoryProbe, check_cognee
+from app.features.health.application.dto.result import ComponentCheck
+from app.features.health.module import get_health_service
 from app.kernel.result import HealthStatus
 
 if TYPE_CHECKING:
@@ -66,15 +66,10 @@ async def test_configured_and_reachable_cognee_is_ok() -> None:
 
 
 def _service(cognee_config: Any, neo4j_driver: Any = None) -> Any:
-    from app.features.health.service import HealthService
+    from app.features.health.application.service import HealthService
 
     return HealthService(
-        mongo_client=None,
-        redis_client=None,
-        postgres_session_factory=None,
-        neo4j_driver=neo4j_driver,
-        celery_app=None,
-        cognee_config=cognee_config,
+        probes=(AgentMemoryProbe(cognee_config, neo4j_driver),),
     )
 
 
@@ -112,10 +107,16 @@ async def test_health_keeps_its_own_200_status_when_optional_backends_are_absent
     monkeypatch,
 ) -> None:
     service = _service(cognee_config=None)
-    # Disk usage is host state, not part of this contract. Keep this test
-    # focused on optional backend absence instead of making its status depend
-    # on how full the runner's filesystem happens to be.
-    monkeypatch.setattr(service, "_check_disk", lambda: ComponentCheck.healthy(state="accessible"))
+    # Disk usage is host state, not part of this contract. Inject an explicit
+    # healthy probe so this assertion stays independent of the runner disk.
+
+    class _HealthyDisk:
+        name = "disk"
+
+        async def check(self) -> ComponentCheck:
+            return ComponentCheck.healthy(state="accessible")
+
+    service._probes["disk"] = _HealthyDisk()
     result = await service.get_health()
 
     assert result.status_code == 200
@@ -127,11 +128,13 @@ async def test_health_keeps_its_own_200_status_when_optional_backends_are_absent
 async def test_health_keeps_its_own_503_status_for_required_probe_failure() -> None:
     service = _service(cognee_config=None)
 
-    async def unhealthy() -> ComponentCheck:
-        return ComponentCheck.unhealthy("disconnected", state="disconnected")
+    class _UnhealthyMongo:
+        name = "mongodb"
 
-    service._check_mongodb = unhealthy
-    service.mongo_client = object()
+        async def check(self) -> ComponentCheck:
+            return ComponentCheck.unhealthy("disconnected", state="disconnected")
+
+    service._probes["mongodb"] = _UnhealthyMongo()
     result = await service.get_health()
 
     assert result.status_code == 503
@@ -153,13 +156,13 @@ def test_health_service_factory_reads_clients_from_app_state() -> None:
 
     service = get_health_service(request)
 
-    assert service.mongo_client is state.mongo_client
-    assert service.redis_client is state.redis
-    assert service.postgres_session_factory is state.db_session_local
-    assert service.neo4j_driver is state.neo4j_driver
-    assert service.celery_app is state.celery
-    assert service.graph_memory_client is state.graphiti
-    assert service.cognee_config is state.cognee_config
+    assert service._probes["mongodb"]._client is state.mongo_client
+    assert service._probes["redis"]._client is state.redis
+    assert service._probes["postgres"]._session_factory is state.db_session_local
+    assert service._probes["neo4j"]._driver is state.neo4j_driver
+    assert service._probes["celery"]._app is state.celery
+    assert service._probes["graphiti"]._client is state.graphiti
+    assert service._probes["agent_memory"]._config is state.cognee_config
 
 
 async def test_both_surfaces_agree_for_the_same_state() -> None:

@@ -9,12 +9,15 @@ git read, then a truthful "unknown".
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from app.config import get_settings
-from app.features.health import build_info
-from app.features.health.build_info import resolve_git_sha
 from app.kernel.result import DependencyHealth
+
+build_info = importlib.import_module("app.features.health.adapters.in.http.build_info")
+resolve_git_sha = build_info.resolve_git_sha
 
 pytestmark = pytest.mark.unit
 
@@ -84,14 +87,19 @@ async def test_deep_health_payload_carries_the_resolved_sha(
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from app.features.health.router import deep_health_router
+    deep_health_router = importlib.import_module(
+        "app.features.health.adapters.in.http.router"
+    ).deep_health_router
 
     async def _healthy(_app: FastAPI) -> DependencyHealth:
         return DependencyHealth.ok("stub", 0.0)
 
     monkeypatch.setenv("GIT_SHA", "unknown")
     monkeypatch.setattr(build_info, "_cached_git_sha", lambda: "dd3abfe")
-    monkeypatch.setattr("app.features.health.router.ALL_PROBES", tuple(_healthy for _ in range(7)))
+    monkeypatch.setattr(
+        "app.features.health.adapters.in.http.router.ALL_PROBES",
+        tuple(_healthy for _ in range(7)),
+    )
     get_settings.cache_clear()
 
     app = FastAPI()
