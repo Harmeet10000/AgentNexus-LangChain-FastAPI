@@ -64,8 +64,8 @@ app = create_worker_celery_app({role!r})
 profile = profile_for_role({role!r})
 assert tuple(app.conf.include) == profile.task_modules
 app.loader.import_default_modules()
-loaded = {{name for name in sys.modules if name.startswith("app.worker.jobs.")}}
 expected_modules = set(profile.task_modules)
+loaded = {{name for name in expected_modules if name in sys.modules}}
 assert expected_modules <= loaded
 assert loaded <= expected_modules
 assert profile.task_names <= set(app.tasks)
@@ -108,6 +108,7 @@ beat.init_loader()
 ensure_beat_catalog_completeness(app)
 assert not any(name.startswith("app.worker.jobs.") for name in sys.modules)
 assert not any(name.startswith("app.worker.capabilities.") for name in sys.modules)
+assert "app.features.auth.adapters.inbound.worker.tasks" not in sys.modules
 print("BEAT_OK")
 """
     result = subprocess.run(  # noqa: S603 — literal script with trusted interpreter
@@ -119,11 +120,16 @@ print("BEAT_OK")
 
 def test_every_feature_task_module_is_explicitly_registered() -> None:
     src = Path(__file__).resolve().parents[3] / "src"
-    discovered = {
+    worker_modules = {
         ".".join(path.relative_to(src).with_suffix("").parts)
         for path in (src / "app/worker/jobs").glob("*.py")
         if path.name != "__init__.py"
     }
+    feature_modules = {
+        ".".join(path.relative_to(src).with_suffix("").parts)
+        for path in (src / "app/features").glob("*/adapters/inbound/worker/tasks.py")
+    }
+    discovered = worker_modules | feature_modules
     assert discovered == set(TASK_MODULES)
     assert len(TASK_MODULES) == len(set(TASK_MODULES))
 

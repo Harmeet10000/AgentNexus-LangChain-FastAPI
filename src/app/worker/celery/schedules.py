@@ -5,10 +5,10 @@ from __future__ import annotations
 from celery.schedules import crontab
 
 from app.config import get_settings
+from app.features.auth.module import MODULE as AUTH_MODULE
 from app.shared.jobs.names import (
     AGENT_MEMORY_CONSOLIDATION,
     AGENT_SAUL_TRANSCRIPT_SWEEP,
-    AUTH_PENDING_REVOCATION_RECONCILE,
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
     BILLING_PAUSE_RESUME,
@@ -88,11 +88,7 @@ BEAT_SCHEDULE = {
         "schedule": crontab(minute="*/15"),
         "options": {"expires": 60},
     },
-    "auth-pending-revocation-reconcile": {
-        "task": AUTH_PENDING_REVOCATION_RECONCILE,
-        # One bounded pass per minute gives a predictable convergence SLO;
-        # retry metadata prevents hot-looping on an outage or poison marker.
-        "schedule": crontab(minute="*/1"),
-        "options": {"expires": 55},
-    },
 }
+
+for schedule_factory in AUTH_MODULE.schedules:
+    BEAT_SCHEDULE.update(schedule_factory())

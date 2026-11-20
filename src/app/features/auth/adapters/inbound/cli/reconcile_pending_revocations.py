@@ -1,9 +1,9 @@
 """Bounded operator command for pending session-revocation recovery.
 
 Examples:
-  uv run python -m app.worker.operations.reconcile_pending_revocations --dry-run
-  uv run python -m app.worker.operations.reconcile_pending_revocations --apply --force
-  uv run python -m app.worker.operations.reconcile_pending_revocations --apply --user-id ID
+  uv run python -m app.features.auth.adapters.inbound.cli.reconcile_pending_revocations --dry-run
+  uv run python -m app.features.auth.adapters.inbound.cli.reconcile_pending_revocations --apply --force
+  uv run python -m app.features.auth.adapters.inbound.cli.reconcile_pending_revocations --apply --user-id ID
 """
 
 from __future__ import annotations

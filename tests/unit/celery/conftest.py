@@ -53,7 +53,7 @@ _LIFTED_TREES = (
     "app.worker.celery.observability",
     "app.worker.capabilities",
     "app.worker.execution",
-    "app.worker.jobs.auth",
+    "app.features.auth.adapters.inbound.worker.tasks",
     "app.worker.jobs.agent_saul",
     "app.worker.jobs.documents",
     "app.worker.jobs.search",

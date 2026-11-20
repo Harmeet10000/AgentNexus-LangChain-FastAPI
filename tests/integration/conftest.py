@@ -30,7 +30,7 @@ _STUBBED_MODULES = [
     "app.mcp.server.middleware",
     "app.mcp.server.tools",
     "tasks",
-    "app.worker.jobs.auth",
+    "app.features.auth.adapters.inbound.worker.tasks",
     "app.features.auth.application.token_audit_log",
 ]
 

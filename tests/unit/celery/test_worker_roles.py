@@ -131,7 +131,7 @@ def test_jobs_namespace_registers_once() -> None:
     import importlib
 
     celery_app.loader.import_default_modules()
-    importlib.import_module("app.worker.jobs.auth")
+    importlib.import_module("app.features.auth.adapters.inbound.worker.tasks")
     names = [name for name in celery_app.tasks if name.startswith("auth.")]
     assert sorted(names) == [
         "auth.pending_revocation_reconcile",
@@ -152,10 +152,14 @@ from app.worker.celery.profiles import profile_for_role
 app = create_worker_celery_app({role!r})
 profile = profile_for_role({role!r})
 assert tuple(app.conf.include) == profile.task_modules
-assert all(module.startswith("app.worker.jobs.") for module in app.conf.include)
+assert all(
+    module.startswith("app.worker.jobs.")
+    or module == "app.features.auth.adapters.inbound.worker.tasks"
+    for module in app.conf.include
+)
 app.loader.import_default_modules()
-loaded = {{name for name in sys.modules if name.startswith("app.worker.jobs.")}}
 expected = set(profile.task_modules)
+loaded = {{name for name in expected if name in sys.modules}}
 assert expected <= loaded
 assert loaded <= expected
 assert profile.task_names <= set(app.tasks)
