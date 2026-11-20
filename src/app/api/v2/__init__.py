@@ -18,7 +18,7 @@ from app.features.crawler.api.http.router import router as crawler_router
 from app.features.documents.api.http.legacy_ingest_router import router as ingestion_router
 from app.features.documents.api.http.router import router as documents_router
 from app.features.health.router import router as health_router
-from app.features.profile.router import router as profile_router
+from app.features.profile.adapters.inbound.http.router import router as profile_router
 from app.features.search.api.http.router import router as search_router
 from app.features.users.router import router as users_router
 

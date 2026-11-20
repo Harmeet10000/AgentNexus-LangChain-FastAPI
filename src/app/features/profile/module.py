@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib import import_module
 from typing import TYPE_CHECKING
 
 from app.shared.module import Module
@@ -41,7 +40,7 @@ async def build_profile_application(request: Any) -> ProfileApplication:
         get_account_store,
         get_refresh_token_repository,
     )
-    from app.features.profile.adapters.out.mongodb.repository import (  # noqa: PLC0415
+    from app.features.profile.adapters.outbound.mongodb.repository import (  # noqa: PLC0415
         MongoProfileRepository,
     )
     from app.features.profile.application.commands.update_profile import (  # noqa: PLC0415
@@ -103,7 +102,7 @@ async def build_profile_application(request: Any) -> ProfileApplication:
 
 def build_router() -> tuple[object, ...]:
     """Build only the HTTP surface when an API composition root asks for it."""
-    router = import_module("app.features.profile.adapters.in.http.router").router
+    from app.features.profile.adapters.inbound.http.router import router  # noqa: PLC0415
 
     return (router,)
 

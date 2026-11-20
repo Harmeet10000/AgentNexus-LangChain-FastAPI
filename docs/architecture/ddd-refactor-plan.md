@@ -87,10 +87,10 @@ src/
         │   ├── contracts/audit_entry_recorded_v1.py
         │   ├── domain/{entities,value_objects}/ enums.py events.py services.py errors.py repositories.py
         │   ├── application/{commands,queries,jobs,ports,dto,subscribers}/
-        │   ├── adapters/in/http/{router,dto,presenters,dependencies}.py
-        │   └── adapters/out/postgres/{models,repository,mappers}.py
+        │   ├── adapters/inbound/http/{router,dto,presenters,dependencies}.py
+        │   └── adapters/outbound/postgres/{models,repository,mappers}.py
         │       └── porttest/
-        ├── health/     … probes in adapters/out/*/probe.py
+        ├── health/     … probes in adapters/outbound/*/probe.py
         ├── profile/    … delegates credential/session mutation to auth
         ├── auth/       … hexagonal + public.py + api/http/admin_users_* + application/queries|commands/admin_*
         ├── documents/  … hexagonal; ingestion/retrieval promoted last
@@ -101,6 +101,12 @@ src/
 ```
 
 ### Slice invariants
+
+> **Why `inbound`/`outbound`, not `in`/`out`:** `in` is a Python reserved
+> keyword, so a package directory named `in` cannot appear in an import
+> statement — `from app.features.x.adapters.in.http.router import router` is a
+> `SyntaxError`, and every consumer would need `importlib.import_module`. The
+> directories are therefore `adapters/inbound/` and `adapters/outbound/`.
 
 1. `domain/` imports: stdlib, `pydantic`, `app.kernel`. **Nothing else.**
 2. `application/` imports: `domain/`, `application/ports/`, `kernel/`, other slices' `contracts/` + `public.py`. **Never** `adapters/`, `api/`, `app.worker`.
@@ -115,10 +121,10 @@ src/
 
 | Kind | Lives in | May be imported by |
 |---|---|---|
-| HTTP request/response | `adapters/in/http/dto.py` | `module.py` only |
+| HTTP request/response | `adapters/inbound/http/dto.py` | `module.py` only |
 | Application command/query | `application/dto/` | `public.py`, `module.py` |
 | Public facade DTO | `public.py` | other slices |
-| Row ↔ entity mapping | `adapters/out/<db>/mappers.py` | that adapter only |
+| Row ↔ entity mapping | `adapters/outbound/<db>/mappers.py` | that adapter only |
 | Integration event | `contracts/*_v1.py` | publishers + subscribers |
 
 ---
@@ -197,9 +203,9 @@ application/commands/record.py  ← RecordAuditEntry use case
 application/queries/list.py
 application/ports/recorder.py   ← Protocol AuditRecorder
 application/dto/
-adapters/out/postgres/{models,repository,mappers}.py
-adapters/out/postgres/porttest/
-adapters/in/http/{router,dto,presenters}.py
+adapters/outbound/postgres/{models,repository,mappers}.py
+adapters/outbound/postgres/porttest/
+adapters/inbound/http/{router,dto,presenters}.py
 module.py  public.py
 ```
 
@@ -225,8 +231,8 @@ module.py  public.py
 ```
 application/service.py        ← orchestrates probes; no driver imports
 application/ports/probes.py   ← Protocol Probe
-adapters/out/{postgres,mongodb,redis,neo4j,celery,system}/probe.py
-adapters/in/http/{router,dto}.py
+adapters/outbound/{postgres,mongodb,redis,neo4j,celery,system}/probe.py
+adapters/inbound/http/{router,dto}.py
 module.py
 ```
 
@@ -279,17 +285,17 @@ Structurally slice-local; repoints to `auth.public` (depends on Phase 3A).
 
 - `application/ports/`: `SearchRepository`, `Embeddings`, `JobQueue`.
 - Replace direct adapter + `api.http.dto` imports in `application/service.py`.
-- Move `worker/jobs/search.py` → `features/search/adapters/in/worker/tasks.py`, with
+- Move `worker/jobs/search.py` → `features/search/adapters/inbound/worker/tasks.py`, with
   the full D8 metadata update in the same commit.
 
 ### Phase 7+ — big slices
 
 `auth` domain cleanup (Beanie out of `domain/user.py`);
 `crawler` (`src/app/worker/capabilities/crawler.py` →
-`src/app/features/crawler/adapters/in/worker/capabilities.py`);
+`src/app/features/crawler/adapters/inbound/worker/capabilities.py`);
 `agent_saul`; `documents`
 (`src/app/worker/capabilities/documents.py` →
-`src/app/features/documents/adapters/in/worker/capabilities.py`, after legacy
+`src/app/features/documents/adapters/inbound/worker/capabilities.py`, after legacy
 ingestion/retrieval deletion). Each worker move includes the complete atomic D8
 metadata checklist. Then perform the deferred D11 `platform/` rename.
 

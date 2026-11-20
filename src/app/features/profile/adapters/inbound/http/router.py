@@ -1,6 +1,5 @@
 """HTTP routes for the profile resource."""
 
-from importlib import import_module
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
@@ -8,6 +7,12 @@ from returns.result import Failure
 
 from app.features.auth.api.http.dependencies import CurrentVerifiedUser
 from app.features.auth.api.http.dto import UserResponse
+from app.features.profile.adapters.inbound.http.dto import (
+    AvatarResponse,
+    ChangePasswordRequest,
+    UpdateProfileRequest,
+)
+from app.features.profile.adapters.inbound.http.presenters import present_profile
 from app.features.profile.application.dto.profile import (
     ChangePasswordCommand,
     GetProfileQuery,
@@ -20,14 +25,6 @@ from app.kernel.result import render_result
 from app.security.tokens import TokenClaims
 from app.shared.rate_limit import get_rate_limiter
 from app.utils import APIResponse, http_response
-
-_HTTP_DTO = import_module("app.features.profile.adapters.in.http.dto")
-AvatarResponse: Any = _HTTP_DTO.AvatarResponse
-ChangePasswordRequest: Any = _HTTP_DTO.ChangePasswordRequest
-UpdateProfileRequest: Any = _HTTP_DTO.UpdateProfileRequest
-present_profile: Any = import_module(
-    "app.features.profile.adapters.in.http.presenters"
-).present_profile
 
 # Per-IP GCRA guards, one class per sensitivity: password changes are
 # auth-critical (tight, mirroring forgot-password), profile edits are routine,
