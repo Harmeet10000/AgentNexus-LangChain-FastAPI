@@ -1,0 +1,1 @@
+"""Immutable profile application DTOs."""

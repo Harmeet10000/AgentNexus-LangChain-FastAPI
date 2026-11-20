@@ -66,7 +66,7 @@ from app.features.documents.ingestion.legacy_errors import (
     IngestionValidationError,
     ingestion_error_to_http_status,
 )
-from app.features.profile.exceptions import (
+from app.features.profile.domain.errors import (
     ProfileAuthenticationError,
     ProfileConflictError,
     ProfileInfrastructureError,

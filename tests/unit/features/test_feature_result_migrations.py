@@ -15,7 +15,6 @@ from returns.result import Failure, Success
 from app.features.agent_saul.application.service import AgentSaulService
 from app.features.agent_saul.domain.errors import AgentSaulError
 from app.features.audit.exceptions import AuditCode, AuditInfrastructureError
-from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccount
 from app.features.auth.domain.user import UserRole
 from app.features.billing.dunning.exceptions import DunningInfrastructureError
 from app.features.billing.dunning.service import DunningService
@@ -26,8 +25,12 @@ from app.features.documents.ingestion.legacy_errors import (
     IngestionPipelineError,
 )
 from app.features.documents.ingestion.legacy_service import IngestionService
-from app.features.profile.exceptions import ProfileAuthenticationError
-from app.features.profile.service import ProfileService
+from app.features.profile.application.commands.update_profile import (
+    UpdateProfileCommandHandler,
+)
+from app.features.profile.application.dto.profile import ChangePasswordCommand
+from app.features.profile.domain.entities.profile import Profile
+from app.features.profile.domain.errors import ProfileAuthenticationError
 from app.features.users.exceptions import UsersConflictError, UsersInfrastructureError
 from app.features.users.service import UserAdminService
 from app.kernel.result import render_result
@@ -154,8 +157,14 @@ async def test_plan_duplicate_is_returned_without_calling_create() -> None:
 
 
 async def test_profile_invalid_current_password_is_typed() -> None:
-    service = ProfileService(AsyncMock(), AsyncMock(), None)
-    user = AuthAccount(
+    service = UpdateProfileCommandHandler(
+        AsyncMock(),
+        password_hasher=SimpleNamespace(verify=lambda _hash, _password: False),
+        session_revoker=AsyncMock(),
+        storage=None,
+        logger=SimpleNamespace(),
+    )
+    user = Profile(
         id="507f1f77bcf86cd799439011",
         email="user@example.com",
         full_name=None,
@@ -163,11 +172,18 @@ async def test_profile_invalid_current_password_is_typed() -> None:
         is_active=True,
         is_verified=True,
         role=UserRole.USER,
-        permissions=frozenset(),
+        avatar_url=None,
         created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
     )
-    result = await service.change_password(user, "wrong", "new", None, revoke_other_sessions=False)
+    result = await service.change_password(
+        ChangePasswordCommand(
+            profile=user,
+            current_password="wrong",
+            new_password="new",
+            current_session_id=None,
+            revoke_other_sessions=False,
+        )
+    )
     assert isinstance(result, Failure)
     assert isinstance(result.failure(), ProfileAuthenticationError)
 
