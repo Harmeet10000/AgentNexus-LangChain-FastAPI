@@ -27,6 +27,10 @@ _BASE_SETTINGS: dict[str, object] = {
     "CRAWLER_EGRESS_LOOPBACK_PROBE_URL": "http://127.0.0.1:9/",
     "CRAWLER_EGRESS_ALLOWED_SCHEME_PORTS": "http:80,https:443",
     "CRAWLER_EGRESS_NO_PROXY": "rabbitmq,crawler-redis-relay,127.0.0.1",
+    "CRAWLER_REDIS_RELAY_HOST": None,
+    "CRAWLER_REDIS_RELAY_CA_FILE": None,
+    "CRAWLER_REDIS_RELAY_CERT_FILE": None,
+    "CRAWLER_REDIS_RELAY_KEY_FILE": None,
     "REDIS_URL": "redis://user:pass@managed.example.com:6379/2",
 }
 

@@ -268,7 +268,7 @@ async def test_webhook_retry_after_receipt_crash_applies_credit_once() -> None:
     coordinator = SubscriptionLifecycleCoordinator(persistence, provider)
     payment_service = PaymentService(
         payments=_Payments(),  # type: ignore[arg-type]
-        audit=SimpleNamespace(create=AsyncMock(return_value=Success(None))),  # type: ignore[arg-type]
+        audit=SimpleNamespace(record=AsyncMock(return_value=Success(None))),  # type: ignore[arg-type]
         lifecycle_coordinator=coordinator,  # type: ignore[arg-type]
     )
     apply_settled = AsyncMock(
@@ -355,7 +355,7 @@ async def test_settled_consumption_records_the_verified_payment_projection() -> 
             return Success(row)
 
     class _Audit:
-        async def create(self, row: object):
+        async def record(self, row: object):
             return Success(row)
 
     operation = ApplyCreditsToInvoice(

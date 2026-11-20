@@ -616,8 +616,6 @@ section-order = [
 "src/app/utils/storage/models.py" = ["TC003"]
 "src/app/connections/tavily.py" = ["TC003"]
 "src/app/connections/mailer.py" = ["TC003"]
-# kernel/result.py carries Pydantic models: ClassVar must stay runtime.
-"src/app/kernel/result.py" = ["TC003"]
 "src/app/ai/tools/shell.py" = [
     "ASYNC240", # Blocking path methods in async — uses os.path intentionally
     "PLC0415",  # Local import re to avoid name collision
@@ -988,9 +986,8 @@ forbidden_modules = ["app.worker"]
 name = "Audit domain is framework-free"
 type = "forbidden"
 source_modules = ["app.features.audit.domain"]
-# Phase 5 removes kernel/result.py; until then these slice contracts police
-# direct dependency direction without treating an approved public facade's
-# own inward dependencies as consumer reach-through.
+# These contracts police direct dependency direction without treating an
+# approved public facade's own inward dependencies as consumer reach-through.
 allow_indirect_imports = true
 forbidden_modules = [
     "app.features",

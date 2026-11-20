@@ -102,7 +102,7 @@ class _InvoiceRepository:
 
 
 class _AuditRepository:
-    async def create(self, row: object) -> Success[object]:
+    async def record(self, row: object) -> Success[object]:
         return Success(row)
 
 

@@ -152,8 +152,8 @@ class TestGrantCredit:
 
         _run(svc.grant_credit("user-123", dto))
 
-        svc.audit.create.assert_awaited_once()
-        audit_call = svc.audit.create.call_args[0][0]
+        svc.audit.record.assert_awaited_once()
+        audit_call = svc.audit.record.call_args[0][0]
         assert audit_call.entity_type == "user_credit"
         assert audit_call.action == "credit.granted"
         assert audit_call.user_id == "user-123"
@@ -333,8 +333,8 @@ class TestConsumeCredits:
             )
         )
 
-        svc.audit.create.assert_awaited_once()
-        audit_call = svc.audit.create.call_args[0][0]
+        svc.audit.record.assert_awaited_once()
+        audit_call = svc.audit.record.call_args[0][0]
         assert audit_call.action == "credit.consumed"
         assert audit_call.changes["invoice_id"] == str(invoice_id)
 

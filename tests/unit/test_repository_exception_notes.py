@@ -6,7 +6,7 @@ import ast
 from pathlib import Path
 
 _REPOSITORIES = (
-    "audit/repository.py",
+    "audit/adapters/outbound/postgres/repository.py",
     "billing/credits/repository.py",
     "documents/adapters/persistence/postgres/document_repository.py",
     "billing/invoices/repository.py",
