@@ -12,7 +12,7 @@ from returns.result import Failure, Success
 from app.features.auth.application.commands.admin_accounts import AdminAccounts
 from app.features.auth.domain.errors import AuthAdminConflictError, AuthAdminInfrastructureError
 from app.features.auth.domain.user import UserRole
-from app.kernel.result import render_result
+from app.shared.result.render import render_result
 
 
 async def test_self_role_change_is_a_renderable_conflict() -> None:

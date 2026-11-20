@@ -24,9 +24,8 @@ from app.features.auth.api.http.dependencies import (
     require_role,
 )
 from app.features.auth.domain.user import Permission, User, UserRole
-from app.kernel.result import render_result
 from app.shared.rate_limit import get_rate_limiter
-from app.utils import APIResponse
+from app.shared.result.render import APIResponse, render_result
 
 if TYPE_CHECKING:
     from collections.abc import Callable

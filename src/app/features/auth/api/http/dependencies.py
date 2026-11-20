@@ -24,6 +24,9 @@ from app.features.auth.application.personal_tenant_provisioning import (
 )
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import (
+    AuthAdminAuthorizationError,
+    AuthAdminConflictError,
+    AuthAdminInfrastructureError,
     AuthAuthenticationError,
     AuthAuthorizationError,
     AuthConflictError,
@@ -498,13 +501,13 @@ async def get_current_user(
                 raise NotFoundException(
                     resource="Auth resource", identifier=None, error_code=error.code
                 )
-            case AuthConflictError():
+            case AuthConflictError() | AuthAdminConflictError():
                 raise ConflictException(
                     detail=error.message, error_code=error.code, data=error.details
                 )
             case AuthAuthenticationError() | AuthRefreshReuseError():
                 raise UnauthorizedException(detail=error.message, error_code=error.code)
-            case AuthAuthorizationError():
+            case AuthAuthorizationError() | AuthAdminAuthorizationError():
                 raise ForbiddenException(detail=error.message, error_code=error.code)
             case AuthProvisioningPendingError():
                 # Durable provisioning pending: retryable conflict, never a
@@ -512,7 +515,7 @@ async def get_current_user(
                 raise ConflictException(
                     detail=error.message, error_code=error.code, data=error.details
                 )
-            case AuthInfrastructureError():
+            case AuthInfrastructureError() | AuthAdminInfrastructureError():
                 raise InfrastructureException(
                     detail=error.message,
                     error_code=error.code,

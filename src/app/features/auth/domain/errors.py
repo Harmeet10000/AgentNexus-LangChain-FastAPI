@@ -1,7 +1,7 @@
 """Authentication feature typed errors."""
 
 from enum import StrEnum
-from typing import ClassVar, assert_never, cast, override
+from typing import ClassVar, assert_never, cast
 
 from pydantic import model_validator
 from returns.result import Result
@@ -118,32 +118,31 @@ class AuthProvisioningPendingError(FeatureError):
     retryable: ClassVar[bool] = True
 
 
-class AuthAdminConflictError(AuthConflictError):
+class AuthAdminConflictError(FeatureError):
     """An administrator attempted a forbidden self-mutation."""
 
+    kind: ClassVar[ErrorKind] = ErrorKind.CONFLICT
     code: ClassVar[AuthCode] = AuthCode.SELF_ROLE_CHANGE
+    retryable: ClassVar[bool] = False
     operation: str | None = None
 
 
-class AuthAdminAuthorizationError(AuthAuthorizationError):
+class AuthAdminAuthorizationError(FeatureError):
     """An administrator attempted an invalid impersonation."""
 
+    kind: ClassVar[ErrorKind] = ErrorKind.AUTHORIZATION
     code: ClassVar[AuthCode] = AuthCode.IMPERSONATION_FORBIDDEN
+    retryable: ClassVar[bool] = False
     operation: str | None = None
 
 
-class AuthAdminInfrastructureError(AuthInfrastructureError):
+class AuthAdminInfrastructureError(FeatureError):
     """An administrative account or session operation could not complete."""
 
+    kind: ClassVar[ErrorKind] = ErrorKind.INFRASTRUCTURE
     code: ClassVar[AuthCode] = AuthCode.USERS_PERSISTENCE_ERROR
+    retryable: ClassVar[bool] = True
     operation: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    @override
-    def _sanitize_details(cls, value: object) -> object:
-        """Retain the legacy users projection's diagnostic payload exactly."""
-        return value
 
 
 type AuthError = (
@@ -170,6 +169,7 @@ def auth_error_to_http_status(error: AuthError) -> int:
             | AuthNotFoundError()
             | AuthSessionNotFoundError()
             | AuthConflictError()
+            | AuthAdminConflictError()
         ):
             return http_status_for_kind(error.kind)
         case (
@@ -177,9 +177,10 @@ def auth_error_to_http_status(error: AuthError) -> int:
             | AuthRefreshReuseError()
             | AuthAuthorizationError()
             | AuthProvisioningPendingError()
+            | AuthAdminAuthorizationError()
         ):
             return http_status_for_kind(error.kind)
-        case AuthInfrastructureError():
+        case AuthInfrastructureError() | AuthAdminInfrastructureError():
             return http_status_for_kind(error.kind, retryable=error.retryable)
         case _ as unreachable:
             assert_never(unreachable)

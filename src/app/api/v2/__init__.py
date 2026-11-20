@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.envelope import StrictEnvelopeAPIRouter
 from app.features.agent_saul.api.http.router import router as agent_saul_router
+from app.features.auth.api.http.admin_users_router import router as users_router
 from app.features.auth.api.http.router import router as auth_router
 from app.features.auth.api.http.tenant_router import router as tenant_router
 from app.features.billing.credits.router import admin_router as credit_admin_router
@@ -20,7 +21,6 @@ from app.features.documents.api.http.router import router as documents_router
 from app.features.health.adapters.inbound.http.router import router as health_router
 from app.features.profile.adapters.inbound.http.router import router as profile_router
 from app.features.search.api.http.router import router as search_router
-from app.features.users.router import router as users_router
 
 billing_router = APIRouter(tags=["billing"])
 for _router in (

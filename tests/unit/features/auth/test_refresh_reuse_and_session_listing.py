@@ -36,9 +36,9 @@ from app.features.auth.domain.errors import (
     AuthCode,
     AuthRefreshReuseError,
 )
-from app.shared.result.render import render_result
 from app.security.tokens import decode_token
 from app.shared.jobs.registry import UnregisteredTaskError
+from app.shared.result.render import render_result
 
 from .provisioning_fakes import FakeTenantSQLStore
 
