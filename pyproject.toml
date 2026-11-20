@@ -983,3 +983,75 @@ source_modules = [
     "app.features.billing.credits.jobs",
 ]
 forbidden_modules = ["app.worker"]
+
+[[tool.importlinter.contracts]]
+name = "Audit domain is framework-free"
+type = "forbidden"
+source_modules = ["app.features.audit.domain"]
+# Phase 5 removes kernel/result.py; until then these slice contracts police
+# direct dependency direction without treating an approved public facade's
+# own inward dependencies as consumer reach-through.
+allow_indirect_imports = true
+forbidden_modules = [
+    "app.features",
+    "app.connections",
+    "app.shared",
+    "app.config",
+    "app.utils",
+    "app.events",
+    "app.observability",
+    "app.security",
+    "app.resilience",
+    "app.worker",
+]
+
+[[tool.importlinter.contracts]]
+name = "Audit application does not import adapters or transport"
+type = "forbidden"
+source_modules = ["app.features.audit.application"]
+allow_indirect_imports = true
+forbidden_modules = ["app.features.audit.adapters", "app.features.audit.api"]
+
+[[tool.importlinter.contracts]]
+name = "Billing reaches audit through public composition only"
+type = "forbidden"
+source_modules = ["app.features.billing"]
+allow_indirect_imports = true
+forbidden_modules = [
+    "app.features.audit.domain",
+    "app.features.audit.application",
+    "app.features.audit.adapters",
+    "app.features.audit.api",
+]
+
+[[tool.importlinter.contracts]]
+name = "Health application is driver-independent"
+type = "forbidden"
+source_modules = ["app.features.health.application"]
+allow_indirect_imports = true
+forbidden_modules = ["app.features.health.adapters"]
+
+[[tool.importlinter.contracts]]
+name = "Profile core is transport and adapter independent"
+type = "forbidden"
+source_modules = ["app.features.profile.domain", "app.features.profile.application"]
+allow_indirect_imports = true
+forbidden_modules = [
+    "app.features.profile.adapters",
+    "app.features.auth.adapters",
+    "app.features.auth.api",
+    "app.features.auth.application",
+    "app.features.auth.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Profile outbound adapters use only the auth public seam"
+type = "forbidden"
+source_modules = ["app.features.profile.adapters.outbound"]
+allow_indirect_imports = true
+forbidden_modules = [
+    "app.features.auth.adapters",
+    "app.features.auth.api",
+    "app.features.auth.application",
+    "app.features.auth.domain",
+]
