@@ -9,7 +9,10 @@ from app.features.agent_saul.domain.errors import (
     AgentSaulValidationError,
     agent_saul_error_to_http_status,
 )
-from app.features.audit.exceptions import AuditInfrastructureError, audit_error_to_http_status
+from app.features.audit.domain.errors import (
+    AuditInfrastructureError,
+    audit_error_to_http_status,
+)
 from app.features.auth.domain.errors import (
     AuthAuthenticationError,
     AuthAuthorizationError,

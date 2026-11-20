@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 MODEL_MODULE_NAMES: tuple[str, ...] = (
-    "app.features.audit.models",
+    "app.features.audit.adapters.outbound.postgres.models",
     "app.features.agent_saul.adapters.persistence.models",
     "app.features.billing.credits.models",
     "app.features.documents.domain.document",

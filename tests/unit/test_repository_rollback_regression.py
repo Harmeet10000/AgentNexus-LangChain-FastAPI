@@ -14,8 +14,8 @@ import pytest
 from returns.result import Failure
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
 
-from app.features.audit.models import AuditLog
-from app.features.audit.repository import AuditLogRepository
+from app.features.audit.adapters.outbound.postgres.models import AuditLog
+from app.features.audit.adapters.outbound.postgres.repository import AuditLogRepository
 
 
 def _run(coro):

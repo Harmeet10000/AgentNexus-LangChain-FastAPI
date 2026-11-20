@@ -14,7 +14,7 @@ from returns.result import Failure, Success
 
 from app.features.agent_saul.application.service import AgentSaulService
 from app.features.agent_saul.domain.errors import AgentSaulError
-from app.features.audit.exceptions import AuditCode, AuditInfrastructureError
+from app.features.audit.domain.errors import AuditCode, AuditInfrastructureError
 from app.features.auth.domain.user import UserRole
 from app.features.billing.dunning.exceptions import DunningInfrastructureError
 from app.features.billing.dunning.service import DunningService
