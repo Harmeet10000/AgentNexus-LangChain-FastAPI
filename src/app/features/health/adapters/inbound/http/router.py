@@ -9,6 +9,9 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from returns.result import Success
 
 from app.config import get_settings
+from app.features.health.application.dto.aggregate import (
+    HealthDataDTO,  # noqa: TC001 — FastAPI response annotation
+)
 from app.features.health.application.service import (
     HealthService,  # noqa: TC001 — FastAPI dependency annotation
 )
@@ -20,21 +23,21 @@ from app.kernel.result import (
     render_result,
 )
 
-from ....adapters.out.mongodb.probe import check_mongodb  # ty: ignore[unresolved-import]
-from ....adapters.out.neo4j.probe import (  # ty: ignore[unresolved-import]
+from ....adapters.outbound.mongodb.probe import check_mongodb
+from ....adapters.outbound.neo4j.probe import (
     check_cognee,
     check_graphiti,
     check_neo4j,
     check_neo4j_plugins,
 )
-from ....adapters.out.postgres.probe import check_postgres  # ty: ignore[unresolved-import]
-from ....adapters.out.redis.probe import check_redis  # ty: ignore[unresolved-import]
-from ....module import get_health_service  # ty: ignore[unresolved-import]
-from .build_info import resolve_git_sha  # ty: ignore[unresolved-import]
-from .dto import (  # ty: ignore[unresolved-import]
+from ....adapters.outbound.postgres.probe import check_postgres
+from ....adapters.outbound.redis.probe import check_redis
+from ....module import get_health_service
+from .build_info import resolve_git_sha
+from .dto import (
     SelfInfoDTO,  # noqa: TC001 — FastAPI response annotation
 )
-from .presenters import present_health, present_self_info  # ty: ignore[unresolved-import]
+from .presenters import present_health, present_self_info
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -131,6 +134,6 @@ async def get_self(
 async def get_health(
     response: Response,
     service: Annotated[HealthService, Depends(get_health_service)],
-) -> APIResponse[object]:
+) -> APIResponse[HealthDataDTO]:
     result: HealthResultDTO = await service.get_health()
     return present_health(result, response)

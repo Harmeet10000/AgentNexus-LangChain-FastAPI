@@ -1,14 +1,14 @@
 """Compatibility imports for deep probes now owned by outbound adapters."""
 
-from app.features.health.adapters.out.mongodb.probe import check_mongodb
-from app.features.health.adapters.out.neo4j.probe import (
+from app.features.health.adapters.outbound.mongodb.probe import check_mongodb
+from app.features.health.adapters.outbound.neo4j.probe import (
     check_cognee,
     check_graphiti,
     check_neo4j,
     check_neo4j_plugins,
 )
-from app.features.health.adapters.out.postgres.probe import check_postgres
-from app.features.health.adapters.out.redis.probe import check_redis
+from app.features.health.adapters.outbound.postgres.probe import check_postgres
+from app.features.health.adapters.outbound.redis.probe import check_redis
 
 ALL_PROBES = [
     check_postgres,

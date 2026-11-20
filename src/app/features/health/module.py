@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import time
 from typing import TYPE_CHECKING
 
@@ -17,8 +16,9 @@ if TYPE_CHECKING:
 
 def _routes() -> tuple[Any, ...]:
     """Load HTTP routes only when an API composition root asks for routes."""
-    http = importlib.import_module("app.features.health.adapters.in.http.router")
-    return (http.router, http.deep_health_router)
+    from .adapters.inbound.http.router import deep_health_router, router
+
+    return (router, deep_health_router)
 
 
 def get_health_service(request: Any) -> Any:
@@ -29,16 +29,20 @@ def get_health_service(request: Any) -> Any:
     independent of the API's database clients.
     """
     from app.config import get_settings
-    from app.features.health.adapters.out.celery.probe import CeleryProbe
-    from app.features.health.adapters.out.mongodb.probe import MongoDBProbe
-    from app.features.health.adapters.out.neo4j.probe import (
+    from app.features.health.adapters.outbound.celery.probe import CeleryProbe
+    from app.features.health.adapters.outbound.mongodb.probe import MongoDBProbe
+    from app.features.health.adapters.outbound.neo4j.probe import (
         AgentMemoryProbe,
         GraphitiProbe,
         Neo4jProbe,
     )
-    from app.features.health.adapters.out.postgres.probe import PostgresProbe
-    from app.features.health.adapters.out.redis.probe import RedisProbe
-    from app.features.health.adapters.out.system.probe import DiskProbe, MemoryProbe, SystemProbe
+    from app.features.health.adapters.outbound.postgres.probe import PostgresProbe
+    from app.features.health.adapters.outbound.redis.probe import RedisProbe
+    from app.features.health.adapters.outbound.system.probe import (
+        DiskProbe,
+        MemoryProbe,
+        SystemProbe,
+    )
     from app.features.health.application.service import HealthService
 
     state = request.app.state

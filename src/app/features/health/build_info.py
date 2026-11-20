@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import importlib
+from app.features.health.adapters.inbound.http.build_info import (
+    _GIT_SHA_CACHE,
+    _cached_git_sha,
+    resolve_git_sha,
+)
 
-_implementation = importlib.import_module("app.features.health.adapters.in.http.build_info")
-_GIT_SHA_CACHE = _implementation._GIT_SHA_CACHE
-_cached_git_sha = _implementation._cached_git_sha
-resolve_git_sha = _implementation.resolve_git_sha
+__all__ = ["_GIT_SHA_CACHE", "_cached_git_sha", "resolve_git_sha"]

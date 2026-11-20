@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import importlib
+from app.features.health.adapters.inbound.http.router import (
+    ALL_PROBES,
+    deep_health_router,
+    router,
+)
 
-_implementation = importlib.import_module("app.features.health.adapters.in.http.router")
-router = _implementation.router
-deep_health_router = _implementation.deep_health_router
-ALL_PROBES = _implementation.ALL_PROBES
+__all__ = ["ALL_PROBES", "deep_health_router", "router"]

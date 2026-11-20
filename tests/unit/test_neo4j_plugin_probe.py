@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any
 
-from app.features.health.adapters.out.neo4j.probe import check_neo4j_plugins
+from app.features.health.adapters.outbound.neo4j.probe import check_neo4j_plugins
 
 
 def test_standalone_cognee_probe_imports_with_application_logger() -> None:

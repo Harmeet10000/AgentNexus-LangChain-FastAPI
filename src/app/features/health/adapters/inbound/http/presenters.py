@@ -4,11 +4,11 @@ from fastapi import Response
 
 from app.kernel.result import APIResponse, http_response
 
-from ....application.dto.aggregate import (  # ty: ignore[unresolved-import]
+from ....application.dto.aggregate import (
     HealthDataDTO,
     HealthResultDTO,
 )
-from .dto import SelfInfoDTO  # ty: ignore[unresolved-import]
+from .dto import SelfInfoDTO
 
 
 def present_self_info(
