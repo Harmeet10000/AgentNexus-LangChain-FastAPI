@@ -89,7 +89,7 @@ async def _run_probe(
 async def get_deep_health(request: Request, response: Response) -> APIResponse[HealthResponse]:
     """Deep health check that probes critical dependencies in parallel."""
     settings = get_settings()
-    dependencies = await asyncio.gather(
+    dependencies: list[DependencyHealth] = await asyncio.gather(
         *[
             _run_probe(probe, request.app, component)
             for probe, component in zip(ALL_PROBES, _DEEP_PROBE_NAMES, strict=True)

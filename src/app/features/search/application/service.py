@@ -548,19 +548,19 @@ class SearchService:
         request-scoped repo is a correctness bug, not a perf trade. The
         branches are cheap indexed reads; the fusion cost dominates.
         """
-        bm25 = await self.repo.bm25_search(
+        bm25: SearchResult[list[RankedResultRow]] = await self.repo.bm25_search(
             tenant_id=tenant_id,
             query=query,
             candidate_limit=candidate_limit,
             metadata_filter=metadata_filter,
         )
-        vector = await self.repo.vector_search(
+        vector: SearchResult[list[RankedResultRow]] = await self.repo.vector_search(
             tenant_id=tenant_id,
             embedding=query_embedding,
             candidate_limit=candidate_limit,
             metadata_filter=metadata_filter,
         )
-        trigram = await self.repo.trigram_search(
+        trigram: SearchResult[list[RankedResultRow]] = await self.repo.trigram_search(
             tenant_id=tenant_id,
             query=query,
             candidate_limit=candidate_limit,
@@ -588,7 +588,7 @@ class SearchService:
             return None
         raw = cached.decode("utf-8") if isinstance(cached, bytes | bytearray) else str(cached)
         try:
-            response = SearchResponse.model_validate_json(raw)
+            response: SearchResponse = SearchResponse.model_validate_json(raw)
         except ValidationError as exc:
             # A corrupt or foreign-schema entry is a miss, not a 500: the
             # query recomputes and the SET below overwrites the bad value.
