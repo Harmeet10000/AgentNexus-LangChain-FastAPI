@@ -5,10 +5,9 @@ from __future__ import annotations
 from celery.schedules import crontab
 
 from app.config import get_settings
+from app.features.agent_saul.module import MODULE as AGENT_SAUL_MODULE
 from app.features.auth.module import MODULE as AUTH_MODULE
 from app.shared.jobs.names import (
-    AGENT_MEMORY_CONSOLIDATION,
-    AGENT_SAUL_TRANSCRIPT_SWEEP,
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
     BILLING_PAUSE_RESUME,
@@ -66,18 +65,6 @@ BEAT_SCHEDULE = {
             day_of_week=settings.CREDIT_RECONCILIATION_CRON_DAY_OF_WEEK,
         ),
     },
-    "agent-memory-consolidation-nightly": {
-        "task": AGENT_MEMORY_CONSOLIDATION,
-        "schedule": crontab(hour=3, minute=30),
-        "kwargs": {"tenant_ids": []},
-    },
-    "agent-saul-transcript-sweep-periodic": {
-        "task": AGENT_SAUL_TRANSCRIPT_SWEEP,
-        # §6 trigger 3: bounded beat sweep (hints + stale non-terminal + GC);
-        # [v3] a Redis outage skips derivation entirely on that beat.
-        "schedule": crontab(minute="*/15"),
-        "options": {"expires": 60},
-    },
     "documents-stuck-sweep-periodic": {
         "task": DOCUMENTS_STUCK_SWEEP,
         # C7: the stuck-age safety net (harden 3.11) only fired on the next
@@ -90,5 +77,6 @@ BEAT_SCHEDULE = {
     },
 }
 
-for schedule_factory in AUTH_MODULE.schedules:
-    BEAT_SCHEDULE.update(schedule_factory())
+for feature_module in (AUTH_MODULE, AGENT_SAUL_MODULE):
+    for schedule_factory in feature_module.schedules:
+        BEAT_SCHEDULE.update(schedule_factory())

@@ -43,7 +43,7 @@ def test_catalog_carries_transcript_payload_and_worker_metadata() -> None:
 
     assert definition.payload_model is NoKwargsPayload
     assert definition.queue is JobQueue.DEFAULT
-    assert definition.declaring_module == "app.worker.jobs.agent_saul"
+    assert definition.declaring_module == "app.features.agent_saul.adapters.inbound.worker.tasks"
     assert AGENT_SAUL_TRANSCRIPT_SWEEP in task_routes()
     assert {entry["task"] for entry in BEAT_SCHEDULE.values()} <= set(JOB_CATALOG)
 

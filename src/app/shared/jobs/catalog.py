@@ -177,14 +177,14 @@ _CATALOG: dict[str, JobDefinition[CeleryTaskPayload]] = {
         AgentMemoryConsolidationPayload,
         queue=JobQueue.DEFAULT,
         capability=JobCapability.AGENT_MEMORY,
-        declaring_module="app.worker.jobs.agent_saul",
+        declaring_module="app.features.agent_saul.adapters.inbound.worker.tasks",
     ),
     AGENT_SAUL_TRANSCRIPT_SWEEP: _job(
         AGENT_SAUL_TRANSCRIPT_SWEEP,
         NoKwargsPayload,
         queue=JobQueue.DEFAULT,
         capability=JobCapability.TRANSCRIPT_SWEEP,
-        declaring_module="app.worker.jobs.agent_saul",
+        declaring_module="app.features.agent_saul.adapters.inbound.worker.tasks",
     ),
     DOCUMENTS_INGEST: _job(
         DOCUMENTS_INGEST,
