@@ -15,7 +15,7 @@ from docling.document_converter import DocumentConverter, DocumentStream
 
 from app.extraction.docling import create_document_converter
 from app.extraction.docling.docling_enhanced import table_markdown
-from app.features.documents.ingestion.chunking.classification import ParsedDocument
+from app.features.documents.application.ingestion.chunking.classification import ParsedDocument
 
 if TYPE_CHECKING:
     from docling.datamodel.document import ConversionResult

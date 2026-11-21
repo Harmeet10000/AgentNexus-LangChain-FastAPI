@@ -15,7 +15,7 @@ from returns.result import Failure
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
 
 from app.features.audit.adapters.outbound.postgres.models import AuditLog
-from app.features.audit.adapters.outbound.postgres.repository import AuditLogRepository
+from app.features.audit.adapters.outbound.postgres.repository import PostgresAuditLogRepository
 
 
 def _run(coro):
@@ -97,7 +97,7 @@ class TestRollbackRegression:
         flush_err = IntegrityError("stmt", {}, Exception("orig"))
         session = _mock_session_with_rollback(raise_on_flush=flush_err)
 
-        repo = AuditLogRepository(session)
+        repo = PostgresAuditLogRepository(session)
         entry = MagicMock(spec=AuditLog)
         entry.entity_type = "t"
         entry.entity_id = "1"
@@ -160,7 +160,7 @@ class TestRollbackRegression:
         flush_err = IntegrityError("stmt", {}, Exception("orig"))
         session = _mock_session_with_rollback(raise_on_flush=flush_err)
 
-        repo = AuditLogRepository(session)
+        repo = PostgresAuditLogRepository(session)
         entry = MagicMock(spec=AuditLog)
         entry.entity_type = "t"
         entry.entity_id = "1"

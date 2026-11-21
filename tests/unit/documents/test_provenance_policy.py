@@ -16,8 +16,8 @@ from app.features.documents.adapters.persistence.postgres.document_repository im
 )
 from app.features.documents.api.http.dto import UnifiedAskResponse
 from app.features.documents.application.queries.documents import _build_answer_cache_key
-from app.features.documents.retrieval.graph.nodes import make_graph_retrieval_node
-from app.features.documents.retrieval.graph.state import (
+from app.features.documents.application.retrieval.graph.nodes import make_graph_retrieval_node
+from app.features.documents.application.retrieval.graph.state import (
     QueryPlan,
     RetrievalGraphContext,
 )

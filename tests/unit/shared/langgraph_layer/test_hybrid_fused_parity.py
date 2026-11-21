@@ -15,16 +15,16 @@ from app.features.documents.application.queries.documents import (
     DocumentQueryService,
     retrieve_fused,
 )
-from app.features.documents.retrieval.graph import nodes as retrieval_nodes
-from app.features.documents.retrieval.graph.nodes import make_hybrid_retrieval_node
-from app.features.documents.retrieval.graph.state import QueryPlan
+from app.features.documents.application.retrieval.graph import nodes as retrieval_nodes
+from app.features.documents.application.retrieval.graph.nodes import make_hybrid_retrieval_node
+from app.features.documents.application.retrieval.graph.state import QueryPlan
 
 
 def _runtime(**collaborators: object) -> object:
     """A minimal invocation runtime: collaborators ride the context schema."""
     from types import SimpleNamespace
 
-    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+    from app.features.documents.application.retrieval.graph.state import RetrievalGraphContext
 
     return SimpleNamespace(context=RetrievalGraphContext(**collaborators))
 

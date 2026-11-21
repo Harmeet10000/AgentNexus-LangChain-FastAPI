@@ -33,9 +33,9 @@ from app.features.documents.adapters.persistence.postgres.document_repository im
     build_search_filter_params,
 )
 from app.features.documents.api.http.dto import EvidenceCoverage
+from app.features.documents.application.retrieval import row_hydration
+from app.features.documents.application.retrieval.graph.state import StageWarning
 from app.features.documents.domain.constants import RRF_WEIGHT_GRAPHITI
-from app.features.documents.retrieval import row_hydration
-from app.features.documents.retrieval.graph.state import StageWarning
 from app.observability.degradation import (
     GRAPHITI_UNAVAILABLE,
     NO_EVIDENCE,
@@ -50,9 +50,9 @@ if TYPE_CHECKING:
     from typing import Any
 
     from app.features.documents.api.http.dto import EvidenceStatus
-    from app.features.documents.retrieval.graph.budgets import StageBudgetTracker
-    from app.features.documents.retrieval.graph.state import RetrievedChunk
-    from app.features.documents.retrieval.reranking.reranker import Reranker
+    from app.features.documents.application.retrieval.graph.budgets import StageBudgetTracker
+    from app.features.documents.application.retrieval.graph.state import RetrievedChunk
+    from app.features.documents.application.retrieval.reranking.reranker import Reranker
     from app.retrieval.token_counter import CountTokens
 
 # Returned chunk text is token-budgeted (harden 5.1 "token budgeting"): a

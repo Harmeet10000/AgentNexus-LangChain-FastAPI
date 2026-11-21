@@ -8,6 +8,10 @@ from returns.result import Failure
 
 from app.config import get_settings
 from app.events import with_terminal_outbox
+from app.features.documents.adapters.inbound.worker.capability import (
+    get_document_worker_resources,
+    run_on_document_worker_loop,
+)
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
 )
@@ -15,10 +19,6 @@ from app.features.documents.application.commands.upload_document import run_docu
 from app.observability.logging import logger
 from app.shared.jobs.names import DOCUMENTS_INGEST, DOCUMENTS_INGEST_TERMINAL
 from app.utils import InfrastructureException, ServiceUnavailableException
-from app.worker.capabilities.documents import (
-    get_document_worker_resources,
-    run_on_document_worker_loop,
-)
 from app.worker.celery.app import get_worker_celery_app
 from app.worker.celery.task import ResilientTask
 
@@ -27,7 +27,7 @@ celery_app = get_worker_celery_app()
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.worker.capabilities.documents import (
+    from app.features.documents.adapters.inbound.worker.capability import (
         DocumentWorkerResources,
     )
 

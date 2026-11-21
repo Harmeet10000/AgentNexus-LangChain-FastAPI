@@ -25,17 +25,17 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from app.extraction.docling.chunker import get_tokenizer
+from app.features.documents.application.ingestion.chunking.classification import (
+    PreparedChunk,
+    QualityWarning,
+    _structure_markdown,
+)
 from app.features.documents.domain.fidelity import (
     ChunkPlausibilityState,
     ChunkPlausibilityVerdict,
     FidelityThresholds,
     IngestionFidelityMetrics,
     TokenCountBasis,
-)
-from app.features.documents.ingestion.chunking.classification import (
-    PreparedChunk,
-    QualityWarning,
-    _structure_markdown,
 )
 from app.retrieval.chunk_policy import resolve_chunk_policy
 
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
     from transformers import PreTrainedTokenizerBase
 
-    from app.features.documents.ingestion.chunking.classification import ParsedDocument
+    from app.features.documents.application.ingestion.chunking.classification import ParsedDocument
 
 _WHITESPACE_RE = re.compile(r"\s+")
 

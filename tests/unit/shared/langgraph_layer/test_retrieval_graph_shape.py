@@ -8,7 +8,7 @@ the pinned sets below in the same commit.
 
 from __future__ import annotations
 
-from app.features.documents.retrieval.graph.graph import build_retrieval_graph
+from app.features.documents.application.retrieval.graph.graph import build_retrieval_graph
 
 
 def _shape() -> tuple[set[str], set[tuple[str, str]]]:

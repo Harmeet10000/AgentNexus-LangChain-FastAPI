@@ -58,6 +58,32 @@ from app.features.documents.application.access_audit import (
     DocumentAccessAuditRecorder,
     InMemoryDocumentAccessAuditRecorder,
 )
+from app.features.documents.application.ingestion.adapters.graphiti.verifier import (
+    write_and_verify_chunk,
+)
+from app.features.documents.application.ingestion.chunking.classification import (
+    ClassifiedDocument,
+    ContractBoundary,
+    ParsedDocument,
+    QualityWarning,
+    classify_document,
+    establish_contract_boundaries,
+    segment_chunks,
+)
+from app.features.documents.application.ingestion.chunking.context_summary import (
+    apply_document_context,
+)
+from app.features.documents.application.ingestion.chunking.fidelity import (
+    BoundaryFidelityInputs,
+    build_fidelity_metrics,
+    fidelity_degradation_warnings,
+)
+from app.features.documents.application.ingestion.enrichment.legal_metadata import (
+    contract_event_dates,
+    enrich_legal_chunks,
+    extract_legal_metadata,
+)
+from app.features.documents.application.ingestion.parsing.parser import parse_document
 from app.features.documents.application.queries.documents import (
     _KNOWLEDGE_EXTRACTION_PROMPT,
     _batched,
@@ -83,28 +109,6 @@ from app.features.documents.domain.fidelity import (
     IngestionFidelityMetrics,
     aggregate_relationship_states,
 )
-from app.features.documents.ingestion.adapters.graphiti.verifier import write_and_verify_chunk
-from app.features.documents.ingestion.chunking.classification import (
-    ClassifiedDocument,
-    ContractBoundary,
-    ParsedDocument,
-    QualityWarning,
-    classify_document,
-    establish_contract_boundaries,
-    segment_chunks,
-)
-from app.features.documents.ingestion.chunking.context_summary import apply_document_context
-from app.features.documents.ingestion.chunking.fidelity import (
-    BoundaryFidelityInputs,
-    build_fidelity_metrics,
-    fidelity_degradation_warnings,
-)
-from app.features.documents.ingestion.enrichment.legal_metadata import (
-    contract_event_dates,
-    enrich_legal_chunks,
-    extract_legal_metadata,
-)
-from app.features.documents.ingestion.parsing.parser import parse_document
 from app.observability.degradation import STUCK_DOCUMENTS, record_degradation
 from app.observability.logging import logger, trace_layer
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
@@ -294,11 +298,11 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, async_sessionmaker
 
     from app.features.documents.api.http.dto import IngestionJob, IngestionRuntime
-    from app.features.documents.domain.errors import DocumentResult
-    from app.features.documents.ingestion.chunking.classification import PreparedChunk
-    from app.features.documents.ingestion.enrichment.legal_metadata import (
+    from app.features.documents.application.ingestion.chunking.classification import PreparedChunk
+    from app.features.documents.application.ingestion.enrichment.legal_metadata import (
         LegalMetadataExtraction,
     )
+    from app.features.documents.domain.errors import DocumentResult
     from app.resilience.idempotency import IdempotencyGuard
     from app.retrieval.graphiti.write_clause_episodes import (
         GraphitiService as ClauseWriterService,

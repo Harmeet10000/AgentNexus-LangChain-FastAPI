@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from app.features.documents.retrieval.graph.state import RetrievedChunk
+from app.features.documents.application.retrieval.graph.state import RetrievedChunk
 
 if TYPE_CHECKING:
     from typing import Any

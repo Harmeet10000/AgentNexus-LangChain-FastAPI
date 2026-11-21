@@ -33,10 +33,7 @@ class PostgresAuditLogRepository:
     @trace_layer("repository")
     async def create(self, entry: AuditEntry) -> AuditResult[AuditEntry]:
         try:
-            # This compatibility branch keeps untouched pre-Phase-1 consumers
-            # working while the application port receives only domain entities.
-            row = entry if isinstance(entry, AuditLog) else to_model(entry)
-            self.session.add(row)
+            self.session.add(to_model(entry))
             await self.session.flush()
             return Success(entry)
         except SQLAlchemyError as exc:
@@ -142,6 +139,3 @@ def _database_error(operation: str, details: dict[str, object]) -> AuditInfrastr
         source="audit_repository",
         operation=operation,
     )
-
-
-AuditLogRepository = PostgresAuditLogRepository

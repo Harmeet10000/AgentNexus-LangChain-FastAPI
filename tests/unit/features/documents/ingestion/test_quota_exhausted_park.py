@@ -25,13 +25,13 @@ from app.ai.embeddings import EmbeddingQuotaExhaustedError
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
 )
+from app.features.documents.application.ingestion.workflow import _make_ingest_document_node
 from app.features.documents.domain.document import (
     DOCUMENT_STATUS_VALUES,
     TERMINAL_DOCUMENT_STATUSES,
     DocumentStatus,
 )
 from app.features.documents.domain.errors import DocumentDatabaseError
-from app.features.documents.ingestion.workflow import _make_ingest_document_node
 from app.utils.storage import StorageService
 
 if TYPE_CHECKING:

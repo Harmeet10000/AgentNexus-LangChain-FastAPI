@@ -53,7 +53,7 @@ from app.ai.validation import (
     ValidationPipeline,
 )
 from app.features.agent_saul.domain.state import RelationshipType
-from app.features.documents.ingestion.enrichment.legal_metadata import (
+from app.features.documents.application.ingestion.enrichment.legal_metadata import (
     UNTRUSTED_CONTENT_DIRECTIVE,
     UNTRUSTED_DOCUMENT_BEGIN,
     UNTRUSTED_DOCUMENT_END,

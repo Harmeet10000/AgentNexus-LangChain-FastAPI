@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING
 
 from returns.result import Failure
 
+from app.features.documents.adapters.inbound.worker.capability import (
+    get_document_worker_resources,
+    run_on_document_worker_loop,
+)
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
 )
@@ -19,15 +23,11 @@ from app.observability.degradation import STUCK_DOCUMENTS, record_degradation
 from app.observability.logging import logger
 from app.shared.jobs.names import DOCUMENTS_STUCK_SWEEP
 from app.utils import ServiceUnavailableException
-from app.worker.capabilities.documents import (
-    get_document_worker_resources,
-    run_on_document_worker_loop,
-)
 from app.worker.celery.app import get_worker_celery_app
 from app.worker.celery.task import ResilientTask
 
 if TYPE_CHECKING:
-    from app.worker.capabilities.documents import DocumentWorkerResources
+    from app.features.documents.adapters.inbound.worker.capability import DocumentWorkerResources
 
 celery_app = get_worker_celery_app()
 

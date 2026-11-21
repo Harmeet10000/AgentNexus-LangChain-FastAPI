@@ -97,7 +97,7 @@ async def test_sweep_task_records_degradation_and_never_writes() -> None:
     # The task body observes through the worker loop; the degradation counter
     # is the observable contract. The DB write surface is asserted ABSENT:
     # the scan path opens no update_document_status call.
-    import app.worker.jobs.maintenance as maintenance_jobs
+    import app.features.documents.adapters.inbound.worker.maintenance_tasks as maintenance_jobs
 
     scan_source = __import__("inspect").getsource(maintenance_jobs._scan)
     assert "update_document_status" not in scan_source
@@ -115,7 +115,9 @@ def test_catalog_registers_the_sweep_on_the_default_queue() -> None:
 
     entry = JOB_CATALOG[DOCUMENTS_STUCK_SWEEP]
     assert entry.queue is JobQueue.DEFAULT
-    assert entry.declaring_module == "app.worker.jobs.maintenance"
+    assert (
+        entry.declaring_module == "app.features.documents.adapters.inbound.worker.maintenance_tasks"
+    )
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 """The documents feature exposes only policy-driven structural chunking."""
 
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ClassifiedDocument,
     ParsedDocument,
     segment_chunks,

@@ -21,12 +21,12 @@ from app.ai.tools.registry import (
     register_default_tools,
     register_portfolio_traversal_tools,
 )
-from app.features.documents.application.tools.portfolio import make_portfolio_traversal_tools
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ClassifiedDocument,
     ParsedDocument,
     segment_chunks,
 )
+from app.features.documents.application.tools.portfolio import make_portfolio_traversal_tools
 
 # ---------------------------------------------------------------------------
 # Task 1.1 — no re-ingestion surface exists (CI-enforced inspection gate)

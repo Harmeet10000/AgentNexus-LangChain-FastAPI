@@ -25,13 +25,13 @@ from app.ai.validation import (
     ValidationDecision,
     ValidationPipeline,
 )
-from app.features.documents.ingestion.chunking.classification import QualityWarning
+from app.features.documents.application.ingestion.chunking.classification import QualityWarning
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from app.ai.validation import RetryFeedback
-    from app.features.documents.ingestion.chunking.classification import (
+    from app.features.documents.application.ingestion.chunking.classification import (
         ClassifiedDocument,
         PreparedChunk,
     )

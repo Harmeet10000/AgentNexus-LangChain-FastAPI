@@ -35,22 +35,22 @@ from app.features.documents.application.access_audit import (
     DocumentAccessAuditRecorder,
     InMemoryDocumentAccessAuditRecorder,
 )
+from app.features.documents.application.retrieval import row_hydration
+from app.features.documents.application.retrieval.context_assembly import (
+    SearchChunkRecord,
+    assemble_rag_context,
+)
+from app.features.documents.application.retrieval.graph import (
+    RetrievalEngine,
+    RetrievalGraphContext,
+)
+from app.features.documents.application.retrieval.graph.budgets import build_stage_budget_tracker
 from app.features.documents.domain.constants import (
     CANONICAL_PIPELINE_VERSION,
     DEFAULT_SEARCH_CACHE_TTL_SECONDS,
     RRF_K,
 )
 from app.features.documents.domain.errors import DocumentDatabaseError
-from app.features.documents.retrieval import row_hydration
-from app.features.documents.retrieval.context_assembly import (
-    SearchChunkRecord,
-    assemble_rag_context,
-)
-from app.features.documents.retrieval.graph import (
-    RetrievalEngine,
-    RetrievalGraphContext,
-)
-from app.features.documents.retrieval.graph.budgets import build_stage_budget_tracker
 from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, RankedResultRow, reciprocal_rank_fusion
 from app.retrieval.graphiti.retrieval_branch import fetch_ranked_chunk_ids
@@ -69,12 +69,12 @@ if TYPE_CHECKING:
 
     from app.ai.generation import TextGenerationStructuredResult
     from app.features.documents.api.http import dto as documents_dto
-    from app.features.documents.domain.errors import DocumentResult
-    from app.features.documents.ingestion.chunking.classification import QualityWarning
-    from app.features.documents.ingestion.enrichment.legal_metadata import (
+    from app.features.documents.application.ingestion.chunking.classification import QualityWarning
+    from app.features.documents.application.ingestion.enrichment.legal_metadata import (
         LegalMetadataExtraction,
     )
-    from app.features.documents.retrieval.context_assembly import ContextSection
+    from app.features.documents.application.retrieval.context_assembly import ContextSection
+    from app.features.documents.domain.errors import DocumentResult
 _FALLBACK_ANSWER = (
     "I do not have enough grounded document context to answer this reliably. "
     "Please narrow the question or ingest the relevant document sections."

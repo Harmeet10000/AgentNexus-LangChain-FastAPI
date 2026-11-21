@@ -21,9 +21,9 @@ from app.features.documents.application.access_audit import (
     InMemoryDocumentAccessAuditRecorder,
 )
 from app.features.documents.application.queries.documents import DocumentQueryService
+from app.features.documents.application.retrieval.graph import RetrievalEngine
+from app.features.documents.application.retrieval.graph.state import GeneratedAnswer, QueryPlan
 from app.features.documents.domain.errors import DocumentDatabaseError
-from app.features.documents.retrieval.graph import RetrievalEngine
-from app.features.documents.retrieval.graph.state import GeneratedAnswer, QueryPlan
 
 if TYPE_CHECKING:
     from typing import Any
@@ -107,7 +107,7 @@ async def _fake_embed(*_args: object, **_kwargs: object) -> list[float]:
 @pytest.fixture
 def _wired(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(documents_module, "embed_text", _fake_embed)
-    import app.features.documents.retrieval.graph.nodes as graph_nodes
+    import app.features.documents.application.retrieval.graph.nodes as graph_nodes
 
     monkeypatch.setattr(graph_nodes, "embed_text", _fake_embed)
     monkeypatch.setattr(graph_nodes, "get_configured_reranker", _PassThroughReranker)

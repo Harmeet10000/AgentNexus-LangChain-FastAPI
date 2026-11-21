@@ -30,6 +30,20 @@ from app.features.documents.application.commands.upload_document import (
     _write_extracted_clause_episodes,
     process_document_ingestion,
 )
+from app.features.documents.application.ingestion.chunking.classification import (
+    ClassifiedDocument,
+    ContractBoundary,
+    ParsedDocument,
+    PreparedChunk,
+)
+from app.features.documents.application.ingestion.chunking.fidelity import (
+    BoundaryFidelityInputs,
+    build_fidelity_metrics,
+    fidelity_degradation_warnings,
+    measure_chunk_plausibility,
+    measure_source_coverage,
+    measure_table_preservation,
+)
 from app.features.documents.domain.errors import DocumentGraphWriteError
 from app.features.documents.domain.fidelity import (
     ChunkPlausibilityVerdict,
@@ -38,20 +52,6 @@ from app.features.documents.domain.fidelity import (
     GraphRelationshipsStatus,
     TokenCountBasis,
     aggregate_relationship_states,
-)
-from app.features.documents.ingestion.chunking.classification import (
-    ClassifiedDocument,
-    ContractBoundary,
-    ParsedDocument,
-    PreparedChunk,
-)
-from app.features.documents.ingestion.chunking.fidelity import (
-    BoundaryFidelityInputs,
-    build_fidelity_metrics,
-    fidelity_degradation_warnings,
-    measure_chunk_plausibility,
-    measure_source_coverage,
-    measure_table_preservation,
 )
 
 if TYPE_CHECKING:
@@ -476,7 +476,9 @@ async def test_checkpoint_reuse_restores_persisted_relationship_state() -> None:
     from app.features.documents.application.commands.upload_document import (
         _extract_document_knowledge,
     )
-    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+    from app.features.documents.application.ingestion.chunking.classification import (
+        ContractBoundary,
+    )
 
     class _CheckpointRepo:
         async def fetch_status(self, **_kwargs: object) -> _Success[dict[str, Any]]:
@@ -530,7 +532,9 @@ async def test_checkpoint_reuse_restores_persisted_budget_ledger() -> None:
     from app.features.documents.application.commands.upload_document import (
         _extract_document_knowledge,
     )
-    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+    from app.features.documents.application.ingestion.chunking.classification import (
+        ContractBoundary,
+    )
 
     class _CheckpointRepo:
         async def fetch_status(self, **_kwargs: object) -> _Success[dict[str, Any]]:
@@ -601,7 +605,9 @@ async def test_checkpoint_reuse_falls_back_to_not_attempted_without_state() -> N
     from app.features.documents.application.commands.upload_document import (
         _extract_document_knowledge,
     )
-    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+    from app.features.documents.application.ingestion.chunking.classification import (
+        ContractBoundary,
+    )
 
     class _LegacyCheckpointRepo:
         async def fetch_status(self, **_kwargs: object) -> _Success[dict[str, Any]]:
@@ -637,7 +643,9 @@ async def test_later_boundary_extraction_failure_keeps_earlier_states() -> None:
     from app.features.documents.application.commands.upload_document import (
         _extract_document_knowledge,
     )
-    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+    from app.features.documents.application.ingestion.chunking.classification import (
+        ContractBoundary,
+    )
 
     class _SwitchProvider:
         """Succeeds for boundary 0, raises (provider error) for boundary 1."""
@@ -790,7 +798,7 @@ class _FixedTokenizer:
 
 
 def test_chunk_plausibility_out_of_bounds_count(monkeypatch: Any) -> None:
-    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+    import app.features.documents.application.ingestion.chunking.fidelity as fidelity_module
 
     monkeypatch.setattr(fidelity_module, "get_tokenizer", lambda: _FixedTokenizer(10_000))
     state = fidelity_module.measure_chunk_plausibility(
@@ -809,7 +817,7 @@ def test_chunk_plausibility_degrades_to_unavailable_without_tokenizer(
         message = "offline"
         raise RuntimeError(message)
 
-    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+    import app.features.documents.application.ingestion.chunking.fidelity as fidelity_module
 
     monkeypatch.setattr(fidelity_module, "get_tokenizer", _boom)
     state = fidelity_module.measure_chunk_plausibility(
@@ -988,7 +996,7 @@ def test_plausibility_upper_bound_counts_every_chunk_emitting_item(
     Uses the deterministic word-count stub: items are 12, none exceeds the
     token bound, so the upper bound is exactly 12.
     """
-    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+    import app.features.documents.application.ingestion.chunking.fidelity as fidelity_module
 
     monkeypatch.setattr(fidelity_module, "get_tokenizer", _WordCountTokenizer)
     markdown = "\n\n".join(
@@ -1006,7 +1014,7 @@ def test_plausibility_upper_bound_counts_every_chunk_emitting_item(
 
 def test_plausibility_upper_bound_accounts_for_split_sections(monkeypatch: Any) -> None:
     """A section exceeding max_tokens contributes ceil(tokens/max_tokens) chunks."""
-    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+    import app.features.documents.application.ingestion.chunking.fidelity as fidelity_module
 
     monkeypatch.setattr(fidelity_module, "get_tokenizer", lambda: _FixedTokenizer(2_000))
     markdown = "One long section body. " * 50
@@ -1027,7 +1035,7 @@ def test_mixed_policy_boundaries_combine_their_own_plausibility_bounds(
     too narrowly and would flag fully-retained content as implausible.  Each
     boundary's bounds must use the policy that actually produced its chunks.
     """
-    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+    import app.features.documents.application.ingestion.chunking.fidelity as fidelity_module
 
     monkeypatch.setattr(fidelity_module, "get_tokenizer", _WordCountTokenizer)
     contract_markdown = "## Terms\n\n" + " ".join(f"word{index}" for index in range(100))

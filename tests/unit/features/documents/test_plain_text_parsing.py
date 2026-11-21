@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.features.documents.ingestion.chunking.classification import ParsedDocument
-from app.features.documents.ingestion.parsing import parser as parser_module
-from app.features.documents.ingestion.parsing.parser import (
+from app.features.documents.application.ingestion.chunking.classification import ParsedDocument
+from app.features.documents.application.ingestion.parsing import parser as parser_module
+from app.features.documents.application.ingestion.parsing.parser import (
     DocumentExtractionBudgetError,
     parse_document,
 )
@@ -63,7 +63,7 @@ async def test_pdf_content_type_still_routes_to_docling(
     parser_module._reset_shared_converter_for_tests()
     monkeypatch.setattr(
         # the converter is imported into the parser's namespace — patch there
-        "app.features.documents.ingestion.parsing.parser.create_document_converter",
+        "app.features.documents.application.ingestion.parsing.parser.create_document_converter",
         lambda **_kwargs: (_ for _ in ()).throw(
             AssertionError("Docling must not run for plain text")
         ),

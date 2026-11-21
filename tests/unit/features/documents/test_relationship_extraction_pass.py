@@ -37,7 +37,7 @@ from app.extraction.langextract.service import (
     ExtractionFailureCode,
 )
 from app.features.agent_saul.domain.state import RelationshipType
-from app.features.documents.ingestion.enrichment.legal_metadata import (
+from app.features.documents.application.ingestion.enrichment.legal_metadata import (
     _NEUTRALIZED_MARKER_FORM,
     UNTRUSTED_CONTENT_DIRECTIVE,
     UNTRUSTED_DOCUMENT_BEGIN,
@@ -941,7 +941,9 @@ def test_absolute_edge_spans_add_the_boundary_offset() -> None:
     from app.features.documents.application.commands.upload_document import (
         _absolute_edge_spans,
     )
-    from app.features.documents.ingestion.chunking.classification import ContractBoundary
+    from app.features.documents.application.ingestion.chunking.classification import (
+        ContractBoundary,
+    )
 
     boundary = ContractBoundary(contract_index=1, markdown="x" * 10, start_char=5000, end_char=5100)
     grounded = [

@@ -27,7 +27,7 @@ from app.features.agent_saul.graph.prompts import (
     _COMPLIANCE_SYSTEM_PROMPT,
     _RISK_ANALYSIS_SYSTEM_PROMPT,
 )
-from app.features.documents.retrieval.graph.state import (
+from app.features.documents.application.retrieval.graph.state import (
     CoverageEnvelope,
     GeneratedAnswer,
     GroundedCitation,

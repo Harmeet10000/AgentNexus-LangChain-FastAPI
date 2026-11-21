@@ -42,7 +42,7 @@ from tests.unit.features.documents.retrieval.test_ask_inline_graph_parity import
 )
 
 from app.features.documents.adapters.persistence.postgres.document_repository import _FILTER_SQL
-from app.features.documents.retrieval.graph.state import Citation, GeneratedAnswer
+from app.features.documents.application.retrieval.graph.state import Citation, GeneratedAnswer
 
 if TYPE_CHECKING:
     from typing import Any

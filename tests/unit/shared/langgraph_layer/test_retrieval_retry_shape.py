@@ -13,12 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.ai.graph.retry import TransientExternalError
-from app.features.documents.retrieval.graph import nodes as retrieval_nodes
-from app.features.documents.retrieval.graph.nodes import (
+from app.features.documents.application.retrieval.graph import nodes as retrieval_nodes
+from app.features.documents.application.retrieval.graph.nodes import (
     make_graph_retrieval_node,
     make_query_analyzer_node,
 )
-from app.features.documents.retrieval.graph.state import QueryPlan
+from app.features.documents.application.retrieval.graph.state import QueryPlan
 from app.retrieval.graphiti.grouping import build_graphiti_group_id
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ def _runtime(**collaborators: Any) -> Any:
     """A minimal invocation runtime: collaborators ride the context schema."""
     from types import SimpleNamespace
 
-    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+    from app.features.documents.application.retrieval.graph.state import RetrievalGraphContext
 
     return SimpleNamespace(context=RetrievalGraphContext(**collaborators))
 

@@ -17,11 +17,11 @@ from loguru import logger as loguru_logger
 from returns.result import Success
 
 import app.features.documents.application.queries.documents as documents_module
-from app.features.documents.retrieval.graph import (
+from app.features.documents.application.retrieval.graph import (
     RetrievalGraphContext,
     build_retrieval_graph,
 )
-from app.features.documents.retrieval.graph.state import (
+from app.features.documents.application.retrieval.graph.state import (
     ContextGrade,
     GeneratedAnswer,
     QueryPlan,
@@ -136,7 +136,7 @@ async def _fake_embed(*_args: object, **_kwargs: object) -> list[float]:
 @pytest.fixture
 def _wired(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(documents_module, "embed_text", _fake_embed)
-    import app.features.documents.retrieval.graph.nodes as graph_nodes
+    import app.features.documents.application.retrieval.graph.nodes as graph_nodes
 
     monkeypatch.setattr(graph_nodes, "embed_text", _fake_embed)
 
@@ -304,7 +304,7 @@ async def test_stage_usage_survives_without_agent_saul_imports() -> None:
     import importlib
     from pathlib import Path
 
-    graph_module = importlib.import_module("app.features.documents.retrieval.graph")
+    graph_module = importlib.import_module("app.features.documents.application.retrieval.graph")
     graph_package = Path(graph_module.__file__ or "").parent
     sources = sorted(graph_package.glob("*.py"))
     assert sources

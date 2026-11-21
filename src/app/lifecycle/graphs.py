@@ -48,8 +48,8 @@ if TYPE_CHECKING:
     from app.config.settings import Settings
     from app.extraction.langextract.service import AsyncExtractionService
     from app.features.documents.application.evidence.service import EvidenceService
+    from app.features.documents.application.retrieval.graph.engine import RetrievalEngine
     from app.features.documents.application.tools.portfolio import RelationshipEdgeProbe
-    from app.features.documents.retrieval.graph.engine import RetrievalEngine
     from app.retrieval.graphiti.client import BoundGraphitiService as GraphitiService
     from app.utils.storage import StorageService
 
@@ -79,7 +79,7 @@ def provide_retrieval_engine(
     startup policy registry; the ask endpoints and the qna node then fail
     closed with a typed unavailability.
     """
-    from app.features.documents.retrieval.graph.engine import (  # noqa: PLC0415
+    from app.features.documents.application.retrieval.graph.engine import (  # noqa: PLC0415
         RetrievalEngine,
     )
 
@@ -119,7 +119,7 @@ def provide_document_ingestion_graph(
     The graph resolves embeddings through the shared embedding layer.  Do not
     add an ``embedding_fn`` argument from older revisions.
     """
-    from app.features.documents.ingestion.workflow import (  # noqa: PLC0415
+    from app.features.documents.application.ingestion.workflow import (  # noqa: PLC0415
         build_document_ingestion_graph,
     )
 

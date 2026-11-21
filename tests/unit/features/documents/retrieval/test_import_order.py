@@ -19,12 +19,12 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _ENTRY_POINTS = (
-    "import app.features.documents.retrieval.service",
-    "from app.features.documents.retrieval.graph import RetrievalEngine",
-    "from app.features.documents.retrieval.graph import build_retrieval_graph",
-    "from app.features.documents.retrieval.graph.nodes import make_hybrid_retrieval_node",
-    "import app.features.documents.retrieval.graph.state",
-    "import app.features.documents.retrieval.row_hydration",
+    "import app.features.documents.application.retrieval.service",
+    "from app.features.documents.application.retrieval.graph import RetrievalEngine",
+    "from app.features.documents.application.retrieval.graph import build_retrieval_graph",
+    "from app.features.documents.application.retrieval.graph.nodes import make_hybrid_retrieval_node",
+    "import app.features.documents.application.retrieval.graph.state",
+    "import app.features.documents.application.retrieval.row_hydration",
 )
 
 

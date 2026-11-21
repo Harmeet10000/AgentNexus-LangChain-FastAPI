@@ -16,8 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field
 # Runtime import: LangGraph evaluates RetrievalState type hints via
 # get_type_hints, so ContextSection must be present in this module's
 # namespace — a TYPE_CHECKING-only import raises NameError at graph build.
-from app.features.documents.retrieval.context_assembly import ContextSection  # noqa: TC001
-from app.features.documents.retrieval.graph.budgets import StageBudgetTracker  # noqa: TC001
+from app.features.documents.application.retrieval.context_assembly import (
+    ContextSection,  # noqa: TC001
+)
+from app.features.documents.application.retrieval.graph.budgets import (
+    StageBudgetTracker,  # noqa: TC001
+)
 
 # Same runtime-import discipline: RetrievalGraphContext is a LangGraph context
 # schema, so its annotations resolve too and CountTokens must be present.

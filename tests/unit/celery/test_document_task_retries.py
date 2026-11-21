@@ -15,7 +15,9 @@ def test_retryable_infrastructure_failures_are_in_the_task_retry_policy(
     real_celery: object,
 ) -> None:
     del real_celery
-    document_tasks = importlib.import_module("app.worker.jobs.documents")
+    document_tasks = importlib.import_module(
+        "app.features.documents.adapters.inbound.worker.ingestion_tasks"
+    )
     infrastructure_exception = importlib.import_module("app.utils").InfrastructureException
 
     assert infrastructure_exception in document_tasks.ingest_document.autoretry_for
@@ -26,7 +28,9 @@ def test_document_ingestion_runs_without_the_optional_redis_lock(
     real_celery: object,
 ) -> None:
     del real_celery
-    document_tasks = importlib.import_module("app.worker.jobs.documents")
+    document_tasks = importlib.import_module(
+        "app.features.documents.adapters.inbound.worker.ingestion_tasks"
+    )
     task = cast("Any", document_tasks.ingest_document)
     resources = SimpleNamespace(engine=object(), ingestion_graph=object(), session_local=object())
     monkeypatch.setattr(document_tasks, "_redis_task_lock_enabled", lambda: False)
@@ -63,7 +67,9 @@ def test_advisory_lock_skip_releases_redis_without_marking_completion(
     real_celery: object,
 ) -> None:
     del real_celery
-    document_tasks = importlib.import_module("app.worker.jobs.documents")
+    document_tasks = importlib.import_module(
+        "app.features.documents.adapters.inbound.worker.ingestion_tasks"
+    )
     task = cast("Any", document_tasks.ingest_document)
     resources = SimpleNamespace(engine=object(), ingestion_graph=object(), session_local=object())
     release = MagicMock()
@@ -97,7 +103,9 @@ def test_document_lock_key_is_scoped_to_tenant_document_and_version(
     real_celery: object,
 ) -> None:
     del real_celery
-    document_tasks = importlib.import_module("app.worker.jobs.documents")
+    document_tasks = importlib.import_module(
+        "app.features.documents.adapters.inbound.worker.ingestion_tasks"
+    )
     task = cast("Any", document_tasks.ingest_document)
     resources = SimpleNamespace(engine=object(), ingestion_graph=object(), session_local=object())
     acquired: list[str] = []
@@ -141,7 +149,9 @@ def test_retryable_failure_releases_processing_lock_without_completion_marker(
     real_celery: object,
 ) -> None:
     del real_celery
-    document_tasks = importlib.import_module("app.worker.jobs.documents")
+    document_tasks = importlib.import_module(
+        "app.features.documents.adapters.inbound.worker.ingestion_tasks"
+    )
     task = cast("Any", document_tasks.ingest_document)
     infrastructure_exception = importlib.import_module("app.utils").InfrastructureException
     resources = SimpleNamespace(engine=object(), ingestion_graph=object(), session_local=object())

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, cast
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
-    from app.features.documents.retrieval.graph.state import RetrievedChunk
+    from app.features.documents.application.retrieval.graph.state import RetrievedChunk
     from app.retrieval.token_counter import CountTokens
 
 #: Per-section token cap: the parent section widens generation context without

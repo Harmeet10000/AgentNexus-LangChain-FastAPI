@@ -41,14 +41,7 @@ from returns.result import Failure
 
 from app.ai.evaluation.deterministic import chunks_for_page, normalize_page_text
 from app.ai.evaluation.schema import load_ingestion_fidelity_set
-from app.features.documents.domain.fidelity import (
-    ChunkPlausibilityState,
-    ChunkPlausibilityVerdict,
-    FidelityThresholds,
-    IngestionFidelityMetrics,
-    TokenCountBasis,
-)
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ParsedDocument,
     PreparedChunk,
     _infer_clause_type,
@@ -56,11 +49,18 @@ from app.features.documents.ingestion.chunking.classification import (
     establish_contract_boundaries,
     recover_locus_from_text,
 )
-from app.features.documents.ingestion.chunking.fidelity import (
+from app.features.documents.application.ingestion.chunking.fidelity import (
     fidelity_degradation_warnings,
     measure_section_preservation,
     measure_source_coverage,
     measure_table_preservation,
+)
+from app.features.documents.domain.fidelity import (
+    ChunkPlausibilityState,
+    ChunkPlausibilityVerdict,
+    FidelityThresholds,
+    IngestionFidelityMetrics,
+    TokenCountBasis,
 )
 
 if TYPE_CHECKING:

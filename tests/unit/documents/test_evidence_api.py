@@ -81,7 +81,7 @@ def service(monkeypatch: pytest.MonkeyPatch) -> tuple[EvidenceService, _Repo]:
     # service, so the fused seam these tests stub lives in that module (the
     # service calls `retrieve_fused` through the queries module at call time).
     from app.features.documents.application.queries import documents as queries_documents
-    from app.features.documents.retrieval import service as retrieval_service
+    from app.features.documents.application.retrieval import service as retrieval_service
 
     monkeypatch.setattr(retrieval_service, "embed_text", _embed)
     monkeypatch.setattr(queries_documents, "retrieve_fused", _retrieve)
@@ -275,7 +275,7 @@ async def test_graphiti_outage_preserves_canonical_chunks(
     async def _embed(*_: object, **__: object) -> list[float]:
         return [0.0]
 
-    from app.features.documents.retrieval import service as retrieval_service
+    from app.features.documents.application.retrieval import service as retrieval_service
 
     monkeypatch.setattr(retrieval_service, "embed_text", _embed)
     monkeypatch.setenv("DOCUMENTS_GRAPHITI_FUSION_ENABLED", "true")
@@ -311,7 +311,7 @@ async def test_graphiti_outage_preserves_canonical_chunks(
 async def test_embedding_deadline_is_timeout_not_no_evidence(
     service: tuple[EvidenceService, _Repo], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.features.documents.retrieval import service as retrieval_service
+    from app.features.documents.application.retrieval import service as retrieval_service
 
     evidence, _repo = service
 
@@ -339,7 +339,7 @@ async def test_no_evidence_is_not_retryable_and_reports_coverage(
     service: tuple[EvidenceService, _Repo], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.features.documents.application.queries import documents as queries_documents
-    from app.features.documents.retrieval import service as retrieval_service
+    from app.features.documents.application.retrieval import service as retrieval_service
 
     evidence, _repo = service
 
@@ -383,7 +383,7 @@ async def test_graph_only_match_is_filtered_before_a_handle_is_issued(
     predicate re-runs in the shared `retrieve` service: a match excluded by
     any active filter never earns an evidence handle."""
     from app.features.documents.application.queries import documents as queries_documents
-    from app.features.documents.retrieval import service as retrieval_service
+    from app.features.documents.application.retrieval import service as retrieval_service
 
     repo = _Repo()
     graph_only = dict(repo.row)

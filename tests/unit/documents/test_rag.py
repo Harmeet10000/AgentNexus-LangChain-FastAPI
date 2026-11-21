@@ -1,4 +1,4 @@
-from app.features.documents.retrieval.context_assembly import (
+from app.features.documents.application.retrieval.context_assembly import (
     SearchChunkRecord,
     assemble_rag_context,
 )
@@ -48,7 +48,7 @@ def test_assemble_rag_context_groups_by_document_and_merges_adjacent_chunks() ->
 
 
 def test_assemble_rag_context_drops_sections_at_the_token_boundary() -> None:
-    from app.features.documents.retrieval.context_assembly import (
+    from app.features.documents.application.retrieval.context_assembly import (
         SearchChunkRecord,
         assemble_rag_context,
     )

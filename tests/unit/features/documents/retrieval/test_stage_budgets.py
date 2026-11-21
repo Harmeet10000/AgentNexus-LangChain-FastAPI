@@ -16,11 +16,11 @@ import pytest
 from loguru import logger as loguru_logger
 
 from app.ai.validation.pipeline import BudgetLedger
-from app.features.documents.retrieval.graph import (
+from app.features.documents.application.retrieval.graph import (
     RetrievalGraphContext,
     build_retrieval_graph,
 )
-from app.features.documents.retrieval.graph.budgets import (
+from app.features.documents.application.retrieval.graph.budgets import (
     DEFAULT_STAGE_BUDGETS,
     STAGE_GENERATE,
     STAGE_GRADE,
@@ -30,7 +30,7 @@ from app.features.documents.retrieval.graph.budgets import (
     build_stage_budget_tracker,
     reset_degradation_window,
 )
-from app.features.documents.retrieval.graph.state import (
+from app.features.documents.application.retrieval.graph.state import (
     ContextGrade,
     GeneratedAnswer,
     QueryPlan,
@@ -131,7 +131,9 @@ async def _fake_embed(*_args: object, **_kwargs: object) -> list[float]:
 
 @pytest.fixture(autouse=True)
 def _clean_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.features.documents.retrieval.graph.nodes.embed_text", _fake_embed)
+    monkeypatch.setattr(
+        "app.features.documents.application.retrieval.graph.nodes.embed_text", _fake_embed
+    )
     reset_degradation_window()
     yield
     reset_degradation_window()
@@ -457,7 +459,7 @@ async def test_empty_retrieval_with_exhausted_grade_never_caches_a_generated_ans
 
     assert llm.generated is False
     assert result["generated_answer"].answer == _FALLBACK
-    from app.features.documents.retrieval.graph.state import CachedAskEnvelope
+    from app.features.documents.application.retrieval.graph.state import CachedAskEnvelope
 
     cached = [CachedAskEnvelope.model_validate_json(value) for value in redis.values.values()]
     assert all(envelope.answer == _FALLBACK and envelope.citations == [] for envelope in cached), (

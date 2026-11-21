@@ -40,8 +40,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.features.documents.ingestion.parsing import parser as parser_module
-from app.features.documents.ingestion.parsing.parser import (
+from app.features.documents.application.ingestion.parsing import parser as parser_module
+from app.features.documents.application.ingestion.parsing.parser import (
     DocumentExtractionBudgetError,
     parse_document,
 )

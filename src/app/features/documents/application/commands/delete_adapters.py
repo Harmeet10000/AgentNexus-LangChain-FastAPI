@@ -16,7 +16,12 @@ from redis.exceptions import RedisError
 from returns.result import Failure, Success
 from sqlalchemy import text
 
-from app.features.audit.models import AuditLog
+from app.features.audit.public import (
+    AuditReader,
+    AuditRecorder,
+    ListAuditEntriesInput,
+    RecordAuditEntryInput,
+)
 from app.features.documents.domain.errors import (
     DocumentDatabaseError,
     DocumentGraphWriteError,
@@ -32,7 +37,6 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-    from app.features.audit.repository import AuditLogRepository
     from app.features.documents.application.commands.delete_document import (
         DeletionTombstone,
     )
@@ -254,25 +258,27 @@ class AuditLogDeletionTombstoneStore:
     configured `AUDIT_TOMBSTONE_RETENTION_DAYS`.
     """
 
-    def __init__(self, repository: AuditLogRepository) -> None:
-        self._repository = repository
+    def __init__(self, *, recorder: AuditRecorder, reader: AuditReader) -> None:
+        self._recorder = recorder
+        self._reader = reader
 
     async def record(self, tombstone: DeletionTombstone) -> DocumentResult[None]:
-        entry = AuditLog(
-            entity_type="document",
-            entity_id=tombstone.document_id,
-            action="document.deleted",
-            user_id=tombstone.actor_id,
-            changes={},
-            metadata_={
-                "event_type": tombstone.event_type,
-                "tenant_id": tombstone.tenant_id,
-                "version_range": list(tombstone.version_range),
-                "retention_days": tombstone.retention_days,
-                "timestamp": tombstone.timestamp.isoformat(),
-            },
+        result = await self._recorder.record(
+            RecordAuditEntryInput(
+                entity_type="document",
+                entity_id=tombstone.document_id,
+                action="document.deleted",
+                user_id=tombstone.actor_id,
+                changes={},
+                metadata_={
+                    "event_type": tombstone.event_type,
+                    "tenant_id": tombstone.tenant_id,
+                    "version_range": list(tombstone.version_range),
+                    "retention_days": tombstone.retention_days,
+                    "timestamp": tombstone.timestamp.isoformat(),
+                },
+            )
         )
-        result = await self._repository.create(entry)
         if isinstance(result, Failure):
             return Failure(
                 DocumentDatabaseError(
@@ -284,7 +290,9 @@ class AuditLogDeletionTombstoneStore:
         return Success(None)
 
     async def exists(self, *, tenant_id: str, document_id: str) -> bool:
-        result = await self._repository.find_by_entity("document", document_id)
+        result = await self._reader.list(
+            ListAuditEntriesInput(entity_type="document", entity_id=document_id)
+        )
         if isinstance(result, Failure):
             # A tombstone lookup failure must not silently skip the idempotency
             # fence; the tenant-scoped document load below still refuses an
@@ -295,7 +303,7 @@ class AuditLogDeletionTombstoneStore:
                 error=str(result.failure()),
             ).warning("deletion_tombstone_lookup_failed")
             return False
-        for entry in result.unwrap():
+        for entry in result.unwrap().entries:
             metadata = entry.metadata_
             if (
                 entry.action == "document.deleted"

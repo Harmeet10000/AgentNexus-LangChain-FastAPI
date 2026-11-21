@@ -12,7 +12,7 @@ from app.observability.degradation import RERANK_FALLBACK, record_degradation
 from app.observability.logging import logger
 
 if TYPE_CHECKING:
-    from app.features.documents.retrieval.graph.state import RetrievedChunk
+    from app.features.documents.application.retrieval.graph.state import RetrievedChunk
 
 
 class Reranker(Protocol):

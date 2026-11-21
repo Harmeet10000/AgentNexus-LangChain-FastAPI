@@ -33,14 +33,14 @@ from app.features.documents.application.queries.documents import (
     DocumentQueryService,
     _build_answer_cache_key,
 )
-from app.features.documents.retrieval.graph import (
+from app.features.documents.application.retrieval.graph import (
     RetrievalEngine,
     build_retrieval_graph,
 )
-from app.features.documents.retrieval.graph.nodes import (
+from app.features.documents.application.retrieval.graph.nodes import (
     _answer_cache_key as _graph_answer_cache_key,
 )
-from app.features.documents.retrieval.graph.state import (
+from app.features.documents.application.retrieval.graph.state import (
     Citation,
     ContextGrade,
     GeneratedAnswer,
@@ -53,7 +53,7 @@ from app.retrieval.graphiti import client as graphiti_client_module
 if TYPE_CHECKING:
     from typing import Any
 
-    from app.features.documents.retrieval.graph.state import GroundedCitation
+    from app.features.documents.application.retrieval.graph.state import GroundedCitation
 
 _CHUNK_ID = "chunk-1"
 _DOC_ID = "doc-a"
@@ -484,7 +484,7 @@ def _insufficient(rewrite: str | None = None) -> ContextGrade:
 @pytest.fixture
 def _wired(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(documents_module, "embed_text", _fake_embed)
-    import app.features.documents.retrieval.graph.nodes as graph_nodes
+    import app.features.documents.application.retrieval.graph.nodes as graph_nodes
 
     monkeypatch.setattr(graph_nodes, "embed_text", _fake_embed)
     # The graph resolves the reranker per invocation from the process config;
@@ -710,7 +710,7 @@ async def test_graphiti_verified_filter_threads_into_hybrid_params() -> None:
     monkeypatch = pytest.MonkeyPatch()
     try:
         monkeypatch.setattr(documents_module, "embed_text", _fake_embed)
-        import app.features.documents.retrieval.graph.nodes as graph_nodes
+        import app.features.documents.application.retrieval.graph.nodes as graph_nodes
 
         monkeypatch.setattr(graph_nodes, "embed_text", _fake_embed)
         llm = _ScriptedAskLLM([_sufficient()])

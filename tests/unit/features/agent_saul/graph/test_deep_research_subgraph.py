@@ -53,10 +53,10 @@ from app.features.documents.application.evidence.service import (
     EvidenceService,
     InMemoryEvidenceHandleStore,
 )
+from app.features.documents.application.retrieval import service as retrieval_service
 from app.features.documents.application.tools.portfolio import (
     make_portfolio_traversal_tools,
 )
-from app.features.documents.retrieval import service as retrieval_service
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool

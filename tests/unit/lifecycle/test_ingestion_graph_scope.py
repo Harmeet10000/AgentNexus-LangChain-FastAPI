@@ -11,11 +11,11 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from returns.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.features.documents.ingestion.workflow as ingestion_graph_module
+import app.features.documents.application.ingestion.workflow as ingestion_graph_module
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
 )
-from app.features.documents.ingestion.workflow import (
+from app.features.documents.application.ingestion.workflow import (
     DocumentIngestionState,
     _make_ingest_document_node,
     build_document_ingestion_graph,

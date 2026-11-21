@@ -30,14 +30,14 @@ from app.features.documents.application.commands.upload_document import (
     _metadata_validation_state,
     _unvalidated_classified,
 )
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ContractBoundary,
     ParsedDocument,
     classify_document,
     establish_contract_boundaries,
     segment_chunks,
 )
-from app.features.documents.ingestion.enrichment.legal_metadata import (
+from app.features.documents.application.ingestion.enrichment.legal_metadata import (
     extract_legal_metadata,
 )
 
@@ -48,8 +48,8 @@ if TYPE_CHECKING:
     import pytest
     from langchain_core.messages import BaseMessage
 
-    from app.features.documents.ingestion.chunking.classification import PreparedChunk
-    from app.features.documents.ingestion.enrichment.legal_metadata import (
+    from app.features.documents.application.ingestion.chunking.classification import PreparedChunk
+    from app.features.documents.application.ingestion.enrichment.legal_metadata import (
         LegalMetadataExtraction,
     )
 
@@ -320,7 +320,9 @@ def json_blob(value: object) -> str:
 async def test_chunk_findings_are_scoped_to_their_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.features.documents.ingestion.chunking import classification as classification_module
+    from app.features.documents.application.ingestion.chunking import (
+        classification as classification_module,
+    )
 
     monkeypatch.setattr(classification_module, "get_tokenizer", _OfflineTokenizer)
     boundaries, _count = _boundaries()
@@ -421,7 +423,9 @@ async def test_rejected_extraction_downgrades_and_scrubs_cross_contract_names(
     with per-contract truth, and the classified heuristics scrubbed so chunk
     preambles carry no party names at all — never the wrong contract's names.
     """
-    from app.features.documents.ingestion.chunking import classification as classification_module
+    from app.features.documents.application.ingestion.chunking import (
+        classification as classification_module,
+    )
 
     monkeypatch.setattr(classification_module, "get_tokenizer", _OfflineTokenizer)
     boundaries, _count = _boundaries()

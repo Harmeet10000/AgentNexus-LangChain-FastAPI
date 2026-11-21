@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from app.features.documents.retrieval.reranking.reranker import (
+from app.features.documents.application.retrieval.reranking.reranker import (
     HostedReranker,
     Reranker,
     get_configured_reranker,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.features.documents.retrieval.graph.nodes import make_post_process_node
-from app.features.documents.retrieval.graph.state import RetrievedChunk
+from app.features.documents.application.retrieval.graph.nodes import make_post_process_node
+from app.features.documents.application.retrieval.graph.state import RetrievedChunk
 
 if TYPE_CHECKING:
     from typing import Any
@@ -15,7 +15,7 @@ def _runtime(**collaborators: Any) -> Any:
     """A minimal invocation runtime: collaborators ride the context schema."""
     from types import SimpleNamespace
 
-    from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+    from app.features.documents.application.retrieval.graph.state import RetrievalGraphContext
 
     return SimpleNamespace(context=RetrievalGraphContext(**collaborators))
 

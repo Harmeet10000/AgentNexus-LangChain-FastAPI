@@ -35,11 +35,11 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import (
 )
 from app.features.auth.api.http.dependencies import get_token_claims
 from app.features.auth.api.websocket.security import WebSocketSecurityService
+from app.features.auth.application.commands.admin_accounts import AdminAccounts
 from app.features.auth.application.revocation.pending import (
     PendingRevocationConfig,
     PendingRevocationReconciler,
 )
-from app.features.auth.application.commands.admin_accounts import AdminAccounts
 from app.features.auth.application.revocation.websocket import (
     REVOCATION_STREAM_KEY,
     new_event,

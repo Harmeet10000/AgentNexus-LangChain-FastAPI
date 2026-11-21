@@ -23,8 +23,8 @@ import pytest
 
 from app.features.agent_saul.domain.state import LegalAgentState
 from app.features.agent_saul.graph.deep_research import DeepResearchState
-from app.features.documents.ingestion.workflow import DocumentIngestionState
-from app.features.documents.retrieval.graph.state import RetrievalState
+from app.features.documents.application.ingestion.workflow import DocumentIngestionState
+from app.features.documents.application.retrieval.graph.state import RetrievalState
 from app.shared.langgraph_layer.open_deep_search.state import (
     AgentState,
     ResearcherState,

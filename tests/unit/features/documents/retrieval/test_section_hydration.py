@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.config.settings import get_settings
-from app.features.documents.retrieval.graph.hydration import (
+from app.features.documents.application.retrieval.graph.hydration import (
     hydrate_sections_for_chunks,
     section_text_for_heading_path,
 )
@@ -93,7 +93,7 @@ def test_unmatched_heading_path_yields_no_fabricated_text() -> None:
 
 
 def test_hydrate_sections_for_chunks_maps_by_chunk_id() -> None:
-    from app.features.documents.retrieval.graph.state import RetrievedChunk as Chunk
+    from app.features.documents.application.retrieval.graph.state import RetrievedChunk as Chunk
 
     chunks = [
         Chunk(
@@ -315,7 +315,7 @@ class _CaptureHandler:
         self._llm = llm
 
     async def ainvoke(self, messages: list[Any]) -> Any:
-        from app.features.documents.retrieval.graph.state import (
+        from app.features.documents.application.retrieval.graph.state import (
             ContextGrade,
             GeneratedAnswer,
             QueryPlan,
@@ -369,8 +369,11 @@ def _input() -> dict[str, Any]:
 
 
 async def _run_graph(llm: Any) -> dict[str, Any]:
-    import app.features.documents.retrieval.graph.nodes as graph_nodes
-    from app.features.documents.retrieval.graph import RetrievalGraphContext, build_retrieval_graph
+    import app.features.documents.application.retrieval.graph.nodes as graph_nodes
+    from app.features.documents.application.retrieval.graph import (
+        RetrievalGraphContext,
+        build_retrieval_graph,
+    )
 
     original = graph_nodes.embed_text
     graph_nodes.embed_text = _fake_embed

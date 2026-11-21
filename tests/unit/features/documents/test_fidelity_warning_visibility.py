@@ -38,16 +38,16 @@ from app.features.documents.application.commands.upload_document import (
     _fidelity_metrics_from_metadata,
 )
 from app.features.documents.application.evidence.service import EvidenceService
-from app.features.documents.application.queries.documents import _flatten_warnings
-from app.features.documents.domain.fidelity import FidelityThresholds
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ParsedDocument,
     PreparedChunk,
 )
-from app.features.documents.ingestion.chunking.fidelity import (
+from app.features.documents.application.ingestion.chunking.fidelity import (
     build_fidelity_metrics,
     fidelity_degradation_warnings,
 )
+from app.features.documents.application.queries.documents import _flatten_warnings
+from app.features.documents.domain.fidelity import FidelityThresholds
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -142,7 +142,7 @@ class _WordCountTokenizer:
 
 @pytest.fixture(autouse=True)
 def _word_tokenizer(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.features.documents.ingestion.chunking.fidelity as fidelity_module
+    import app.features.documents.application.ingestion.chunking.fidelity as fidelity_module
 
     monkeypatch.setattr(fidelity_module, "get_tokenizer", _WordCountTokenizer)
 
@@ -157,7 +157,9 @@ def measure_fixture_fidelity(
     thresholds: FidelityThresholds | None = None,
 ):
     """Real measurement seam: one boundary carrying this fixture's chunks."""
-    from app.features.documents.ingestion.chunking.fidelity import BoundaryFidelityInputs
+    from app.features.documents.application.ingestion.chunking.fidelity import (
+        BoundaryFidelityInputs,
+    )
 
     parsed = ParsedDocument(
         title="fixture",

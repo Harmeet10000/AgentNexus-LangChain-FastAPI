@@ -18,13 +18,13 @@ from returns.result import Failure, Success
 from app.config.settings import get_settings
 from app.features.documents.application.queries import documents as queries_documents
 from app.features.documents.application.queries.documents import RankedChunk
-from app.features.documents.domain.errors import DocumentDatabaseError
-from app.features.documents.retrieval import service as retrieval_service
-from app.features.documents.retrieval.service import (
+from app.features.documents.application.retrieval import service as retrieval_service
+from app.features.documents.application.retrieval.service import (
     RetrievalFilters,
     RetrievalRequestContext,
     retrieve,
 )
+from app.features.documents.domain.errors import DocumentDatabaseError
 
 if TYPE_CHECKING:
     from typing import Any
@@ -224,7 +224,10 @@ async def test_graphiti_outage_preserves_canonical_chunks() -> None:
 
 @pytest.mark.usefixtures("_patched_fusion")
 async def test_budget_exhaustion_is_budget_exhausted_not_no_evidence() -> None:
-    from app.features.documents.retrieval.graph.budgets import StageBudget, StageBudgetTracker
+    from app.features.documents.application.retrieval.graph.budgets import (
+        StageBudget,
+        StageBudgetTracker,
+    )
 
     tracker = StageBudgetTracker(
         budgets={"retrieve_fusion": StageBudget(latency_ms=60_000, max_calls=0)},
@@ -251,7 +254,7 @@ async def test_out_of_scope_request_documents_are_unauthorized() -> None:
 
 @pytest.mark.usefixtures("_patched_fusion")
 async def test_ok_result_carries_provenance_rows() -> None:
-    from app.features.documents.retrieval.row_hydration import pipeline_version
+    from app.features.documents.application.retrieval.row_hydration import pipeline_version
 
     result = await retrieve(_context(), "query", _filters(), 5, None)
     assert result.status == "ok"

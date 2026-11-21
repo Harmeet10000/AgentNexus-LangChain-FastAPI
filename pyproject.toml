@@ -926,7 +926,7 @@ forbidden_modules = ["app.features"]
 # exemption: 4.3 moves the domain legal tool, 5.2 splits the source chunking
 # engines (policy already moved).
 ignore_imports = [
-    "app.extraction.docling.chunker -> app.features.documents.ingestion.chunking.classification",
+    "app.extraction.docling.chunker -> app.features.documents.application.ingestion.chunking.classification",
     # The crawl4ai connection constructs the adapter's config by design.
     "app.connections.crawl4ai -> app.features.crawler.adapters.crawl4ai.config",
     # The crawl4ai connection exposes the feature's shared crawler adapter.

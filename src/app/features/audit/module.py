@@ -7,11 +7,14 @@ from typing import TYPE_CHECKING
 from app.shared.module import Module
 
 from .application.commands.record import RecordAuditEntry
+from .application.queries.list import ListAuditEntries
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from .application.dto.list import ListAuditEntriesInput, ListAuditEntriesOutput
     from .application.dto.record import RecordAuditEntryInput, RecordAuditEntryOutput
+    from .application.ports.reader import AuditReader
     from .application.ports.recorder import AuditRecorder
     from .domain.errors import AuditResult
 
@@ -30,9 +33,27 @@ def build_audit_recorder(session: AsyncSession) -> AuditRecorder:
     return _SessionAuditRecorder(use_case)
 
 
+def build_audit_reader(session: AsyncSession) -> AuditReader:
+    """Bind audit projections to the caller-owned session."""
+
+    from .adapters.outbound.postgres.repository import (  # noqa: PLC0415
+        PostgresAuditLogRepository,
+    )
+
+    return _SessionAuditReader(ListAuditEntries(PostgresAuditLogRepository(session)))
+
+
 class _SessionAuditRecorder:
     def __init__(self, use_case: RecordAuditEntry) -> None:
         self._use_case = use_case
 
     async def record(self, entry: RecordAuditEntryInput) -> AuditResult[RecordAuditEntryOutput]:
         return await self._use_case.execute(entry)
+
+
+class _SessionAuditReader:
+    def __init__(self, use_case: ListAuditEntries) -> None:
+        self._use_case = use_case
+
+    async def list(self, query: ListAuditEntriesInput) -> AuditResult[ListAuditEntriesOutput]:
+        return await self._use_case.execute(query)

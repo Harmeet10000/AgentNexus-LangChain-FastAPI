@@ -14,14 +14,14 @@ from typing import TYPE_CHECKING
 import pytest
 from loguru import logger as loguru_logger
 
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ClassifiedDocument,
     ContractBoundary,
 )
 
 if TYPE_CHECKING:
     from typing import Any
-from app.features.documents.ingestion.enrichment.legal_metadata import (
+from app.features.documents.application.ingestion.enrichment.legal_metadata import (
     JURISDICTION_BOUNDARY_FINDING_CODE,
     LEGAL_METADATA_VALIDATION_SEAM,
     PARTY_BOUNDARY_FINDING_CODE,
@@ -33,7 +33,7 @@ from app.features.documents.ingestion.enrichment.legal_metadata import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from app.features.documents.ingestion.chunking.classification import PreparedChunk
+    from app.features.documents.application.ingestion.chunking.classification import PreparedChunk
 
 _BOUNDARY = (
     "# Services Agreement\n\n"
@@ -346,8 +346,8 @@ async def test_validation_failed_chunks_carry_no_heuristic_metadata() -> None:
     from app.features.documents.application.commands.upload_document import (
         _unvalidated_classified,
     )
-    from app.features.documents.ingestion.chunking.classification import segment_chunks
-    from app.features.documents.ingestion.parsing.parser import parse_document
+    from app.features.documents.application.ingestion.chunking.classification import segment_chunks
+    from app.features.documents.application.ingestion.parsing.parser import parse_document
 
     parsed = await parse_document(
         raw_bytes=_BOUNDARY.encode(), filename="agreement.md", content_type="text/markdown"

@@ -21,9 +21,9 @@ from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.ai.generation import TextGenerationRequest
 from app.ai.graph.retry import TransientExternalError, retry_immediate
 from app.config import get_settings
-from app.features.documents.retrieval import row_hydration
-from app.features.documents.retrieval.reranking.reranker import get_configured_reranker
-from app.features.documents.retrieval.service import _is_graphiti_branch_failure
+from app.features.documents.application.retrieval import row_hydration
+from app.features.documents.application.retrieval.reranking.reranker import get_configured_reranker
+from app.features.documents.application.retrieval.service import _is_graphiti_branch_failure
 from app.observability.degradation import GRADER_FALLBACK, GRAPHITI_UNAVAILABLE, record_degradation
 from app.observability.logging import logger
 from app.retrieval.edge_expansion import EdgeSeedChunk, expand_along_edges
@@ -1000,12 +1000,12 @@ def make_post_process_node() -> Callable[[RetrievalState, Any], Awaitable[dict[s
         context = _invocation_context(runtime)
         # Local imports (noqa: PLC0415): `documents` modules import this
         # package at module load, so top-level imports would close a cycle.
-        from app.features.documents.domain.constants import (  # noqa: PLC0415
-            DEFAULT_RAG_TOKEN_BUDGET,
-        )
-        from app.features.documents.retrieval.context_assembly import (  # noqa: PLC0415
+        from app.features.documents.application.retrieval.context_assembly import (  # noqa: PLC0415
             SearchChunkRecord,
             assemble_rag_context,
+        )
+        from app.features.documents.domain.constants import (  # noqa: PLC0415
+            DEFAULT_RAG_TOKEN_BUDGET,
         )
         from app.retrieval.fusion import RankedChunk  # noqa: PLC0415
 
@@ -1675,7 +1675,7 @@ async def _hydrate_sections(
     nothing — the generator payload is then byte-identical to the
     non-hydrated contract.
     """
-    from app.features.documents.retrieval.graph.hydration import (  # noqa: PLC0415
+    from app.features.documents.application.retrieval.graph.hydration import (  # noqa: PLC0415
         hydrate_sections_for_chunks,
     )
 

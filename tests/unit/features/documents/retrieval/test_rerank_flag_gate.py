@@ -12,9 +12,12 @@ from typing import Any
 import pytest
 
 from app.config.settings import get_settings
-from app.features.documents.retrieval.graph.budgets import STAGE_RERANK
-from app.features.documents.retrieval.graph.nodes import RERANK_LIMIT, make_reranker_node
-from app.features.documents.retrieval.graph.state import RetrievedChunk, StageUsage
+from app.features.documents.application.retrieval.graph.budgets import STAGE_RERANK
+from app.features.documents.application.retrieval.graph.nodes import (
+    RERANK_LIMIT,
+    make_reranker_node,
+)
+from app.features.documents.application.retrieval.graph.state import RetrievedChunk, StageUsage
 
 
 def _chunk(index: int) -> RetrievedChunk:
@@ -72,7 +75,7 @@ async def test_flag_off_passes_fused_order_through(
     # flag-off the accessor must return None before the shared reranker is
     # ever consulted, and the node must pass fused order through.
     monkeypatch.setattr(
-        "app.features.documents.retrieval.reranking.reranker.get_shared_reranker",
+        "app.features.documents.application.retrieval.reranking.reranker.get_shared_reranker",
         _ExplodingReranker,
     )
     node = make_reranker_node()
@@ -108,7 +111,7 @@ async def test_flag_on_still_reranks(monkeypatch: pytest.MonkeyPatch) -> None:
             return list(reversed(candidates))[:limit]
 
     monkeypatch.setattr(
-        "app.features.documents.retrieval.graph.nodes.get_configured_reranker",
+        "app.features.documents.application.retrieval.graph.nodes.get_configured_reranker",
         _RecordingReranker,
     )
 

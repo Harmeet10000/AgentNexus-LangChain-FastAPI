@@ -158,6 +158,8 @@ assert all(
         "app.features.auth.adapters.inbound.worker.tasks",
         "app.features.agent_saul.adapters.inbound.worker.tasks",
         "app.features.crawler.adapters.inbound.worker.tasks",
+        "app.features.documents.adapters.inbound.worker.ingestion_tasks",
+        "app.features.documents.adapters.inbound.worker.maintenance_tasks",
         "app.features.search.adapters.inbound.worker.tasks",
     }}
     for module in app.conf.include
@@ -271,6 +273,12 @@ def test_profile_completeness_filters_framework_but_rejects_application_drift() 
         ensure_worker_profile_completeness(
             role,
             consumed_queues=(profile.queue,),
-            task_names=(*profile.task_names, "app.worker.jobs.documents.ingest_document"),
-            task_modules=(*profile.task_modules, "app.worker.jobs.documents"),
+            task_names=(
+                *profile.task_names,
+                "app.features.documents.adapters.inbound.worker.ingestion_tasks.ingest_document",
+            ),
+            task_modules=(
+                *profile.task_modules,
+                "app.features.documents.adapters.inbound.worker.ingestion_tasks",
+            ),
         )

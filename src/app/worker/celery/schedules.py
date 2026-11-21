@@ -7,6 +7,7 @@ from celery.schedules import crontab
 from app.config import get_settings
 from app.features.agent_saul.module import MODULE as AGENT_SAUL_MODULE
 from app.features.auth.module import MODULE as AUTH_MODULE
+from app.features.documents.module import MODULE as DOCUMENTS_MODULE
 from app.shared.jobs.names import (
     BILLING_DUNNING,
     BILLING_INVOICE_GENERATION,
@@ -17,7 +18,6 @@ from app.shared.jobs.names import (
     BILLING_RENEWAL,
     CREDITS_EXPIRE,
     CREDITS_RECONCILE,
-    DOCUMENTS_STUCK_SWEEP,
 )
 
 settings = get_settings()
@@ -65,18 +65,8 @@ BEAT_SCHEDULE = {
             day_of_week=settings.CREDIT_RECONCILIATION_CRON_DAY_OF_WEEK,
         ),
     },
-    "documents-stuck-sweep-periodic": {
-        "task": DOCUMENTS_STUCK_SWEEP,
-        # C7: the stuck-age safety net (harden 3.11) only fired on the next
-        # ingestion attempt; a doc that lost its terminal transition and is
-        # never retried would sit unobserved forever. This sweep OBSERVES
-        # (log + degradation counter) — re-drive stays with the idempotent
-        # resume driver, never the scheduler.
-        "schedule": crontab(minute="*/15"),
-        "options": {"expires": 60},
-    },
 }
 
-for feature_module in (AUTH_MODULE, AGENT_SAUL_MODULE):
+for feature_module in (AUTH_MODULE, AGENT_SAUL_MODULE, DOCUMENTS_MODULE):
     for schedule_factory in feature_module.schedules:
         BEAT_SCHEDULE.update(schedule_factory())

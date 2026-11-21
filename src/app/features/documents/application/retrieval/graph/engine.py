@@ -15,8 +15,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from app.features.documents.retrieval.graph.graph import build_retrieval_graph
-from app.features.documents.retrieval.graph.state import RetrievalGraphContext
+from app.features.documents.application.retrieval.graph.graph import build_retrieval_graph
+from app.features.documents.application.retrieval.graph.state import RetrievalGraphContext
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
     from langgraph.graph.state import CompiledStateGraph
 
-    from app.features.documents.retrieval.reranking.reranker import Reranker
+    from app.features.documents.application.retrieval.reranking.reranker import Reranker
 
 
 class RetrievalEngine:
@@ -74,7 +74,7 @@ class RetrievalEngine:
         )
 
         async with independent_session(self._session_factory) as session:
-            from app.features.documents.retrieval.graph.budgets import (  # noqa: PLC0415
+            from app.features.documents.application.retrieval.graph.budgets import (  # noqa: PLC0415
                 build_stage_budget_tracker,
             )
 

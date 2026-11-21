@@ -21,7 +21,7 @@ import pytest
 from returns.result import Success
 
 import app.features.documents.application.commands.upload_document as document_ingest
-import app.features.documents.ingestion.workflow as ingestion_graph
+import app.features.documents.application.ingestion.workflow as ingestion_graph
 from app.events.writer import terminal_event_id, with_terminal_outbox
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
@@ -30,13 +30,13 @@ from app.features.documents.api.http.dto import IngestionJob
 from app.features.documents.application.commands.upload_document import (
     process_document_ingestion,
 )
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ClassifiedDocument,
     ParsedDocument,
     PreparedChunk,
     QualityWarning,
 )
-from app.features.documents.ingestion.workflow import _record_ingestion_failure
+from app.features.documents.application.ingestion.workflow import _record_ingestion_failure
 
 if TYPE_CHECKING:
     from typing import Any

@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from app.config.settings import get_settings
-from app.features.documents.ingestion.chunking.classification import (
+from app.features.documents.application.ingestion.chunking.classification import (
     ClassifiedDocument,
     ParsedDocument,
     PreparedChunk,
 )
-from app.features.documents.ingestion.chunking.context_summary import (
+from app.features.documents.application.ingestion.chunking.context_summary import (
     CONTEXT_STATE_CONTEXT_FREE,
     CONTEXT_STATE_CONTEXTUALIZED,
     CONTEXT_STATE_FAILED,
@@ -200,8 +200,8 @@ def test_flag_defaults_off(tmp_path: Path) -> None:
 
 
 def test_system_prompt_names_the_untrusted_data_rule() -> None:
-    from app.features.documents.ingestion.chunking.context_summary import _SYSTEM_PROMPT
-    from app.features.documents.ingestion.enrichment.legal_metadata import (
+    from app.features.documents.application.ingestion.chunking.context_summary import _SYSTEM_PROMPT
+    from app.features.documents.application.ingestion.enrichment.legal_metadata import (
         UNTRUSTED_CONTENT_DIRECTIVE,
     )
 
@@ -220,11 +220,11 @@ async def test_instruction_shaped_document_text_is_wrapped_as_untrusted_data() -
     (spoofed delimiters). The stored preamble still comes from the model output, so
     the wrap governs how the text is READ, not what is ultimately stored.
     """
-    from app.features.documents.ingestion.chunking.context_summary import (
+    from app.features.documents.application.ingestion.chunking.context_summary import (
         UNTRUSTED_DOCUMENT_BEGIN,
         UNTRUSTED_DOCUMENT_END,
     )
-    from app.features.documents.ingestion.enrichment.legal_metadata import (
+    from app.features.documents.application.ingestion.enrichment.legal_metadata import (
         _NEUTRALIZED_MARKER_FORM,
     )
 

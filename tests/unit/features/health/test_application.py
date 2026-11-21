@@ -7,9 +7,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app.features.health.application.dto.result import AgentMemoryCheck, ComponentCheck
+from app.features.health.application.dto.result import (
+    AgentMemoryCheck,
+    ComponentCheck,
+    HealthStatus,
+)
 from app.features.health.application.service import HealthService
-from app.features.health.application.dto.result import HealthStatus
 
 if TYPE_CHECKING:
     from app.features.health.application.ports.probes import Probe

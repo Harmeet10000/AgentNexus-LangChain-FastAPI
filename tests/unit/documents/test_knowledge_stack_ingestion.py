@@ -22,6 +22,11 @@ from app.features.documents.application.commands.upload_document import (
     _write_extracted_clause_episodes,
     process_document_ingestion,
 )
+from app.features.documents.application.ingestion.chunking.classification import (
+    ClassifiedDocument,
+    ParsedDocument,
+    PreparedChunk,
+)
 from app.features.documents.application.queries.documents import (
     DocumentQueryService,
 )
@@ -30,11 +35,6 @@ from app.features.documents.domain.errors import (
     DocumentIngestionCheckpointError,
 )
 from app.features.documents.domain.fidelity import GraphRelationshipsStatus
-from app.features.documents.ingestion.chunking.classification import (
-    ClassifiedDocument,
-    ParsedDocument,
-    PreparedChunk,
-)
 
 if TYPE_CHECKING:
     from typing import Any

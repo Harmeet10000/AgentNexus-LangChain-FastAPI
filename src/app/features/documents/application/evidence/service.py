@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from pydantic import BaseModel, ConfigDict
 from returns.result import Failure
 
+from app.features.documents.adapters.outbound.audit import PostgresDocumentAccessAuditRecorder
 from app.features.documents.adapters.persistence.postgres.document_repository import (
     DocumentRepository,
 )
@@ -36,15 +37,14 @@ from app.features.documents.application.access_audit import (
     DocumentAccessAuditEvent,
     DocumentAccessAuditRecorder,
     InMemoryDocumentAccessAuditRecorder,
-    SqlDocumentAccessAuditRecorder,
 )
-from app.features.documents.domain.errors import DocumentStatusNotFoundError
-from app.features.documents.retrieval import row_hydration
-from app.features.documents.retrieval.service import (
+from app.features.documents.application.retrieval import row_hydration
+from app.features.documents.application.retrieval.service import (
     RetrievalFilters,
     RetrievalRequestContext,
     retrieve,
 )
+from app.features.documents.domain.errors import DocumentStatusNotFoundError
 from app.observability.degradation import (
     COMPLETED_WITH_WARNINGS,
     INDEX_NOT_READY,
@@ -862,7 +862,7 @@ def build_evidence_service(
         RedisEvidenceHandleStore(redis) if redis is not None else InMemoryEvidenceHandleStore()
     )
     if audit_recorder is None and session_factory is not None:
-        audit_recorder = SqlDocumentAccessAuditRecorder(session_factory)
+        audit_recorder = PostgresDocumentAccessAuditRecorder(session_factory)
     return EvidenceService(
         repo=repo,
         handle_store=store,

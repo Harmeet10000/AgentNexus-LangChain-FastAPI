@@ -21,9 +21,9 @@ from app.features.documents.application.commands.upload_document import (
     process_document_ingestion,
     run_document_ingestion_task,
 )
+from app.features.documents.application.ingestion.workflow import build_document_ingestion_graph
 from app.features.documents.domain.chunk import UnifiedChunk
 from app.features.documents.domain.document import UnifiedDocument
-from app.features.documents.ingestion.workflow import build_document_ingestion_graph
 from app.resilience.idempotency import IdempotencyGuard
 from app.utils.storage import StorageService
 

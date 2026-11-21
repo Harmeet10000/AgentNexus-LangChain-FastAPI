@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from app.config.settings import get_settings
 from app.features.documents.application.access_audit import DocumentAccessAuditEvent
-from app.features.documents.retrieval.graph.budgets import (
+from app.features.documents.application.retrieval.graph.budgets import (
     StageBudget,
     StageBudgetTracker,
     reset_degradation_window,
