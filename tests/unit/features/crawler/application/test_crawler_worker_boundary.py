@@ -13,15 +13,14 @@ on.
 from __future__ import annotations
 
 import asyncio
-import importlib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
 from app.config import Settings
+from app.features.crawler.adapters.inbound.worker.tasks import crawl_job as crawler_crawl_job
 from app.utils import ServiceUnavailableException
-from app.worker.capabilities.owner import CapabilityUsageError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -41,9 +40,9 @@ def _run_at_task_boundary(
     asyncio.run(_invoke())
 
 
-def _current_crawler_jobs():
-    """Return the module instance left by worker-isolation reload tests."""
-    return importlib.import_module("app.features.crawler.adapters.inbound.worker.tasks")
+def _current_crawler_jobs() -> dict[str, Any]:
+    """Return the registered task's own globals, immune to sys.modules churn."""
+    return crawler_crawl_job._orig_run.__globals__
 
 
 def test_crawl_job_hands_the_boundary_provisioned_browser_into_the_job(
@@ -58,8 +57,8 @@ def test_crawl_job_hands_the_boundary_provisioned_browser_into_the_job(
     """
     jobs = _current_crawler_jobs()
     resources = SimpleNamespace(browser=object())
-    monkeypatch.setattr(jobs, "get_crawler_worker_resources", lambda: resources)
-    monkeypatch.setattr(jobs, "run_on_crawler_worker_loop", _run_at_task_boundary)
+    monkeypatch.setitem(jobs, "get_crawler_worker_resources", lambda: resources)
+    monkeypatch.setitem(jobs, "run_on_crawler_worker_loop", _run_at_task_boundary)
 
     seen: dict[str, Any] = {}
 
@@ -74,12 +73,12 @@ def test_crawl_job_hands_the_boundary_provisioned_browser_into_the_job(
         seen["final_attempt"] = final_attempt
         seen["browser"] = browser
 
-    monkeypatch.setattr(jobs, "_run_crawl_job", _stub)
+    monkeypatch.setitem(jobs, "_run_crawl_job", _stub)
 
     # `crawl_job` is a bound Celery task (PromiseProxy) with autoretry wrapping;
     # `_orig_run` is the underlying bound function. Outside a task context
     # `self.request.retries` defaults to 0, so `final_attempt` is False.
-    result = jobs.crawl_job._orig_run(
+    result = crawler_crawl_job._orig_run(
         crawl_id="crawl-f8",
         request_payload={"url": "https://example.com"},
     )
@@ -100,7 +99,7 @@ def test_a_running_owner_loop_refuses_the_sync_resource_accessor() -> None:
     from app.features.crawler.adapters.inbound.worker import capabilities as capability
 
     async def _miswired() -> None:
-        with pytest.raises(CapabilityUsageError, match="task boundary"):
+        with pytest.raises(capability.CapabilityUsageError, match="task boundary"):
             capability.get_crawler_worker_resources()
 
     asyncio.run(_miswired())
@@ -117,16 +116,16 @@ def test_terminal_preflight_failure_marks_the_job_failed(
     def unavailable() -> None:
         raise ServiceUnavailableException(detail="crawler egress unavailable")
 
-    monkeypatch.setattr(jobs, "get_settings", lambda: settings)
-    monkeypatch.setattr(jobs, "get_crawler_worker_resources", unavailable)
-    monkeypatch.setattr(
+    monkeypatch.setitem(jobs, "get_settings", lambda: settings)
+    monkeypatch.setitem(jobs, "get_crawler_worker_resources", unavailable)
+    monkeypatch.setitem(
         jobs,
         "_mark_failed_sync",
         lambda crawl_id, message: recorded.append((crawl_id, message)),
     )
 
     with pytest.raises(ServiceUnavailableException):
-        jobs.crawl_job._orig_run(
+        crawler_crawl_job._orig_run(
             crawl_id="crawl-preflight-failure",
             request_payload={"url": "https://example.com"},
         )
