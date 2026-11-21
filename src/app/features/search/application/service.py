@@ -5,17 +5,19 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import traceback
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 import orjson
 from pydantic import ValidationError
 from returns.result import Failure, Success
 
-from app.ai.embeddings import EmbeddingTaskType, embed_text
 from app.config import get_settings
-from app.events.writer import stamp_outbox_payload_event_id
-from app.features.search.adapters.persistence.models import SEARCH_EMBEDDING_DIM
-from app.features.search.api.http.dto import (
+from app.config.settings import SEARCH_EMBEDDING_DIM
+from app.features.search.application.context_assembly import (
+    SearchChunkRecord,
+    assemble_rag_context,
+)
+from app.features.search.application.dto import (
     RagContextSectionResponse,
     RagSearchResponse,
     SearchIngestResponse,
@@ -23,10 +25,7 @@ from app.features.search.api.http.dto import (
     SearchResultItem,
     SearchTaskStatusResponse,
 )
-from app.features.search.application.context_assembly import (
-    SearchChunkRecord,
-    assemble_rag_context,
-)
+from app.features.search.application.ports import SearchIngestionJob
 from app.features.search.domain.errors import (
     SearchInfrastructureError,
     SearchNotFoundError,
@@ -39,41 +38,34 @@ from app.features.search.domain.models import (
 )
 from app.observability.logging import logger, trace_layer
 from app.retrieval.fusion import RankedChunk, reciprocal_rank_fusion
-from app.shared.jobs import AggregateRef, is_transaction_scope
-from app.shared.jobs.catalog import JOB_CATALOG
-from app.shared.jobs.names import SEARCH_INGEST
-from app.shared.jobs.payloads import SearchIngestPayload
 from app.shared.result.logging import log_expected_failure
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Sequence
-    from typing import Any
+    from collections.abc import Sequence
+    from typing import Any, TypeGuard
 
     from redis.asyncio import Redis
 
-    from app.features.search.adapters.persistence.models import SearchDocument
-    from app.features.search.adapters.persistence.postgres.search_repository import (
-        SearchRepository,
-    )
-    from app.features.search.api.http.dto import (
+    from app.features.search.application.dto import (
         HybridSearchRequest,
         RagSearchRequest,
         SearchIngestRequest,
     )
+    from app.features.search.application.ports import (
+        SearchEmbeddings,
+        SearchJobQueue,
+        SearchRepository,
+        SearchTransaction,
+    )
     from app.features.search.domain.errors import SearchResult
+    from app.features.search.domain.models import SearchDocument
     from app.retrieval.fusion import RankedResultRow
-    from app.shared.jobs import JobBus
 
 
-class EmbedQueryFn(Protocol):
-    """The single embedding call the service needs; test doubles implement it."""
-
-    def __call__(self, text: str, *, task_type: EmbeddingTaskType) -> Awaitable[list[float]]: ...
-
-
-async def _default_embed_query(text: str, *, task_type: EmbeddingTaskType) -> list[float]:
-    return await embed_text(text, task_type=task_type)
+def _is_search_transaction(value: object) -> TypeGuard[SearchTransaction]:
+    """Narrow an adapter transaction by the one staging capability required."""
+    return callable(getattr(value, "execute", None))
 
 
 class SearchService:
@@ -88,16 +80,13 @@ class SearchService:
         self,
         repo: SearchRepository,
         redis: Redis | None,
-        job_bus: JobBus | None,
-        *,
-        embed_query: EmbedQueryFn | None = None,
+        job_queue: SearchJobQueue | None,
+        embeddings: SearchEmbeddings,
     ):
         self.repo: SearchRepository = repo
         self.redis: Redis | None = redis
-        self.job_bus: JobBus | None = job_bus
-        if embed_query is None:
-            embed_query = _default_embed_query
-        self._embed_query: EmbedQueryFn = embed_query
+        self.job_queue = job_queue
+        self.embeddings = embeddings
 
     @trace_layer("service")
     async def ingest_document(
@@ -117,7 +106,7 @@ class SearchService:
         canonical_content = payload.content.strip()
         content_hash = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
 
-        if self.job_bus is None:
+        if self.job_queue is None:
             # Fail closed BEFORE any write: a document row without a queueable
             # pipeline is a pending orphan, so the enqueue seam being absent is
             # an outage, not a 201.
@@ -167,7 +156,8 @@ class SearchService:
         document_id = str(document.id)
         # The request session is the transaction scope: the runtime guard
         # checks the one staging capability (async execute) structurally.
-        if not is_transaction_scope(self.repo.session):
+        transaction = self.repo.transaction
+        if not _is_search_transaction(transaction):
             await self.repo.rollback()
             return Failure(
                 SearchInfrastructureError(
@@ -176,10 +166,10 @@ class SearchService:
                     source="search_service",
                 )
             )
-        tx = self.repo.session
         try:
-            typed_job = JOB_CATALOG[SEARCH_INGEST].prepare(
-                SearchIngestPayload(
+            task_id = await self.job_queue.stage_ingestion(
+                transaction,
+                job=SearchIngestionJob(
                     document_id=document_id,
                     tenant_id=tenant_id,
                     content=canonical_content,
@@ -187,17 +177,8 @@ class SearchService:
                     title=payload.title,
                     source_uri=payload.source_uri,
                     doc_metadata=payload.doc_metadata,
-                )
+                ),
             )
-            receipt = await self.job_bus.in_transaction(tx).enqueue(
-                typed_job,
-                aggregate=AggregateRef(aggregate_type="search_document", aggregate_id=document_id),
-            )
-            # The adapter generates the event id internally, so the payload was
-            # staged without it; stamping it into the stored row (same
-            # transaction) lets the worker bind its real Celery task id back to
-            # the event id the API returned to the client.
-            await stamp_outbox_payload_event_id(tx, event_id=receipt.event_id)
         except Exception as exc:  # noqa: BLE001 — staging failure is classified into the typed search error union
             exc.add_note(f"operation=search_ingest, document_id={document_id}")
             # The traceback note plus the structured log are the only durable
@@ -220,7 +201,6 @@ class SearchService:
 
         # The transactional bus is the only enqueue path: its receipt carries
         # the outbox event id, which becomes the pollable task identity.
-        task_id = receipt.event_id
         owner_recorded = await self._task_owner_set(
             task_id, tenant_id=tenant_id, document_id=document_id
         )
@@ -466,9 +446,7 @@ class SearchService:
                 return Success(cached)
 
         try:
-            query_embedding = await self._embed_query(
-                payload.query, task_type=EmbeddingTaskType.QUERY
-            )
+            query_embedding = await self.embeddings.embed_query(payload.query)
         except Exception as exc:  # noqa: BLE001 — embedding-provider failure is classified into the typed search error union
             exc.add_note(f"operation=search_hybrid, tenant_id={tenant_id}")
             exc.add_note(traceback.format_exc())

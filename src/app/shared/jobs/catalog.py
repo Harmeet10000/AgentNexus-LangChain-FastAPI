@@ -212,7 +212,7 @@ _CATALOG: dict[str, JobDefinition[CeleryTaskPayload]] = {
         SearchIngestPayload,
         queue=JobQueue.INGESTION,
         capability=JobCapability.SEARCH_INGESTION,
-        declaring_module="app.worker.jobs.search",
+        declaring_module="app.features.search.adapters.inbound.worker.tasks",
     ),
     CRAWLER_CRAWL: _job(
         CRAWLER_CRAWL,

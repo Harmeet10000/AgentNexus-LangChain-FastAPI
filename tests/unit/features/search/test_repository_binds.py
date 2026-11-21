@@ -11,6 +11,7 @@ the wrong place to discover.
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +21,7 @@ from app.features.search.adapters.persistence.postgres.search_repository import 
     build_chunk_rows,
     build_chunk_upsert_statement,
 )
+from app.features.search.domain.models import SearchChunkUpsert
 from app.utils.sql_binds import uuid_any, uuid_param
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -85,16 +87,16 @@ def test_hydration_fetch_is_tenant_scoped_in_the_builder() -> None:
 
 def test_chunk_upsert_statement_compiles_with_conflict_refresh_columns() -> None:
     rows = build_chunk_rows(
-        document_id="00000000-0000-0000-0000-000000000001",
-        tenant_id=_DOCUMENT_TENANT,
-        chunks=[
-            {
-                "id": "00000000-0000-0000-0000-0000000000f1",
-                "chunk_index": 0,
-                "content": "chunk body",
-                "embedding": [0.1, 0.2],
-                "chunk_metadata": {"token_count": 2},
-            }
+        [
+            SearchChunkUpsert(
+                id=UUID("00000000-0000-0000-0000-0000000000f1"),
+                document_id=UUID("00000000-0000-0000-0000-000000000001"),
+                tenant_id=_DOCUMENT_TENANT,
+                chunk_index=0,
+                content="chunk body",
+                embedding=[0.1, 0.2],
+                chunk_metadata={"token_count": 2},
+            )
         ],
     )
     statement = build_chunk_upsert_statement(rows)
@@ -184,16 +186,16 @@ def test_non_unique_integrity_errors_are_not_treated_as_the_race() -> None:
 
 def test_chunk_rows_carry_the_tenant() -> None:
     rows = build_chunk_rows(
-        document_id="00000000-0000-0000-0000-000000000001",
-        tenant_id=_DOCUMENT_TENANT,
-        chunks=[
-            {
-                "id": "00000000-0000-0000-0000-0000000000f1",
-                "chunk_index": 0,
-                "content": "chunk body",
-                "embedding": [0.1, 0.2],
-                "chunk_metadata": {},
-            }
+        [
+            SearchChunkUpsert(
+                id=UUID("00000000-0000-0000-0000-0000000000f1"),
+                document_id=UUID("00000000-0000-0000-0000-000000000001"),
+                tenant_id=_DOCUMENT_TENANT,
+                chunk_index=0,
+                content="chunk body",
+                embedding=[0.1, 0.2],
+                chunk_metadata={},
+            )
         ],
     )
     assert rows[0]["tenant_id"] == _DOCUMENT_TENANT

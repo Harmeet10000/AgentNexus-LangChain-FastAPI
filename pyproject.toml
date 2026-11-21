@@ -977,6 +977,8 @@ source_modules = [
     # Crawler use cases moved into the nested application layer; protect all
     # application modules from importing worker task entry points.
     "app.features.crawler.application.**",
+    # Search now owns its inbound worker adapter and application ports.
+    "app.features.search.application.**",
     "app.features.billing.jobs",
     "app.features.billing.credits.jobs",
 ]
@@ -1008,6 +1010,13 @@ type = "forbidden"
 source_modules = ["app.features.audit.application"]
 allow_indirect_imports = true
 forbidden_modules = ["app.features.audit.adapters", "app.features.audit.api"]
+
+[[tool.importlinter.contracts]]
+name = "Search application does not import adapters or transport"
+type = "forbidden"
+source_modules = ["app.features.search.application"]
+allow_indirect_imports = true
+forbidden_modules = ["app.features.search.adapters", "app.features.search.api"]
 
 [[tool.importlinter.contracts]]
 name = "Billing reaches audit through public composition only"

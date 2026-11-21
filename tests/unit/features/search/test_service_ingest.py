@@ -16,9 +16,10 @@ import pytest
 from fakeredis.aioredis import FakeRedis
 from returns.result import Failure, Success
 
+from app.features.search.adapters.outbound.jobs import DurableSearchJobQueue
 from app.features.search.adapters.persistence.models import SearchDocument
-from app.features.search.api.http.dto import SearchIngestRequest
 from app.features.search.application import service as search_service_module
+from app.features.search.application.dto import SearchIngestRequest
 from app.features.search.application.service import SearchService, bump_tenant_cache_version
 from app.features.search.domain.errors import (
     SearchConflictError,
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
 
-    from app.features.search.api.http.dto import HybridSearchRequest
+    from app.features.search.application.dto import HybridSearchRequest
     from app.shared.jobs import AggregateRef
     from app.shared.jobs.bus import TypedJob
     from app.shared.jobs.payloads import CeleryTaskPayload
@@ -84,6 +85,10 @@ class _StubRepository:
         # The service binds transactional staging to the repo's session; the
         # staging guard checks for an async `execute` capability.
         self.session = _FakeSession()
+
+    @property
+    def transaction(self) -> _FakeSession:
+        return self.session
 
     def _record(self, method: str, kwargs: dict[str, Any]) -> None:
         self.calls.append((method, kwargs))
@@ -225,11 +230,12 @@ def _service(
     job_bus: JobBus | None = None,
     redis: Any = None,
 ) -> SearchService:
+    job_queue = DurableSearchJobQueue(job_bus) if job_bus is not None else None
     return SearchService(
         repo=repo,  # type: ignore[arg-type]
         redis=redis,
-        job_bus=job_bus,
-        embed_query=_stub_embed_query,
+        job_queue=job_queue,
+        embeddings=_StubEmbeddings(),
     )
 
 
@@ -239,8 +245,12 @@ def _job_bus(staging: _RecordingStagingAdapter) -> JobBus:
     return JobBus(InMemoryDirectAdapter(), staging)  # type: ignore[arg-type]
 
 
-async def _stub_embed_query(text: str, *, task_type: Any) -> list[float]:
-    return [0.1, 0.2, 0.3]
+class _StubEmbeddings:
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.1, 0.2, 0.3]
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2, 0.3] for _ in texts]
 
 
 def _ingest_payload(**overrides: str) -> SearchIngestRequest:
@@ -691,7 +701,7 @@ async def test_hybrid_search_fuses_and_hydrates() -> None:
 
 
 def _hybrid_payload(**overrides: Any) -> Any:
-    from app.features.search.api.http.dto import HybridSearchRequest
+    from app.features.search.application.dto import HybridSearchRequest
 
     values: dict[str, Any] = {"query": "site query", "limit": 10, "candidate_limit": 50}
     values.update(overrides)

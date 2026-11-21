@@ -20,6 +20,8 @@ from app.features.search.application.ingestion import process_search_ingestion_d
 if TYPE_CHECKING:
     from typing import Any
 
+    from app.features.search.domain.models import SearchChunkUpsert
+
 
 TENANT = "tenant-1"
 DOC_ID = "00000000-0000-0000-0000-0000000000aa"
@@ -29,12 +31,12 @@ class _PipelineRepository:
     """Records upsert batches and status writes without a database."""
 
     def __init__(self):
-        self.upsert_batches: list[list[dict[str, Any]]] = []
+        self.upsert_batches: list[list[SearchChunkUpsert]] = []
         self.statuses: list[tuple[str, str]] = []
         self.analyze_calls = 0
 
-    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> Any:
-        self.upsert_batches.append(rows)
+    async def upsert_chunks(self, chunks: list[SearchChunkUpsert]) -> Any:
+        self.upsert_batches.append(chunks)
         return Success(None)
 
     async def analyze_chunks(self) -> Any:
@@ -55,15 +57,19 @@ class _FakeSettings:
     SEARCH_ANALYZE_THRESHOLD_CHUNKS = 10_000
 
 
+class _FakeEmbeddings:
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.0, 0.1]
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0, 0.1] for _ in texts]
+
+
 def _install_pipeline(monkeypatch: pytest.MonkeyPatch) -> _PipelineRepository:
     """Wire the small-geometry settings and a stubbed embedder; return the repo."""
     repo = _PipelineRepository()
     monkeypatch.setattr(ingestion_module, "get_settings", _FakeSettings)
 
-    async def _fake_embed(texts: list[str], *, task_type: Any) -> list[list[float]]:
-        return [[0.0, 0.1] for _ in texts]
-
-    monkeypatch.setattr(ingestion_module, "embed_texts", _fake_embed)
     return repo
 
 
@@ -73,6 +79,7 @@ async def test_chunks_are_upserted_per_embedding_batch(monkeypatch: pytest.Monke
     pipeline = _install_pipeline(monkeypatch)
     result = await process_search_ingestion_document(
         repo=pipeline,  # type: ignore[arg-type]
+        embeddings=_FakeEmbeddings(),
         document_id=DOC_ID,
         tenant_id=TENANT,
         content="a b c d e",
@@ -84,8 +91,8 @@ async def test_chunks_are_upserted_per_embedding_batch(monkeypatch: pytest.Monke
     # Every row is tenant-stamped; all rows bind the same document.
     for batch in pipeline.upsert_batches:
         for row in batch:
-            assert row["tenant_id"] == TENANT
-            assert str(row["document_id"]) == DOC_ID
+            assert row.tenant_id == TENANT
+            assert str(row.document_id) == DOC_ID
     assert pipeline.statuses == [(DOC_ID, "completed")]
 
 
@@ -97,6 +104,7 @@ async def test_empty_content_records_a_completed_zero_chunk_state(
     pipeline = _install_pipeline(monkeypatch)
     result = await process_search_ingestion_document(
         repo=pipeline,  # type: ignore[arg-type]
+        embeddings=_FakeEmbeddings(),
         document_id=DOC_ID,
         tenant_id=TENANT,
         content="   \n\t ",
@@ -125,6 +133,7 @@ async def test_ingested_metadata_is_searchable_via_chunk_metadata(
     pipeline = _install_pipeline(monkeypatch)
     result = await process_search_ingestion_document(
         repo=pipeline,  # type: ignore[arg-type]
+        embeddings=_FakeEmbeddings(),
         document_id=DOC_ID,
         tenant_id=TENANT,
         content="a b c d e",
@@ -135,6 +144,6 @@ async def test_ingested_metadata_is_searchable_via_chunk_metadata(
     assert pipeline.upsert_batches
     for batch in pipeline.upsert_batches:
         for row in batch:
-            assert row["chunk_metadata"]["lang"] == "en"
-            assert row["chunk_metadata"]["brand"] == "acme"
-            assert "token_count" in row["chunk_metadata"]
+            assert row.chunk_metadata["lang"] == "en"
+            assert row.chunk_metadata["brand"] == "acme"
+            assert "token_count" in row.chunk_metadata

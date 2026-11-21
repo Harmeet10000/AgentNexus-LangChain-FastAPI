@@ -10,11 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Response, status
 
-from app.shared.rate_limit import get_rate_limiter
-from app.shared.result.render import APIResponse, render_result
-
-from .dependencies import SearchAuthorizationDep, SearchServiceDep
-from .dto import (
+from app.features.search.application.dto import (
     HybridSearchRequest,
     RagSearchRequest,
     RagSearchResponse,
@@ -23,6 +19,10 @@ from .dto import (
     SearchResponse,
     SearchTaskStatusResponse,
 )
+from app.shared.rate_limit import get_rate_limiter
+from app.shared.result.render import APIResponse, render_result
+
+from .dependencies import SearchAuthorizationDep, SearchServiceDep
 
 router = APIRouter(prefix="/search", tags=["search"])
 

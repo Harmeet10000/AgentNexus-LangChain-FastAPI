@@ -14,20 +14,16 @@ it, because a retry cannot fix a configuration drift or a constraint.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from returns.result import Failure
 
-from app.ai.embeddings import EmbeddingQuotaExhaustedError, EmbeddingTaskType, embed_texts
 from app.config import get_settings
-from app.features.search.adapters.persistence.models import SEARCH_EMBEDDING_DIM
-from app.features.search.adapters.persistence.postgres.search_repository import (
-    SearchRepository,
-    build_chunk_rows,
-)
+from app.config.settings import SEARCH_EMBEDDING_DIM
+from app.features.search.application.ports import SearchEmbeddingQuotaExhaustedError
 from app.features.search.domain.chunking import chunk_text
 from app.features.search.domain.errors import SearchInfrastructureError
-from app.features.search.domain.models import SearchDocumentStatus
+from app.features.search.domain.models import SearchChunkUpsert, SearchDocumentStatus
 from app.observability.logging import logger
 from app.utils import ServiceUnavailableException
 from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
@@ -35,6 +31,7 @@ from app.utils.embedding import stored_width_mismatch, width_mismatch_detail
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from app.features.search.application.ports import SearchEmbeddings, SearchRepository
     from app.features.search.domain.chunking import TextChunk
     from app.features.search.domain.errors import SearchError
 
@@ -81,6 +78,7 @@ def _to_raising_exception(error: SearchError) -> Exception:
 async def process_search_ingestion_document(
     *,
     repo: SearchRepository,
+    embeddings: SearchEmbeddings,
     document_id: str,
     tenant_id: str,
     content: str,
@@ -129,40 +127,33 @@ async def process_search_ingestion_document(
     chunk_count = 0
     for batch in _batched(chunks, settings.SEARCH_INGEST_EMBEDDING_BATCH_SIZE):
         try:
-            embeddings = await embed_texts(
-                [chunk.content for chunk in batch],
-                task_type=EmbeddingTaskType.DOCUMENT,
-            )
-        except EmbeddingQuotaExhaustedError as exc:
+            vectors = await embeddings.embed_documents([chunk.content for chunk in batch])
+        except SearchEmbeddingQuotaExhaustedError as exc:
             # Keep the quota cause typed at this boundary too: the dead-letter
             # record must name the daily cap, not a generic provider error.
-            raise SearchIngestQuotaExhaustedError(exc.detail) from exc
-        batch_rows = [
-            {
-                "id": str(uuid4()),
-                "chunk_index": chunk.chunk_index,
-                "content": chunk.content,
-                "embedding": embedding,
-                "chunk_metadata": {
+            raise SearchIngestQuotaExhaustedError(str(exc)) from exc
+        batch_chunks = [
+            SearchChunkUpsert(
+                id=uuid4(),
+                document_id=UUID(document_id),
+                tenant_id=tenant_id,
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                embedding=embedding,
+                chunk_metadata={
                     **(doc_metadata or {}),
                     "token_count": chunk.token_count,
                 },
-            }
-            for chunk, embedding in zip(batch, embeddings, strict=True)
+            )
+            for chunk, embedding in zip(batch, vectors, strict=True)
         ]
         # One INSERT per embedding batch, all inside the caller's transaction:
         # the whole document either lands or rolls back, but no statement ever
         # carries every chunk of a huge document at once.
-        upsert_result = await repo.upsert_chunks(
-            build_chunk_rows(
-                document_id=document_id,
-                tenant_id=tenant_id,
-                chunks=batch_rows,
-            )
-        )
+        upsert_result = await repo.upsert_chunks(batch_chunks)
         if isinstance(upsert_result, Failure):
             raise _to_raising_exception(upsert_result.failure())
-        chunk_count += len(batch_rows)
+        chunk_count += len(batch_chunks)
 
     if chunk_count > settings.SEARCH_ANALYZE_THRESHOLD_CHUNKS:
         analyze_result = await repo.analyze_chunks()
@@ -189,33 +180,6 @@ async def process_search_ingestion_document(
         "chunk_count": chunk_count,
         "embedding_dim": SEARCH_EMBEDDING_DIM,
     }
-
-
-async def run_search_ingestion_task(
-    *,
-    document_id: str,
-    tenant_id: str,
-    content: str,
-    event_id: str | None = None,
-    doc_metadata: dict[str, object] | None = None,
-) -> dict[str, object]:
-    """Create a task-local async DB session and execute search ingestion."""
-    from app.connections import init_db  # noqa: PLC0415 — keeps the web import graph worker-free
-
-    engine, session_local = await init_db()
-    try:
-        async with session_local() as session, session.begin():
-            repo = SearchRepository(session)
-            return await process_search_ingestion_document(
-                repo=repo,
-                document_id=document_id,
-                tenant_id=tenant_id,
-                content=content,
-                event_id=event_id,
-                doc_metadata=doc_metadata,
-            )
-    finally:
-        await engine.dispose()
 
 
 def _batched(values: Sequence[TextChunk], batch_size: int) -> list[Sequence[TextChunk]]:

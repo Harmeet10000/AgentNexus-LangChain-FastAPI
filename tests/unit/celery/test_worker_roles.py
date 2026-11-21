@@ -79,7 +79,7 @@ def test_ingestion_profile_registers_the_search_ingest_job() -> None:
     profile = profile_for_role("ingestion")
 
     assert SEARCH_INGEST in profile.task_names
-    assert "app.worker.jobs.search" in profile.task_modules
+    assert "app.features.search.adapters.inbound.worker.tasks" in profile.task_modules
 
 
 def test_role_command_rejects_duplicate_queue_or_process_flags() -> None:
@@ -154,7 +154,10 @@ profile = profile_for_role({role!r})
 assert tuple(app.conf.include) == profile.task_modules
 assert all(
     module.startswith("app.worker.jobs.")
-    or module == "app.features.auth.adapters.inbound.worker.tasks"
+    or module in {{
+        "app.features.auth.adapters.inbound.worker.tasks",
+        "app.features.search.adapters.inbound.worker.tasks",
+    }}
     for module in app.conf.include
 )
 app.loader.import_default_modules()

@@ -17,8 +17,10 @@ from app.features.auth.api.http.dependencies import (
     AuthorizationContext,
     CurrentAuthorizationContext,
 )
+from app.features.search.adapters.outbound.embeddings import ProviderSearchEmbeddings
+from app.features.search.adapters.outbound.jobs import DurableSearchJobQueue
 from app.features.search.adapters.persistence.postgres.search_repository import (
-    SearchRepository,
+    PostgresSearchRepository,
 )
 from app.features.search.application.service import SearchService
 
@@ -28,17 +30,23 @@ if TYPE_CHECKING:
 
 async def get_search_repository(
     session: Annotated[AsyncSession, Depends(get_postgres_db)],
-) -> SearchRepository:
-    return SearchRepository(session)
+) -> PostgresSearchRepository:
+    return PostgresSearchRepository(session)
 
 
 async def get_search_service(
-    repo: Annotated[SearchRepository, Depends(get_search_repository)],
+    repo: Annotated[PostgresSearchRepository, Depends(get_search_repository)],
     redis: Annotated[Redis, Depends(get_redis)],
     request: Request,
 ) -> SearchService:
     job_bus: JobBus | None = getattr(request.app.state, "job_bus", None)
-    return SearchService(repo=repo, redis=redis, job_bus=job_bus)
+    job_queue = DurableSearchJobQueue(job_bus) if job_bus is not None else None
+    return SearchService(
+        repo=repo,
+        redis=redis,
+        job_queue=job_queue,
+        embeddings=ProviderSearchEmbeddings(),
+    )
 
 
 async def get_search_authorization(
@@ -52,6 +60,6 @@ async def get_search_authorization(
     return context
 
 
-SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)]
+SearchRepositoryDep = Annotated[PostgresSearchRepository, Depends(get_search_repository)]
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
 SearchAuthorizationDep = Annotated[AuthorizationContext, Depends(get_search_authorization)]

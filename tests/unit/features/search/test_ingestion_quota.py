@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import app.features.search.application.ingestion as search_ingestion
 from app.ai.embeddings import EmbeddingQuotaExhaustedError
 from app.features.search.application.ingestion import (
     SearchIngestQuotaExhaustedError,
     SearchIngestTerminalError,
     process_search_ingestion_document,
 )
+from app.features.search.application.ports import SearchEmbeddingQuotaExhaustedError
 
 if TYPE_CHECKING:
     from typing import Any
@@ -33,29 +33,36 @@ class _UnusedRepo:
         raise AssertionError(violation)
 
 
-async def test_quota_failure_raises_typed_terminal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _quota_boom(*_args: Any, **_kwargs: Any) -> list[list[float]]:
+class _QuotaEmbeddings:
+    async def embed_query(self, text: str) -> list[float]:
+        return []
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         quota_detail = "Embedding provider daily quota exhausted for model gemini-embedding-001"
-        raise EmbeddingQuotaExhaustedError(
+        provider_error = EmbeddingQuotaExhaustedError(
             quota_detail,
             model="gemini-embedding-001",
             provider_status=429,
         )
+        raise SearchEmbeddingQuotaExhaustedError(quota_detail) from provider_error
 
-    monkeypatch.setattr(search_ingestion, "embed_texts", _quota_boom)
 
+async def test_quota_failure_raises_typed_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     with pytest.raises(SearchIngestQuotaExhaustedError) as raised:
         await process_search_ingestion_document(
             repo=_UnusedRepo(),  # type: ignore[arg-type]
+            embeddings=_QuotaEmbeddings(),
             document_id="doc-1",
             tenant_id="tenant-1",
             content=_CONTENT,
         )
 
     assert raised.value.error_code == "embedding_quota_exhausted"
-    assert isinstance(raised.value.__cause__, EmbeddingQuotaExhaustedError)
+    port_error = raised.value.__cause__
+    assert isinstance(port_error, SearchEmbeddingQuotaExhaustedError)
+    assert isinstance(port_error.__cause__, EmbeddingQuotaExhaustedError)
 
 
 def test_quota_error_is_terminal_for_the_autoretry_policy() -> None:

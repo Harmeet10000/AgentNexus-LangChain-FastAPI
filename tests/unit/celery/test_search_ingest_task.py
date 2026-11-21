@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from app.features.search.adapters.inbound.worker.tasks import record_celery_task_id
 from app.features.search.application.ingestion import SearchIngestTerminalError
 from app.features.search.application.service import bump_tenant_cache_version
 from app.shared.jobs.names import SEARCH_INGEST
 from app.utils import InfrastructureException
-from app.worker.jobs.search import record_celery_task_id
 
 if TYPE_CHECKING:
     from typing import Any
@@ -40,7 +40,7 @@ def _fresh_worker_loop():
 
 def test_search_ingest_keeps_the_stable_wire_name(real_celery: object) -> None:
     del real_celery
-    search_tasks = importlib.import_module("app.worker.jobs.search")
+    search_tasks = importlib.import_module("app.features.search.adapters.inbound.worker.tasks")
 
     assert search_tasks.search_ingest.name == SEARCH_INGEST
 
@@ -49,7 +49,7 @@ def test_retryable_infrastructure_failures_are_in_the_task_retry_policy(
     real_celery: object,
 ) -> None:
     del real_celery
-    search_tasks = importlib.import_module("app.worker.jobs.search")
+    search_tasks = importlib.import_module("app.features.search.adapters.inbound.worker.tasks")
 
     assert InfrastructureException in search_tasks.search_ingest.autoretry_for
 
@@ -57,7 +57,7 @@ def test_retryable_infrastructure_failures_are_in_the_task_retry_policy(
 def test_terminal_errors_are_exempt_from_autoretry(real_celery: object) -> None:
     """Configuration drift and constraint conflicts must dead-letter, not spin."""
     del real_celery
-    search_tasks = importlib.import_module("app.worker.jobs.search")
+    search_tasks = importlib.import_module("app.features.search.adapters.inbound.worker.tasks")
 
     assert SearchIngestTerminalError in (search_tasks.search_ingest.dont_autoretry_for or ())
 
@@ -100,7 +100,7 @@ def test_successful_run_records_id_and_bumps_cache_version(
     del real_celery
     from fakeredis.aioredis import FakeRedis
 
-    search_tasks = importlib.import_module("app.worker.jobs.search")
+    search_tasks = importlib.import_module("app.features.search.adapters.inbound.worker.tasks")
     task = cast("Any", search_tasks.search_ingest)
     redis = FakeRedis()
     monkeypatch.setattr(search_tasks, "_redis_task_lock_enabled", lambda: True)
@@ -162,7 +162,7 @@ def test_lock_disabled_run_never_constructs_a_redis_client(
 ) -> None:
     """An empty REDIS_URL gates everything cache-shaped BEFORE get_redis_client."""
     del real_celery
-    search_tasks = importlib.import_module("app.worker.jobs.search")
+    search_tasks = importlib.import_module("app.features.search.adapters.inbound.worker.tasks")
     task = cast("Any", search_tasks.search_ingest)
     monkeypatch.setattr(search_tasks, "get_settings", lambda: SimpleNamespace(REDIS_URL=""))
 
@@ -207,7 +207,7 @@ def test_task_runs_without_the_optional_redis_lock(
     real_celery: object,
 ) -> None:
     del real_celery
-    search_tasks = importlib.import_module("app.worker.jobs.search")
+    search_tasks = importlib.import_module("app.features.search.adapters.inbound.worker.tasks")
     task = cast("Any", search_tasks.search_ingest)
     monkeypatch.setattr(search_tasks, "_redis_task_lock_enabled", lambda: False)
     monkeypatch.setattr(
@@ -258,7 +258,7 @@ def test_task_failure_propagates_to_the_retry_policy(
     real_celery: object,
 ) -> None:
     """Celery entrypoints raise; autoretry owns the retry, the body never swallows."""
-    search_tasks = importlib.import_module("app.worker.jobs.search")
+    search_tasks = importlib.import_module("app.features.search.adapters.inbound.worker.tasks")
     task = cast("Any", search_tasks.search_ingest)
     monkeypatch.setattr(search_tasks, "_redis_task_lock_enabled", lambda: False)
 

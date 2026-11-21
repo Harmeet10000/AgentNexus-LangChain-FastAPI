@@ -22,9 +22,13 @@ import traceback
 from typing import TYPE_CHECKING
 
 from app.config import get_settings
+from app.features.search.adapters.outbound.embeddings import ProviderSearchEmbeddings
+from app.features.search.adapters.persistence.postgres.search_repository import (
+    PostgresSearchRepository,
+)
 from app.features.search.application.ingestion import (
     SearchIngestTerminalError,
-    run_search_ingestion_task,
+    process_search_ingestion_document,
 )
 from app.features.search.application.service import bump_tenant_cache_version
 from app.features.search.domain.models import TASK_CELERY_ID_CACHE_KEY
@@ -79,6 +83,33 @@ async def record_celery_task_id(
         logger.bind(event_id=event_id, task_id=task_id).warning(
             "search_task_celery_id_record_failed"
         )
+
+
+async def run_search_ingestion_task(
+    *,
+    document_id: str,
+    tenant_id: str,
+    content: str,
+    event_id: str | None = None,
+    doc_metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Compose task-local adapters around the search ingestion use case."""
+    from app.connections import init_db  # noqa: PLC0415 — worker-only composition
+
+    engine, session_local = await init_db()
+    try:
+        async with session_local() as session, session.begin():
+            return await process_search_ingestion_document(
+                repo=PostgresSearchRepository(session),
+                embeddings=ProviderSearchEmbeddings(),
+                document_id=document_id,
+                tenant_id=tenant_id,
+                content=content,
+                event_id=event_id,
+                doc_metadata=doc_metadata,
+            )
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(

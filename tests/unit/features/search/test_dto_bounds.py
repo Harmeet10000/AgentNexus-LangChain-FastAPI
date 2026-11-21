@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.features.search.api.http.dto import (
+from app.features.search.application.dto import (
     MAX_INGEST_CONTENT_CHARS,
     MAX_INGEST_METADATA_BYTES,
     MAX_SEARCH_QUERY_CHARS,

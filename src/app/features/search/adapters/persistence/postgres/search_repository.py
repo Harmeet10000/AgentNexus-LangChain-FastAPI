@@ -28,11 +28,17 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.config import get_settings
-from app.features.search.adapters.persistence.models import SearchChunk, SearchDocument
+from app.features.search.adapters.persistence.models import (
+    SearchChunk,
+)
+from app.features.search.adapters.persistence.models import (
+    SearchDocument as SearchDocumentModel,
+)
 from app.features.search.domain.errors import (
     SearchConflictError,
     SearchInfrastructureError,
 )
+from app.features.search.domain.models import SearchDocument
 from app.retrieval.fusion import RankedResultRow
 from app.shared.db.postgres.diagnostics import add_database_error_note
 from app.utils.sql_binds import uuid_any, uuid_param
@@ -45,6 +51,7 @@ if TYPE_CHECKING:
     from sqlalchemy.sql.elements import TextClause
 
     from app.features.search.domain.errors import SearchResult
+    from app.features.search.domain.models import SearchChunkUpsert
 
 # Shared tenant + metadata-containment predicate appended to every retrieval
 # branch. The containment half is the documented text() JSONB form: the
@@ -59,23 +66,29 @@ _FILTER_SQL = """
 """
 
 
-class SearchRepository:
+class PostgresSearchRepository:
     """Database operations for the site-search feature."""
 
     def __init__(self, session: AsyncSession):
         self.session: AsyncSession = session
+
+    @property
+    def transaction(self) -> AsyncSession:
+        """Expose only the caller-owned transaction capability to use cases."""
+        return self.session
 
     async def get_document_by_content_hash(
         self, *, tenant_id: str, content_hash: str
     ) -> SearchResult[SearchDocument | None]:
         """Tenant-scoped dedupe lookup; ``None`` is the normal first-ingest path."""
         try:
-            statement = select(SearchDocument).where(
-                SearchDocument.tenant_id == tenant_id,
-                SearchDocument.content_hash == content_hash,
+            statement = select(SearchDocumentModel).where(
+                SearchDocumentModel.tenant_id == tenant_id,
+                SearchDocumentModel.content_hash == content_hash,
             )
             result = await self.session.execute(statement)
-            return Success(result.scalar_one_or_none())
+            document = result.scalar_one_or_none()
+            return Success(_to_domain_document(document) if document is not None else None)
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="search_documents")
             await self.session.rollback()
@@ -92,12 +105,13 @@ class SearchRepository:
     ) -> SearchResult[SearchDocument | None]:
         """Tenant-scoped document lookup by uuid string."""
         try:
-            statement = select(SearchDocument).where(
-                SearchDocument.tenant_id == tenant_id,
-                SearchDocument.id == uuid_param("document_id", document_id),
+            statement = select(SearchDocumentModel).where(
+                SearchDocumentModel.tenant_id == tenant_id,
+                SearchDocumentModel.id == uuid_param("document_id", document_id),
             )
             result = await self.session.execute(statement)
-            return Success(result.scalar_one_or_none())
+            document = result.scalar_one_or_none()
+            return Success(_to_domain_document(document) if document is not None else None)
         except SQLAlchemyError as exc:
             add_database_error_note(exc, table="search_documents")
             await self.session.rollback()
@@ -119,7 +133,7 @@ class SearchRepository:
         doc_metadata: dict[str, object],
     ) -> SearchResult[SearchDocument]:
         try:
-            document = SearchDocument(
+            document = SearchDocumentModel(
                 tenant_id=tenant_id,
                 title=title,
                 source_uri=source_uri,
@@ -128,7 +142,7 @@ class SearchRepository:
             )
             self.session.add(document)
             await self.session.flush()
-            return Success(document)
+            return Success(_to_domain_document(document))
         except IntegrityError as exc:
             add_database_error_note(exc, table="search_documents")
             await self.session.rollback()
@@ -165,7 +179,7 @@ class SearchRepository:
     async def set_document_status(self, *, document_id: str, status: str) -> SearchResult[None]:
         """Worker-side lifecycle update; the worker owns the tenant it acts for."""
         try:
-            document = await self.session.get(SearchDocument, UUID(document_id))
+            document = await self.session.get(SearchDocumentModel, UUID(document_id))
             if document is not None:
                 document.status = status
                 await self.session.flush()
@@ -193,10 +207,11 @@ class SearchRepository:
         """
         await self.session.rollback()
 
-    async def upsert_chunks(self, rows: list[dict[str, Any]]) -> SearchResult[None]:
+    async def upsert_chunks(self, chunks: Sequence[SearchChunkUpsert]) -> SearchResult[None]:
         """Bulk upsert chunk rows on the (document_id, chunk_index) key."""
-        if not rows:
+        if not chunks:
             return Success(None)
+        rows = build_chunk_rows(chunks)
         try:
             await self.session.execute(build_chunk_upsert_statement(rows))
             return Success(None)
@@ -427,17 +442,17 @@ class SearchRepository:
                     SearchChunk.chunk_index,
                     SearchChunk.content,
                     SearchChunk.chunk_metadata,
-                    SearchDocument.title,
+                    SearchDocumentModel.title,
                 )
                 .join_from(
                     SearchChunk,
-                    SearchDocument,
+                    SearchDocumentModel,
                     # The join repeats the composite-ownership pair, not just
                     # the id: a chunk row claiming another tenant's document id
                     # can never hydrate, even if a pre-migration row existed.
                     and_(
-                        SearchDocument.id == SearchChunk.document_id,
-                        SearchDocument.tenant_id == SearchChunk.tenant_id,
+                        SearchDocumentModel.id == SearchChunk.document_id,
+                        SearchDocumentModel.tenant_id == SearchChunk.tenant_id,
                     ),
                 )
                 .where(
@@ -468,6 +483,21 @@ class SearchRepository:
                     source="search_repository",
                 )
             )
+
+
+def _to_domain_document(document: SearchDocumentModel) -> SearchDocument:
+    """Detach an ORM row from its session before it crosses the adapter seam."""
+    return SearchDocument(
+        id=document.id,
+        tenant_id=document.tenant_id,
+        source_uri=document.source_uri,
+        title=document.title,
+        content_hash=document.content_hash,
+        status=document.status,
+        doc_metadata=dict(document.doc_metadata),
+        ingested_at=document.ingested_at,
+        updated_at=document.updated_at,
+    )
 
 
 def _is_tenant_content_hash_race(exc: IntegrityError) -> bool:
@@ -551,23 +581,18 @@ def build_chunk_upsert_statement(rows: list[dict[str, Any]]) -> Any:
     )
 
 
-def build_chunk_rows(
-    *,
-    document_id: str,
-    tenant_id: str,
-    chunks: Sequence[dict[str, Any]],
-) -> list[dict[str, Any]]:
+def build_chunk_rows(chunks: Sequence[SearchChunkUpsert]) -> list[dict[str, Any]]:
     """Create row payloads for repository upsert calls."""
     now = datetime.now(tz=UTC)
     return [
         {
-            "id": UUID(str(chunk["id"])),
-            "document_id": UUID(document_id),
-            "tenant_id": tenant_id,
-            "chunk_index": int(chunk["chunk_index"]),
-            "content": str(chunk["content"]),
-            "embedding": chunk["embedding"],
-            "chunk_metadata": dict(chunk["chunk_metadata"]),
+            "id": chunk.id,
+            "document_id": chunk.document_id,
+            "tenant_id": chunk.tenant_id,
+            "chunk_index": chunk.chunk_index,
+            "content": chunk.content,
+            "embedding": chunk.embedding,
+            "chunk_metadata": dict(chunk.chunk_metadata),
             "created_at": now,
             "updated_at": now,
         }
