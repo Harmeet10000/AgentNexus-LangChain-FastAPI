@@ -24,8 +24,8 @@ from returns.result import Failure
 from app.connections.mongodb import close_mongo_client, create_mongo_client
 from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
 from app.features.auth.adapters.persistence.mongodb.admin_accounts import AdminAccountRepository
+from app.features.auth.adapters.persistence.mongodb.models import UserDocument as User
 from app.features.auth.application.token_audit_log import TokenAuditLog
-from app.features.auth.domain.user import User
 from app.kernel.models import ConfigModel, StrictModel
 from app.observability.logging import logger
 

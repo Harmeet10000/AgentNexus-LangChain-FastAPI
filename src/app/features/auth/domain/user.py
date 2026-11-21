@@ -1,10 +1,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, ClassVar
 
-from beanie import Document, Indexed
-from pydantic import BaseModel, Field
-from pymongo import ASCENDING, IndexModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from .tenancy import LegalRole, ProvisioningState
 
@@ -60,10 +57,18 @@ class OAuthAccount(BaseModel):
     linked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class User(Document):
-    """Primary user document. hashed_password is None for OAuth-only accounts."""
+class User(BaseModel):
+    """Persistence-neutral auth account state.
 
-    email: Annotated[str, Indexed(unique=True)]
+    Mongo collection configuration, indexes, and query expressions belong to
+    the outbound adapter.  This model is safe to use in domain and application
+    code without initializing Beanie.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = ""
+    email: str
     hashed_password: str | None = None
     full_name: str | None = None
     avatar_url: str | None = None
@@ -103,22 +108,6 @@ class User(Document):
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    class Settings:
-        name = "users"
-        indexes: ClassVar[list[IndexModel]] = [
-            IndexModel([("email", ASCENDING)], unique=True),
-            IndexModel(
-                [
-                    ("oauth_accounts.provider", ASCENDING),
-                    ("oauth_accounts.provider_user_id", ASCENDING),
-                ],
-                unique=True,
-                sparse=True,
-            ),
-            IndexModel([("reset_token_hash", ASCENDING)], sparse=True),
-            IndexModel([("verification_token_hash", ASCENDING)], sparse=True),
-        ]
 
     def get_permissions(self) -> frozenset[Permission]:
         return ROLE_PERMISSIONS.get(self.role, frozenset())

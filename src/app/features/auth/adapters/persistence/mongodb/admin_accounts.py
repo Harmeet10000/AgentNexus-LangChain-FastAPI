@@ -8,12 +8,16 @@ from beanie.operators import Or, RegEx
 from pymongo.errors import PyMongoError
 from returns.result import Failure, Success
 
-from app.features.auth.application.identity import (
+from app.features.auth.adapters.persistence.mongodb.identity import (
     clear_session_revocation_pending,
     delete_user_document,
     get_user_document,
     set_user_active,
     set_user_role,
+)
+from app.features.auth.adapters.persistence.mongodb.models import (
+    UserDocument,
+    to_domain_user,
 )
 from app.features.auth.application.ports.admin_accounts import AdminAccountRepositoryPort
 from app.features.auth.domain.errors import (
@@ -24,12 +28,11 @@ from app.features.auth.domain.errors import (
     AuthConflictError,
     AuthInfrastructureError,
 )
-from app.features.auth.domain.user import User
 from app.observability.logging import logger, trace_layer
 
 if TYPE_CHECKING:
     from app.features.auth.domain.errors import AuthError, AuthResult
-    from app.features.auth.domain.user import UserRole
+    from app.features.auth.domain.user import User, UserRole
 
 
 def _translate_identity_error(error: AuthError, *, operation: str, user_id: str) -> AuthError:
@@ -88,21 +91,24 @@ class AdminAccountRepository(AdminAccountRepositoryPort):
         is_active: bool | None = None,
         search: str | None = None,
     ) -> AuthResult[tuple[list[User], int]]:
-        query = User.find()
+        query = UserDocument.find()
         if role is not None:
-            query = query.find(User.role == role)
+            query = query.find(UserDocument.role == role)
         if is_active is not None:
-            query = query.find(User.is_active == is_active)
+            query = query.find(UserDocument.is_active == is_active)
         if search:
             query = query.find(
-                Or(RegEx(User.email, search, "i"), RegEx(User.full_name, search, "i"))
+                Or(
+                    RegEx(UserDocument.email, search, "i"),
+                    RegEx(UserDocument.full_name, search, "i"),
+                )
             )
 
         try:
             total = await query.count()
             skip = (page - 1) * per_page
-            items = await query.skip(skip).limit(per_page).to_list()
-            return Success((items, total))
+            documents = await query.skip(skip).limit(per_page).to_list()
+            return Success(([to_domain_user(document) for document in documents], total))
         except PyMongoError as exc:
             exc.add_note("auth_admin_repository operation=list_users")
             logger.bind(operation="list_users", error=str(exc)).exception(

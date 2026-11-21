@@ -16,13 +16,13 @@ from pymongo.errors import PyMongoError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.features.auth.adapters.persistence.mongodb.models import UserDocument as User
 from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
     TenantMembershipRepository,
     normalize_legal_roles,
 )
 from app.features.auth.domain.tenancy import LegalRole, personal_tenant_id
 from app.features.auth.domain.tenancy_models import Tenant, TenantMembership
-from app.features.auth.domain.user import User
 from app.kernel.models import MutableModel
 from app.observability.logging import logger
 

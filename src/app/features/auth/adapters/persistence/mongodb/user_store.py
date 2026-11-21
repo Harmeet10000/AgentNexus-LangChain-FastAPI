@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
     from app.features.auth.domain.errors import AuthError
 
+from app.features.auth.adapters.persistence.mongodb.models import UserDocument as User
 from app.features.auth.domain.errors import (
     AuthConflictError,
     AuthInfrastructureError,
@@ -33,7 +34,6 @@ from app.features.auth.domain.tenancy import LegalRole, ProvisioningState
 from app.features.auth.domain.user import (
     ROLE_PERMISSIONS,
     OAuthAccount,
-    User,
     UserRole,
 )
 

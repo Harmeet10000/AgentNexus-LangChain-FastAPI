@@ -31,6 +31,7 @@ import sys
 from app.config import get_settings
 from app.connections.mongodb import close_mongo_client, create_mongo_client
 from app.connections.postgres import close_db_engine, init_db
+from app.features.auth.adapters.persistence.mongodb.models import UserDocument
 from app.features.auth.adapters.persistence.mongodb.user_store import BeanieAuthAccountStore
 from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
     TenantMembershipService,
@@ -39,7 +40,6 @@ from app.features.auth.application.tenancy_migration import (
     PersonalTenantMigration,
     check_tenant_readiness,
 )
-from app.features.auth.domain.user import User
 
 
 async def _run(*, dry_run: bool, check: bool, reconcile: bool, limit: int) -> dict[str, object]:
@@ -47,7 +47,7 @@ async def _run(*, dry_run: bool, check: bool, reconcile: bool, limit: int) -> di
     mongo_client, _ = await create_mongo_client(
         settings.MONGODB_URI,
         settings.MONGODB_DB_NAME,
-        [User],
+        [UserDocument],
     )
     engine, session_factory = await init_db()
     try:

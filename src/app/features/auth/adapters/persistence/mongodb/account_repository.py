@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from returns.result import Failure, Success
 
+from app.features.auth.adapters.persistence.mongodb.models import UserDocument as User
 from app.features.auth.application.revocation.websocket import (
     new_event,
     publish_event,
@@ -27,7 +28,7 @@ from app.features.auth.domain.errors import (
     AuthResult,
     AuthValidationError,
 )
-from app.features.auth.domain.user import OAuthAccount, User
+from app.features.auth.domain.user import OAuthAccount
 from app.observability.logging import logger, trace_layer
 
 if TYPE_CHECKING:

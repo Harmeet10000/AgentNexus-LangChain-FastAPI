@@ -20,8 +20,8 @@ from app.features.auth.domain.errors import (
 from app.features.auth.domain.user import User
 from app.features.documents.domain.errors import DocumentDatabaseError, DocumentNotFoundError
 from app.kernel.errors import ErrorKind
-from app.shared.result.render import render_result
 from app.security.tokens import TokenClaims
+from app.shared.result.render import render_result
 from app.utils import UnauthorizedException
 
 _AUTH_REPOSITORY = Path("src/app/features/auth/adapters/persistence/mongodb/account_repository.py")

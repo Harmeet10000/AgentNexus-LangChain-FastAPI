@@ -1005,6 +1005,13 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "Auth user domain does not import persistence adapters"
+type = "forbidden"
+source_modules = ["app.features.auth.domain.user"]
+allow_indirect_imports = true
+forbidden_modules = ["app.features.auth.adapters"]
+
+[[tool.importlinter.contracts]]
 name = "Audit application does not import adapters or transport"
 type = "forbidden"
 source_modules = ["app.features.audit.application"]

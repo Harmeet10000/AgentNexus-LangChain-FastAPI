@@ -47,9 +47,9 @@ from app.connections import (
 from app.connections.celery_producer import DirectPublicationAdapter
 from app.events.writer import PostgresOutboxAdapter
 from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.adapters.persistence.mongodb.models import UserDocument
 from app.features.auth.api.websocket.security import build_websocket_security_service
 from app.features.auth.application.token_audit_log import TokenAuditLog
-from app.features.auth.domain.user import User
 from app.features.billing.providers import RazorpayBillingProvider
 from app.features.documents.application.evidence.service import build_evidence_service
 from app.features.health.adapters.outbound.neo4j.probe import check_cognee, check_graphiti
@@ -644,7 +644,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: PLR0912, PLR09
                 coro=setup_mongodb(
                     uri=settings.MONGODB_URI,
                     db_name=settings.MONGODB_DB_NAME,
-                    document_models=[User, TokenAuditLog],
+                    document_models=[UserDocument, TokenAuditLog],
                 )
             )
             redis_task = tg.create_task(coro=setup_redis(app=app))
