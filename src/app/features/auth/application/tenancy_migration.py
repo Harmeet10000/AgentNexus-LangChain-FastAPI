@@ -116,7 +116,7 @@ class PersonalTenantMigration:
 
     async def run(self, users: AsyncIterator[User] | None = None) -> TenantMigrationReport:
         report = TenantMigrationReport()
-        source = users if users is not None else iter_users()
+        source: AsyncIterator[User] = users if users is not None else iter_users()
         async for user in source:
             report.scanned += 1
             user_id = str(user.id)
