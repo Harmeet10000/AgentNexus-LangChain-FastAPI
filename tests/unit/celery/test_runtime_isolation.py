@@ -127,7 +127,7 @@ def test_every_feature_task_module_is_explicitly_registered() -> None:
     }
     feature_modules = {
         ".".join(path.relative_to(src).with_suffix("").parts)
-        for path in (src / "app/features").glob("*/adapters/inbound/worker/tasks.py")
+        for path in (src / "app/features").glob("*/adapters/inbound/worker/*tasks.py")
     }
     discovered = worker_modules | feature_modules
     assert discovered == set(TASK_MODULES)

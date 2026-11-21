@@ -19,6 +19,9 @@ def test_public_surface_contains_only_facade_symbols() -> None:
     assert MODULE.routes == ()
     assert set(__import__("app.features.audit.public", fromlist=["__all__"]).__all__) == {
         "AuditAction",
+        "AuditReader",
+        "ListAuditEntriesInput",
+        "ListAuditEntriesOutput",
         "AuditRecorder",
         "RecordAuditEntryInput",
         "RecordAuditEntryOutput",

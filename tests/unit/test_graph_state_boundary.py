@@ -103,7 +103,7 @@ class GraphStateContract(NamedTuple):
 GRAPH_STATE_CONTRACTS: tuple[GraphStateContract, ...] = (
     GraphStateContract(
         name="documents.ingestion",
-        module_path="src/app/features/documents/ingestion/workflow.py",
+        module_path="src/app/features/documents/application/ingestion/workflow.py",
         state=DocumentIngestionState,
         initial_state_keys=frozenset(
             {
@@ -121,7 +121,7 @@ GRAPH_STATE_CONTRACTS: tuple[GraphStateContract, ...] = (
     ),
     GraphStateContract(
         name="documents.retrieval",
-        module_path="src/app/features/documents/retrieval/graph/graph.py",
+        module_path="src/app/features/documents/application/retrieval/graph/graph.py",
         state=RetrievalState,
         initial_state_keys=frozenset(
             {
