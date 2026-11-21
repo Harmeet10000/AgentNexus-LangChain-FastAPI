@@ -92,9 +92,7 @@ def test_poisoning_events_survive_the_full_collection_to_assertion_path() -> Non
     gate passed a poisoned run. The same copy runs for every supported report
     family, and an observed value always beats the absent-counter default.
     """
-    from_entailment = collect_metrics(
-        entailment_report={"aggregates": {"poisoning_events": 1}}
-    )
+    from_entailment = collect_metrics(entailment_report={"aggregates": {"poisoning_events": 1}})
     assert from_entailment["poisoning_events"] == pytest.approx(1.0)
     failures = evaluate_assertions(from_entailment, _thresholds())
     assert any("poisoning_events" in failure for failure in failures)

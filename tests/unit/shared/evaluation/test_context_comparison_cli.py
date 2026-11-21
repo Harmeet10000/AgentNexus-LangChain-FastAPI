@@ -51,15 +51,15 @@ def _fixture_golden_set(tmp_path: Path) -> Path:
     row["expected_chunk_ids"] = ["SRC-TST:p1:c01"]
     row["expected_document_ids"] = []
     path = tmp_path / "fixture_v1.jsonl"
-    path.write_text(
-        json.dumps(metadata) + "\n" + json.dumps(row) + "\n", encoding="utf-8"
-    )
+    path.write_text(json.dumps(metadata) + "\n" + json.dumps(row) + "\n", encoding="utf-8")
     return path
 
 
 def _fixture_overlay(tmp_path: Path) -> Path:
     overlay_path = tmp_path / "overlay.json"
-    overlay_path.write_text(json.dumps({"SRC-TST:p1:c01": "Performance Security"}), encoding="utf-8")
+    overlay_path.write_text(
+        json.dumps({"SRC-TST:p1:c01": "Performance Security"}), encoding="utf-8"
+    )
     return overlay_path
 
 

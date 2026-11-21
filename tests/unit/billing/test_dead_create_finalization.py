@@ -82,9 +82,7 @@ def _make_service(
 
 async def test_dead_create_row_finalizes_locally(monkeypatch: pytest.MonkeyPatch) -> None:
     row = _row(status="created", remote_sync="permanent_failure", provider_id=None)
-    finalized = _row(
-        status="cancelled", remote_sync="permanent_failure", provider_id=None
-    )
+    finalized = _row(status="cancelled", remote_sync="permanent_failure", provider_id=None)
     service, repo = _make_service(monkeypatch, row=row, finalized=finalized)
 
     result = await service.cancel_subscription(
@@ -103,7 +101,9 @@ async def test_pending_create_still_refuses_terminalization(
 ) -> None:
     row = _row(status="created", remote_sync="pending", provider_id=None)
     service, repo = _make_service(
-        monkeypatch, row=row, finalized=_row(status="cancelled", remote_sync="pending", provider_id=None)
+        monkeypatch,
+        row=row,
+        finalized=_row(status="cancelled", remote_sync="pending", provider_id=None),
     )
 
     result = await service.cancel_subscription(

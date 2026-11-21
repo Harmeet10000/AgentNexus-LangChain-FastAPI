@@ -138,8 +138,7 @@ def test_root_route_uses_the_shared_resolver() -> None:
 
     # And the resolver is the shared build_info seam, not a local copy.
     assert (
-        "from .features.health.adapters.inbound.http.build_info import resolve_git_sha"
-        in source
+        "from .features.health.adapters.inbound.http.build_info import resolve_git_sha" in source
         or "from app.features.health.adapters.inbound.http.build_info import resolve_git_sha"
         in source
     )

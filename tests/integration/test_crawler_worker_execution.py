@@ -116,9 +116,7 @@ async def _arrange_job(
     payload = request.model_dump(mode="json")
     await store.create(crawl_id=crawl_id, owner="client-1", request_payload=payload)
 
-    monkeypatch.setattr(
-        crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis
-    )
+    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis)
     monkeypatch.setattr(crawler_job, "get_processor", _no_processor)
     monkeypatch.setattr(
         "app.features.crawler.adapters.crawl4ai.crawler.get_crawler_config",
@@ -355,9 +353,7 @@ async def test_boot_reconcile_settles_only_orphaned_cancellations(
     """
     states, inspection, fake_server = await _seed_reconciliation_rows()
     worker_redis = FakeRedis(server=fake_server, decode_responses=True)
-    monkeypatch.setattr(
-        crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis
-    )
+    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis)
 
     settled = await crawler_job._reconcile_orphaned_cancellations()
 
@@ -389,9 +385,7 @@ async def test_boot_reconcile_is_bounded_by_the_row_cap(
     await extra.aclose(close_connection_pool=True)
 
     worker_redis = FakeRedis(server=fake_server, decode_responses=True)
-    monkeypatch.setattr(
-        crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis
-    )
+    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis)
     monkeypatch.setattr(crawler_job, "_RECONCILE_MAX_ROWS", 1)
 
     settled = await crawler_job._reconcile_orphaned_cancellations()

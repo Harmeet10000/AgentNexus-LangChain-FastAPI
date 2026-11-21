@@ -29,10 +29,7 @@ def find_claim_privilege_violations(source_root: Path) -> list[str]:  # noqa: PL
     for path in sorted(app_root.rglob("*.py")):
         # This module owns JWT wire serialization; it is the one intentional
         # place where role/permission claim keys are encoded and decoded.
-        if (
-            path.relative_to(app_root).as_posix()
-            == "features/auth/adapters/security/tokens.py"
-        ):
+        if path.relative_to(app_root).as_posix() == "features/auth/adapters/security/tokens.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         claim_aliases = set(_CLAIM_NAMES)

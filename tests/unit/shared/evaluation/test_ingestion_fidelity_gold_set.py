@@ -341,9 +341,7 @@ def _fixture_gold_set(tmp_path: Path, *, row_overrides: dict[str, object] | None
         "provenance_schema_version": "golden_provenance_v1",
     }
     gold_path = tmp_path / "ingestion_fidelity_fixture.jsonl"
-    gold_path.write_text(
-        json.dumps(metadata) + "\n" + json.dumps(row) + "\n", encoding="utf-8"
-    )
+    gold_path.write_text(json.dumps(metadata) + "\n" + json.dumps(row) + "\n", encoding="utf-8")
     manifest = {
         "manifest_version": "1",
         "golden_set_version": INGESTION_FIDELITY_SET_VERSION,
@@ -443,8 +441,7 @@ def test_fresh_evaluate_gold_set_passes_on_the_current_code() -> None:
     )
     gate = report.gate
     assert gate.verdict == "pass", (
-        f"fresh corpus evaluation failed: {gate.rows_failed} rows "
-        f"({gate.failed_case_ids})"
+        f"fresh corpus evaluation failed: {gate.rows_failed} rows ({gate.failed_case_ids})"
     )
     assert gate.rows_failed == 0
     assert gate.rows_passed == 25
