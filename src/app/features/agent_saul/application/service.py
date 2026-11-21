@@ -85,7 +85,7 @@ from app.features.agent_saul.domain.state import (
     initial_ingestion_state,
     legacy_resume_update,
 )
-from app.features.auth.api.websocket.security import (
+from app.features.auth.adapters.security.websocket import (
     WebSocketIdleTimeout,
     WebSocketSecurityViolation,
 )
@@ -115,7 +115,7 @@ if TYPE_CHECKING:
     from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
         TenantMembershipService,
     )
-    from app.features.auth.api.websocket.security import (
+    from app.features.auth.adapters.security.websocket import (
         WebSocketSecurityContext,
         WebSocketSecurityService,
     )

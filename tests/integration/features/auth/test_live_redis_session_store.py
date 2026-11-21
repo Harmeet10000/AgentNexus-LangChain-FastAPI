@@ -25,8 +25,8 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import (
     RefreshTokenRepository,
     SessionData,
 )
+from app.features.auth.adapters.security.tokens import derive_refresh_token_material
 from app.features.auth.domain.errors import AuthInfrastructureError
-from app.security.tokens import derive_refresh_token_material
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable

@@ -314,7 +314,7 @@ forbidden_modules = [
   "redis", "celery", "httpx", "aiohttp", "socket",
   # legacy technical namespaces AND the target one — both forbidden from slice one
   "app.connections", "app.shared", "app.config", "app.utils", "app.events",
-  "app.observability", "app.security", "app.resilience", "app.platform", "app.worker",
+  "app.observability", "app.resilience", "app.platform", "app.worker",
 ]
 
 [[tool.importlinter.contracts]]

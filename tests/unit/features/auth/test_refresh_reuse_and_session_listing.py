@@ -26,6 +26,7 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import (
 from app.features.auth.adapters.persistence.mongodb.user_store import (
     InMemoryAuthAccountStore,
 )
+from app.features.auth.adapters.security.tokens import decode_token
 from app.features.auth.api.http.dto import LoginRequest, RegisterRequest
 from app.features.auth.application.personal_tenant_provisioning import (
     PersonalTenantProvisioner,
@@ -36,7 +37,6 @@ from app.features.auth.domain.errors import (
     AuthCode,
     AuthRefreshReuseError,
 )
-from app.security.tokens import decode_token
 from app.shared.jobs.registry import UnregisteredTaskError
 from app.shared.result.render import render_result
 

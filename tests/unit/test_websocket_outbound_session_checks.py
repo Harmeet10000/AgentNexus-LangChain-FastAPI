@@ -12,12 +12,12 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
-from app.features.auth.api.websocket.security import (
+from app.features.auth.adapters.security.tokens import TokenClaims
+from app.features.auth.adapters.security.websocket import (
     WebSocketSecurityContext,
     WebSocketSecurityService,
     WebSocketSessionRevokedError,
 )
-from app.security.tokens import TokenClaims
 
 if TYPE_CHECKING:
     from typing import Any

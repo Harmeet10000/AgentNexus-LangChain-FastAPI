@@ -21,6 +21,8 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
     NewAuthAccount,
     OAuthAccountInput,
 )
+from app.features.auth.adapters.security.passwords import hash_password
+from app.features.auth.adapters.security.tokens import decode_token
 from app.features.auth.api.http.dto import (
     LoginRequest,
     RegisterRequest,
@@ -30,8 +32,6 @@ from app.features.auth.application.personal_tenant_provisioning import (
 )
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import AuthConflictError
-from app.security.passwords import hash_password
-from app.security.tokens import decode_token
 from app.utils.exceptions import (
     UnauthorizedException,
 )
@@ -69,7 +69,7 @@ async def create_account_in_store(
     registration now guarantees before any session can be issued.
     """
     from app.features.auth.adapters.persistence.mongodb.user_store import NewAuthAccount
-    from app.security.passwords import hash_password
+    from app.features.auth.adapters.security.passwords import hash_password
 
     new_account = NewAuthAccount(
         email=email.lower(),

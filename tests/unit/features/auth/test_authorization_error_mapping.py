@@ -14,6 +14,7 @@ import pytest
 from returns.result import Failure, Success
 
 from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccount
+from app.features.auth.adapters.security.tokens import TokenClaims
 from app.features.auth.api.http.dependencies import (
     _raise_tenant_selection_failure,
     get_current_authorization_context,
@@ -26,7 +27,6 @@ from app.features.auth.domain.errors import (
     auth_error_to_http_status,
 )
 from app.features.auth.domain.user import UserRole
-from app.security.tokens import TokenClaims
 from app.utils import ConflictException, ForbiddenException, InfrastructureException
 
 if TYPE_CHECKING:

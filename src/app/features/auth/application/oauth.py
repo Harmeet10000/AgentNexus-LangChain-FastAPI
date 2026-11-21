@@ -2,7 +2,7 @@
 
 Provider configuration and userinfo normalization are account policy, not
 reusable cryptography — the stateless state signing they rely on lives in
-`app.security.tokens`.
+`app.features.auth.adapters.security.tokens`.
 """
 
 from typing import TYPE_CHECKING

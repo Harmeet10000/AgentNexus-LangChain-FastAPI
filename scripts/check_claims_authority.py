@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from app.security.claims_authority import find_claim_privilege_violations
+from app.features.auth.adapters.security.claims_authority import find_claim_privilege_violations
 
 
 def main() -> int:

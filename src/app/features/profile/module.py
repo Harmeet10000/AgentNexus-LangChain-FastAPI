@@ -36,6 +36,10 @@ async def build_profile_application(request: Any) -> ProfileApplication:
         message = "Session store is unavailable"
         raise ServiceUnavailableException(message)
 
+    from app.features.auth.adapters.security.passwords import (  # noqa: PLC0415
+        hash_password,
+        verify_password,
+    )
     from app.features.auth.api.http.dependencies import (  # noqa: PLC0415
         get_account_store,
         get_refresh_token_repository,
@@ -53,7 +57,6 @@ async def build_profile_application(request: Any) -> ProfileApplication:
         GetProfileQueryHandler,
     )
     from app.observability.logging import logger  # noqa: PLC0415
-    from app.security.passwords import hash_password, verify_password  # noqa: PLC0415
     from app.utils.storage import uri_to_location  # noqa: PLC0415
 
     account_store = await get_account_store()

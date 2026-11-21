@@ -920,7 +920,7 @@ root_package = "app"
 [[tool.importlinter.contracts]]
 name = "Reusable runtime does not import domain implementations"
 type = "forbidden"
-source_modules = ["app.shared", "app.utils", "app.connections", "app.retrieval", "app.security"]
+source_modules = ["app.shared", "app.utils", "app.connections", "app.retrieval"]
 forbidden_modules = ["app.features"]
 # Each entry below is a scheduled move with its owning task, not a blanket
 # exemption: 4.3 moves the domain legal tool, 5.2 splits the source chunking
@@ -935,12 +935,15 @@ ignore_imports = [
     # relocation (clause-episode writer protocol references clause types);
     # consolidation is section 5 work.
     "app.retrieval.graphiti.write_clause_episodes -> app.features.agent_saul.domain.state",
+    # Shared request throttling resolves optional authenticated identity through
+    # the auth-owned token adapter while retaining IP fallback for public routes.
+    "app.shared.rate_limit.adapters.redis.dependencies -> app.features.auth.adapters.security.tokens",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Pure contracts stay free of features and workers"
 type = "forbidden"
-source_modules = ["app.retrieval", "app.security"]
+source_modules = ["app.retrieval"]
 forbidden_modules = ["app.features", "app.worker"]
 # Same scheduled move as above: the clause-episode writer binds its payload
 # types to the agent_saul state protocol; consolidation is section 5 work.
@@ -999,7 +1002,6 @@ forbidden_modules = [
     "app.utils",
     "app.events",
     "app.observability",
-    "app.security",
     "app.resilience",
     "app.worker",
 ]

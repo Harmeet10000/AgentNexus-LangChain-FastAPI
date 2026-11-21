@@ -1,6 +1,6 @@
 """Security adapter that issues the auth impersonation token."""
 
-from app.security.tokens import create_impersonation_token
+from app.features.auth.adapters.security.tokens import create_impersonation_token
 
 
 class ImpersonationTokenIssuer:

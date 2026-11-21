@@ -17,6 +17,7 @@ from pyrate_limiter import BucketFullException, Limiter, Rate
 from pyrate_limiter.buckets import InMemoryBucket, RedisBucket
 from returns.result import Failure
 
+from app.features.auth.adapters.security.tokens import TokenClaims
 from app.features.auth.application.revocation.websocket import (
     REVOCATION_CLOSE_LATENCY,
     REVOCATION_CLOSED,
@@ -30,7 +31,6 @@ from app.features.auth.application.revocation.websocket import (
     parse_event,
 )
 from app.observability.logging import logger
-from app.security.tokens import TokenClaims
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis

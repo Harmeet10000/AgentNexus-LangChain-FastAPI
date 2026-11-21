@@ -16,14 +16,14 @@ from returns.result import Failure, Success
 
 from app.config import get_settings
 from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
-from app.features.auth.api.websocket.security import (
+from app.features.auth.adapters.security.tokens import TokenClaims
+from app.features.auth.adapters.security.websocket import (
     WebSocketSecurityContext,
     WebSocketSessionRevokedError,
     build_websocket_security_service,
 )
 from app.features.auth.domain.errors import AuthInfrastructureError
 from app.observability.logging import logger
-from app.security.tokens import TokenClaims
 
 pytestmark = pytest.mark.unit
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from app.security.claims_authority import find_claim_privilege_violations
+from app.features.auth.adapters.security.claims_authority import find_claim_privilege_violations
 
 
 def test_application_never_authorizes_from_jwt_role_or_permissions() -> None:

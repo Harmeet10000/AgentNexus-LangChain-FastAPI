@@ -33,8 +33,9 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import (
     RefreshTokenRepository,
     SessionData,
 )
+from app.features.auth.adapters.security.tokens import TokenClaims, derive_refresh_token_material
+from app.features.auth.adapters.security.websocket import WebSocketSecurityService
 from app.features.auth.api.http.dependencies import get_token_claims
-from app.features.auth.api.websocket.security import WebSocketSecurityService
 from app.features.auth.application.commands.admin_accounts import AdminAccounts
 from app.features.auth.application.revocation.pending import (
     PendingRevocationConfig,
@@ -52,7 +53,6 @@ from app.features.auth.domain.errors import (
     AuthInfrastructureError,
 )
 from app.features.auth.domain.user import UserRole
-from app.security.tokens import TokenClaims, derive_refresh_token_material
 from app.utils import UnauthorizedException
 
 if TYPE_CHECKING:

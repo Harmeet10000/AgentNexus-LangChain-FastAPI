@@ -7,12 +7,12 @@ from returns.result import Failure
 from app.config import get_settings
 from app.connections.redis import get_redis
 from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
+from app.features.auth.adapters.security.tokens import OAUTH_STATE_COOKIE
 from app.features.auth.application.personal_tenant_provisioning import (
     PersonalTenantProvisioner,
 )
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import AuthAuthenticationError, AuthValidationError
-from app.security.tokens import OAUTH_STATE_COOKIE
 from app.shared.rate_limit import get_rate_limiter
 from app.shared.result.render import APIResponse, http_response, render_result
 

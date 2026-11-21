@@ -45,6 +45,21 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
     NewAuthAccount,
     OAuthAccountInput,
 )
+from app.features.auth.adapters.security.passwords import (
+    generate_token,
+    hash_password,
+    hash_token,
+    needs_rehash,
+    verify_password,
+)
+from app.features.auth.adapters.security.tokens import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    derive_refresh_token_material,
+    sign_oauth_state,
+    verify_oauth_state,
+)
 from app.features.auth.api.http.dto import (
     OAuthLinkConfirmationResponse,
     SessionResponse,
@@ -63,21 +78,6 @@ from app.features.auth.domain.errors import (
     AuthValidationError,
 )
 from app.features.auth.domain.tenancy import LegalRole, ProvisioningState
-from app.security.passwords import (
-    generate_token,
-    hash_password,
-    hash_token,
-    needs_rehash,
-    verify_password,
-)
-from app.security.tokens import (
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    derive_refresh_token_material,
-    sign_oauth_state,
-    verify_oauth_state,
-)
 
 from .oauth import fetch_oauth_userinfo, get_oauth_config
 

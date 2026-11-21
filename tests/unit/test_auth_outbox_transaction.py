@@ -10,9 +10,9 @@ from returns.result import Failure, Success
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccount
+from app.features.auth.adapters.security.passwords import hash_token
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.user import UserRole
-from app.security.passwords import hash_token
 
 if TYPE_CHECKING:
     from typing import Any

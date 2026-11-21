@@ -26,12 +26,12 @@ from app.features.agent_saul.api.http.router import router
 from app.features.agent_saul.application.runtime import SaulThreadContext
 from app.features.agent_saul.application.service import AgentSaulService
 from app.features.auth.adapters.persistence.mongodb.user_store import AuthAccountStore
+from app.features.auth.adapters.security.websocket import WebSocketSecurityViolation
 from app.features.auth.api.http.dependencies import (
     TenantMembershipServiceDep,
     WebSocketAuthorizationContext,
     get_account_store,
 )
-from app.features.auth.api.websocket.security import WebSocketSecurityViolation
 from app.features.documents.api.http.dependencies import DocumentAuthorizationWsDep
 from app.observability.logging import logger
 from app.utils import ErrorCode, ValidationException

@@ -20,6 +20,7 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
     InMemoryAuthAccountStore,
     NewAuthAccount,
 )
+from app.features.auth.adapters.security.passwords import hash_password
 from app.features.auth.api.http.dto import LoginRequest, RegisterRequest
 from app.features.auth.application.oauth import OAuthUserInfo
 from app.features.auth.application.personal_tenant_provisioning import (
@@ -31,7 +32,6 @@ from app.features.auth.domain.errors import (
     AuthProvisioningPendingError,
 )
 from app.features.auth.domain.tenancy import ProvisioningState, personal_tenant_id
-from app.security.passwords import hash_password
 
 from .provisioning_fakes import FakeTenantSQLStore
 

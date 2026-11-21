@@ -20,8 +20,8 @@ from app.features.agent_saul.application.transcript.export import (
     TranscriptExportError,
     TranscriptExportRow,
 )
+from app.features.auth.adapters.security.tokens import TokenClaims
 from app.features.auth.api.http.dependencies import get_token_claims
-from app.security.tokens import TokenClaims
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

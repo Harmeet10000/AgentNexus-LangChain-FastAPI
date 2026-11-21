@@ -22,6 +22,7 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
     InMemoryAuthAccountStore,
     NewAuthAccount,
 )
+from app.features.auth.adapters.security.tokens import TokenClaims
 from app.features.auth.api.http.dependencies import (
     AuthorizationContext,
     get_optional_refresh_token_repository,
@@ -40,7 +41,6 @@ from app.features.auth.application.token_audit_log import TokenAuditLog
 from app.features.auth.domain.errors import AuthAuthenticationError, AuthInfrastructureError
 from app.features.auth.domain.user import Permission, UserRole
 from app.features.billing.credits.router import get_credit_balance, get_credit_history
-from app.security.tokens import TokenClaims
 from app.utils import ForbiddenException, InfrastructureException, UnauthorizedException
 
 pytestmark = pytest.mark.unit

@@ -39,17 +39,18 @@ Known deviations from the plain four folders:
 
 Dependencies point inward only: `api → application → domain`; `adapters →
 application/domain`. Domain imports nothing outward. Shared runtime
-(`shared/`, `utils/`, `security/`, `retrieval/`, `connections/`) must not
+(`shared/`, `utils/`, `retrieval/`, `connections/`) must not
 import feature code — features import shared, never the reverse.
 
 This is enforced, not aspirational: `lint-imports` reads the five contracts
 in `pyproject.toml` (`[tool.importlinter]`):
 
 1. **Reusable runtime does not import domain implementations** — `app.shared`,
-   `app.utils`, `app.connections`, `app.retrieval`, `app.security` cannot
-   import `app.features`.
-2. **Pure contracts stay free of features and workers** — `app.retrieval`,
-   `app.security` cannot import `app.features` or `app.worker`.
+   `app.utils`, `app.connections`, and `app.retrieval` cannot import
+   `app.features`. The rate-limit dependency has one explicit auth-token
+   adapter edge for authenticated identity resolution.
+2. **Pure contracts stay free of features and workers** — `app.retrieval`
+   cannot import `app.features` or `app.worker`.
 3. **Web and producers do not load worker execution** — `app.api`, `app.main`,
    `app.lifecycle`, `app.connections`, `app.shared`, `app.config`,
    `app.middleware` cannot import `app.worker`.

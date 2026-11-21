@@ -39,12 +39,12 @@ from app.features.agent_saul.application.runtime import (
     thread_owner_violates,
 )
 from app.features.auth.adapters.persistence.mongodb.account_repository import SessionData
-from app.features.auth.api.websocket.security import (
+from app.features.auth.adapters.security.tokens import TokenClaims
+from app.features.auth.adapters.security.websocket import (
     WebSocketSecurityContext,
     WebSocketSecurityService,
 )
 from app.features.auth.domain.errors import AuthInfrastructureError
-from app.security.tokens import TokenClaims
 from app.utils import ServiceUnavailableException
 
 pytestmark = pytest.mark.unit

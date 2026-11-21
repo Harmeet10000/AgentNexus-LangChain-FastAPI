@@ -19,6 +19,7 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
 from app.features.auth.adapters.persistence.postgres.tenancy_repository import (
     TenantMembershipService,
 )
+from app.features.auth.adapters.security.tokens import TokenClaims, decode_token
 from app.features.auth.application.personal_tenant_provisioning import (
     PersonalTenantProvisioner,
 )
@@ -42,7 +43,6 @@ from app.features.auth.domain.tenancy import LegalRole
 from app.features.auth.domain.user import Permission, UserRole
 from app.kernel.models import StrictModel
 from app.observability.logging import set_request_actor
-from app.security.tokens import TokenClaims, decode_token
 from app.utils import (
     ConflictException,
     ForbiddenException,

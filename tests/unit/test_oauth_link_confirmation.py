@@ -18,6 +18,8 @@ from app.features.auth.adapters.persistence.mongodb.user_store import (
     InMemoryAuthAccountStore,
     NewAuthAccount,
 )
+from app.features.auth.adapters.security.passwords import hash_password
+from app.features.auth.adapters.security.tokens import TokenClaims
 from app.features.auth.application.oauth import OAuthUserInfo
 from app.features.auth.application.service import AuthService
 from app.features.auth.domain.errors import (
@@ -25,8 +27,6 @@ from app.features.auth.domain.errors import (
     AuthAuthorizationError,
     AuthConflictError,
 )
-from app.security.passwords import hash_password
-from app.security.tokens import TokenClaims
 
 pytestmark = pytest.mark.unit
 

@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from returns.result import Failure
 
+from app.features.auth.adapters.security.tokens import TokenClaims
 from app.features.auth.api.http.dependencies import CurrentVerifiedUser
 from app.features.profile.adapters.inbound.http.dto import (
     AvatarResponse,
@@ -21,7 +22,6 @@ from app.features.profile.application.dto.profile import (
 )
 from app.features.profile.domain.errors import ProfileValidationError
 from app.features.profile.module import ProfileApplication, build_profile_application
-from app.security.tokens import TokenClaims
 from app.shared.rate_limit import get_rate_limiter
 from app.shared.result.render import APIResponse, http_response, render_result
 

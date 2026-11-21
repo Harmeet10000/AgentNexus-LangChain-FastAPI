@@ -48,7 +48,7 @@ from app.connections.celery_producer import DirectPublicationAdapter
 from app.events.writer import PostgresOutboxAdapter
 from app.features.auth.adapters.persistence.mongodb.account_repository import RefreshTokenRepository
 from app.features.auth.adapters.persistence.mongodb.models import UserDocument
-from app.features.auth.api.websocket.security import build_websocket_security_service
+from app.features.auth.adapters.security.websocket import build_websocket_security_service
 from app.features.auth.application.token_audit_log import TokenAuditLog
 from app.features.billing.providers import RazorpayBillingProvider
 from app.features.documents.application.evidence.service import build_evidence_service

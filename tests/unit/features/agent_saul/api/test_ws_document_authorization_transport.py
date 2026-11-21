@@ -21,10 +21,10 @@ from returns.result import Failure, Success
 
 import app.features.agent_saul.api.websocket.endpoint  # noqa: F401 — registers WS route
 from app.features.agent_saul.api.http.router import router
+from app.features.auth.adapters.security.tokens import TokenClaims
 from app.features.auth.api.http.dependencies import AuthorizationContext
 from app.features.documents.api.http import dependencies as document_dependencies
 from app.features.documents.api.http.dependencies import get_document_authorization_ws
-from app.security.tokens import TokenClaims
 from app.utils import InfrastructureException
 
 if TYPE_CHECKING:

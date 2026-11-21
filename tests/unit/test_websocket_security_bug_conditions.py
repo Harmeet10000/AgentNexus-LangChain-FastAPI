@@ -29,13 +29,13 @@ from app.features.auth.adapters.persistence.mongodb.account_repository import (
     RefreshTokenRepository,
     SessionData,
 )
-from app.features.auth.api.websocket.security import (
+from app.features.auth.adapters.security.tokens import TokenClaims
+from app.features.auth.adapters.security.websocket import (
     WebSocketRateLimitExceededError,
     WebSocketSecurityContext,
     WebSocketSessionRevokedError,
     build_websocket_security_service,
 )
-from app.security.tokens import TokenClaims
 
 pytestmark = pytest.mark.unit
 

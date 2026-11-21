@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request
 from pydantic import ValidationError
 
-from app.security import tokens
+from app.features.auth.adapters.security import tokens
 from app.shared.rate_limit.adapters.redis.throttle import RateLimitService
 from app.utils.exceptions import UnauthorizedException
 
