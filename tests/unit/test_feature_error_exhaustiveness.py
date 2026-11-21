@@ -61,13 +61,6 @@ from app.features.documents.domain.errors import (
     DocumentValidationError,
     document_error_to_http_status,
 )
-from app.features.documents.ingestion.legacy_errors import (
-    IngestionGraphError,
-    IngestionInternalError,
-    IngestionPipelineError,
-    IngestionValidationError,
-    ingestion_error_to_http_status,
-)
 from app.features.profile.domain.errors import (
     ProfileAuthenticationError,
     ProfileConflictError,
@@ -135,18 +128,6 @@ def _error(error_type: type[FeatureError], **fields: object) -> FeatureError:
                     ProfileAuthenticationError,
                     ProfileInfrastructureError,
                     ProfileStorageError,
-                )
-            ],
-        ),
-        (
-            ingestion_error_to_http_status,
-            [
-                _error(error_type, doc_id="d")
-                for error_type in (
-                    IngestionGraphError,
-                    IngestionPipelineError,
-                    IngestionInternalError,
-                    IngestionValidationError,
                 )
             ],
         ),

@@ -23,7 +23,6 @@ import pytest
 
 from app.features.agent_saul.domain.state import LegalAgentState
 from app.features.agent_saul.graph.deep_research import DeepResearchState
-from app.features.documents.ingestion.legacy_service import map_legacy_state
 from app.features.documents.ingestion.workflow import DocumentIngestionState
 from app.features.documents.retrieval.graph.state import RetrievalState
 from app.shared.langgraph_layer.open_deep_search.state import (
@@ -87,12 +86,6 @@ _SAUL_INITIAL_STATE_KEYS = frozenset(
         "permissions",
         "budget_ledger",
     }
-)
-
-#: The legacy compatibility path's historical state shape. Every one of these
-#: keys is undeclared by ``DocumentIngestionState`` — the original silent drop.
-HISTORICAL_LEGACY_STATE_KEYS = frozenset(
-    {"doc_id", "raw_bytes", "thread_id", "source", "document_type", "jurisdiction"}
 )
 
 
@@ -259,57 +252,3 @@ def test_every_compile_site_is_registered() -> None:
         f"that no longer compiles a graph. Compiled: {compile_sites}. "
         f"Registered: {registered}."
     )
-
-
-def test_the_historical_legacy_shape_is_disjoint_and_every_key_is_named() -> None:
-    """Task 2.2: the pre-mapping legacy shape names every undeclared key.
-
-    This is the regression scenario. Against the historical legacy service the
-    assertion below reports all six keys; the mapping in task 3.1 must place
-    every one of them, and a revert to the old dict fails the test naming them.
-    """
-    undeclared = undeclared_state_keys(HISTORICAL_LEGACY_STATE_KEYS, DocumentIngestionState)
-
-    assert undeclared == sorted(HISTORICAL_LEGACY_STATE_KEYS)
-
-
-def test_the_mapped_legacy_state_declares_every_key() -> None:
-    """Task 3.1: after mapping, no undeclared key reaches ``ainvoke``."""
-    legacy = {
-        "doc_id": "doc-1",
-        "user_id": "user-1",
-        "tenant_id": "personal:user-1",
-        "filename": "contract.pdf",
-        "content_type": "application/pdf",
-        "object_uri": "s3://bucket/documents/user-1/doc-1/hash.pdf",
-        "document_version": 1,
-        "attempt": 0,
-        "document_type": "legal_contract",
-        "thread_id": "thread-1",
-        "source": "contract.pdf",
-        "jurisdiction": "India",
-        "raw_bytes": b"clause text",
-    }
-
-    state, configurable, unmapped = map_legacy_state(legacy)
-
-    assert unmapped == []
-    assert undeclared_state_keys(frozenset(state), DocumentIngestionState) == []
-    assert state["document_id"] == "doc-1"
-    assert state["document_kind"] == "legal_contract"
-    assert configurable == {
-        "thread_id": "thread-1",
-        "source": "contract.pdf",
-        "jurisdiction": "India",
-    }
-
-
-def test_an_unrouted_raw_bytes_key_is_named_not_dropped() -> None:
-    """A key that cannot be placed is enumerated, never silently discarded."""
-    legacy = {"doc_id": "doc-1", "raw_bytes": b"clause text", "unknown_extra": 1}
-
-    state, configurable, unmapped = map_legacy_state(legacy)
-
-    assert unmapped == ["raw_bytes", "unknown_extra"]
-    assert "object_uri" not in state
-    assert configurable == {}

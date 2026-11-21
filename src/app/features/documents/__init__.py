@@ -10,9 +10,4 @@ Import from explicit modules (``app.features.documents.api.http.router``,
 ``app.features.documents.adapters.persistence.postgres.document_repository``)
 rather than from this package root: root re-exports pull the HTTP stack and
 LangChain into every importer.
-
-Legacy compatibility routes and their fail-closed dependency live at
-``app.features.documents.api.http.legacy_ingest_router`` and
-``app.features.documents.api.http.legacy_ingest_dependencies`` (the former
-``app.features.ingestion`` package, now folded in here).
 """

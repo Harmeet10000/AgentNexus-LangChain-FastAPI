@@ -16,7 +16,6 @@ from app.features.billing.plans.router import router as plans_router
 from app.features.billing.subscriptions.router import router as subscriptions_router
 from app.features.billing.webhooks.router import router as webhooks_router
 from app.features.crawler.api.http.router import router as crawler_router
-from app.features.documents.api.http.legacy_ingest_router import router as ingestion_router
 from app.features.documents.api.http.router import router as documents_router
 from app.features.health.adapters.inbound.http.router import router as health_router
 from app.features.profile.adapters.inbound.http.router import router as profile_router
@@ -40,7 +39,6 @@ v2_router.include_router(auth_router)
 v2_router.include_router(tenant_router)
 v2_router.include_router(crawler_router)
 v2_router.include_router(health_router)
-v2_router.include_router(ingestion_router)
 v2_router.include_router(users_router)
 v2_router.include_router(profile_router)
 v2_router.include_router(documents_router)

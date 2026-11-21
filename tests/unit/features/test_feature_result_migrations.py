@@ -19,11 +19,6 @@ from app.features.billing.dunning.exceptions import DunningInfrastructureError
 from app.features.billing.dunning.service import DunningService
 from app.features.billing.plans.exceptions import PlanConflictError
 from app.features.billing.plans.service import PlanService
-from app.features.documents.ingestion.legacy_errors import (
-    IngestionGraphError,
-    IngestionPipelineError,
-)
-from app.features.documents.ingestion.legacy_service import IngestionService
 from app.features.profile.application.commands.update_profile import (
     UpdateProfileCommandHandler,
 )
@@ -56,32 +51,6 @@ def test_all_requested_features_expose_closed_error_unions() -> None:
     members = get_args(AgentSaulError.__value__)
     assert members
     assert all(error_type.__base__.__name__ == "FeatureError" for error_type in members)
-
-
-def _ingestion_service_with_storage(graph: SimpleNamespace) -> IngestionService:
-    """Service with a stub object store: the bytes route to storage, so the
-    state's object_uri lands and the key-set boundary forgives raw_bytes —
-    letting these tests reach the graph-translation paths they exist for."""
-    object_store = SimpleNamespace(put_object=AsyncMock(return_value=Success("s3://bucket/key")))
-    return IngestionService(graph, object_store=object_store)
-
-
-async def test_ingestion_graph_exception_returns_typed_failure() -> None:
-    graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=RuntimeError("graph down")))
-    result = await _ingestion_service_with_storage(graph).ingest_document(
-        b"x", "user", "a.pdf", "a.pdf"
-    )
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), IngestionGraphError)
-
-
-async def test_ingestion_state_failure_is_translated_locally() -> None:
-    graph = SimpleNamespace(ainvoke=AsyncMock(return_value={"failure": {"message": "node failed"}}))
-    result = await _ingestion_service_with_storage(graph).ingest_document(
-        b"x", "user", "a.pdf", "a.pdf"
-    )
-    assert isinstance(result, Failure)
-    assert isinstance(result.failure(), IngestionPipelineError)
 
 
 async def test_dunning_propagates_subscription_update_failure() -> None:
