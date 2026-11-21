@@ -11,13 +11,13 @@ from graphiti_core import Graphiti
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.features.documents.adapters.inbound.worker import capability as document_worker
 from app.features.documents.application.commands.upload_document import (
     _document_ingestion_lock_key,
     _release_document_ingestion_lock,
     run_document_ingestion_task,
 )
 from app.resilience.idempotency import IdempotencyGuard
-from app.worker.capabilities import documents as document_worker
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
