@@ -219,7 +219,7 @@ _CATALOG: dict[str, JobDefinition[CeleryTaskPayload]] = {
         CrawlerJobPayload,
         queue=JobQueue.CRAWLER,
         capability=JobCapability.CRAWLER,
-        declaring_module="app.worker.jobs.crawler",
+        declaring_module="app.features.crawler.adapters.inbound.worker.tasks",
     ),
     SEND_VERIFICATION_EMAIL: _job(
         SEND_VERIFICATION_EMAIL,

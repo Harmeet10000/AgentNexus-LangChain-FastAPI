@@ -21,6 +21,14 @@ from returns.result import Failure
 from app.config import get_settings
 from app.connections.redis import create_redis_client
 from app.features.crawler.adapters.crawl4ai.crawler import WebCrawler
+from app.features.crawler.adapters.inbound.worker.capabilities import (
+    aprobe_crawler_browser,
+    areset_crawler_worker,
+    get_crawler_worker_resources,
+    probe_crawler_browser,
+    reset_crawler_worker,
+    run_on_crawler_worker_loop,
+)
 from app.features.crawler.adapters.persistence.redis.job_store import CrawlJobStore
 from app.features.crawler.application.contracts import CrawlRequest
 from app.features.crawler.application.egress import (
@@ -33,14 +41,6 @@ from app.features.crawler.application.service import CrawlerService
 from app.observability.logging import logger
 from app.shared.jobs.names import CRAWLER_CRAWL
 from app.utils import InfrastructureException, ServiceUnavailableException
-from app.worker.capabilities.crawler import (
-    aprobe_crawler_browser,
-    areset_crawler_worker,
-    get_crawler_worker_resources,
-    probe_crawler_browser,
-    reset_crawler_worker,
-    run_on_crawler_worker_loop,
-)
 from app.worker.celery.app import get_worker_celery_app
 from app.worker.celery.task import ResilientTask
 

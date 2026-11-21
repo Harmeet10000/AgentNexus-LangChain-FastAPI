@@ -66,7 +66,7 @@ async def test_finish_single_result_rejects_private_redirect(
 
 
 def test_worker_browser_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.worker.capabilities import crawler as worker_tasks
+    from app.features.crawler.adapters.inbound.worker import capabilities as worker_tasks
 
     calls: dict[str, object] = {"count": 0, "proxy_url": None}
 

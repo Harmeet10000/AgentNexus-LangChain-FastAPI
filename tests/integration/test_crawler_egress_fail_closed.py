@@ -12,9 +12,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from app.features.crawler.adapters.inbound.worker import capabilities as crawler_capability
 from app.features.crawler.application.egress import CrawlerEgressPolicy
 from app.utils import ServiceUnavailableException
-from app.worker.capabilities import crawler as crawler_capability
 
 
 def _policy() -> CrawlerEgressPolicy:

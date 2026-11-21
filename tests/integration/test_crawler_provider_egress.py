@@ -12,9 +12,9 @@ import os
 import pytest
 
 from app.config import Settings
+from app.features.crawler.adapters.inbound.worker import tasks as crawler_job
+from app.features.crawler.adapters.inbound.worker.capabilities import _apply_egress_environment
 from app.features.crawler.application.egress import CrawlerEgressConfigError, build_egress_policy
-from app.worker.capabilities.crawler import _apply_egress_environment
-from app.worker.jobs import crawler as crawler_job
 
 _BASE_SETTINGS: dict[str, object] = {
     "CRAWLER_EGRESS_ENABLED": True,

@@ -19,11 +19,11 @@ from loguru import logger as loguru_logger
 from redis.exceptions import RedisError
 
 from app.features.crawler.adapters.crawl4ai.config import CrawlerConfig
+from app.features.crawler.adapters.inbound.worker import tasks as crawler_job
 from app.features.crawler.adapters.persistence.redis.job_store import CrawlJobStore
 from app.features.crawler.api.http.dto import CrawlRequest
 from app.features.crawler.application.egress import CrawlerEgressConfigError
 from app.features.crawler.domain.models import CrawlJobStatus
-from app.worker.jobs import crawler as crawler_job
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -116,7 +116,9 @@ async def _arrange_job(
     payload = request.model_dump(mode="json")
     await store.create(crawl_id=crawl_id, owner="client-1", request_payload=payload)
 
-    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url: worker_redis)
+    monkeypatch.setattr(
+        crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis
+    )
     monkeypatch.setattr(crawler_job, "get_processor", _no_processor)
     monkeypatch.setattr(
         "app.features.crawler.adapters.crawl4ai.crawler.get_crawler_config",
@@ -353,7 +355,9 @@ async def test_boot_reconcile_settles_only_orphaned_cancellations(
     """
     states, inspection, fake_server = await _seed_reconciliation_rows()
     worker_redis = FakeRedis(server=fake_server, decode_responses=True)
-    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url: worker_redis)
+    monkeypatch.setattr(
+        crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis
+    )
 
     settled = await crawler_job._reconcile_orphaned_cancellations()
 
@@ -385,7 +389,9 @@ async def test_boot_reconcile_is_bounded_by_the_row_cap(
     await extra.aclose(close_connection_pool=True)
 
     worker_redis = FakeRedis(server=fake_server, decode_responses=True)
-    monkeypatch.setattr(crawler_job, "create_redis_client", lambda _url: worker_redis)
+    monkeypatch.setattr(
+        crawler_job, "create_redis_client", lambda _url, **_kwargs: worker_redis
+    )
     monkeypatch.setattr(crawler_job, "_RECONCILE_MAX_ROWS", 1)
 
     settled = await crawler_job._reconcile_orphaned_cancellations()
@@ -430,7 +436,7 @@ from app.worker.celery.profiles import profile_for_role
 
 profile = profile_for_role("crawler")
 app = create_worker_celery_app("crawler")
-assert "app.worker.jobs.crawler" in (app.conf.include or ()), app.conf.include
+assert "app.features.crawler.adapters.inbound.worker.tasks" in (app.conf.include or ()), app.conf.include
 
 # Worker construction must import the role's task modules through celery's
 # include machinery (loader.init_worker), which is where the boot reconcile
@@ -443,9 +449,9 @@ worker = CatalogValidatingWorker(
     hostname="crawler-recon-probe@probe",
     loglevel="info",
 )
-assert "app.worker.jobs.crawler" in sys.modules
+assert "app.features.crawler.adapters.inbound.worker.tasks" in sys.modules
 
-import app.worker.jobs.crawler as crawler_jobs  # noqa: PLC0415
+import app.features.crawler.adapters.inbound.worker.tasks as crawler_jobs  # noqa: PLC0415
 
 fired: list[str] = []
 

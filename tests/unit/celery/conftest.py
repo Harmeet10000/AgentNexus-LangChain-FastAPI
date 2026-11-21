@@ -57,7 +57,8 @@ _LIFTED_TREES = (
     "app.worker.jobs.agent_saul",
     "app.worker.jobs.documents",
     "app.features.search.adapters.inbound.worker.tasks",
-    "app.worker.jobs.crawler",
+    "app.features.crawler.adapters.inbound.worker.capabilities",
+    "app.features.crawler.adapters.inbound.worker.tasks",
     "app.worker.jobs.billing",
     "app.worker.jobs.credits",
 )

@@ -20,7 +20,6 @@ def test_inner_crawler_layers_do_not_import_http_transport() -> None:
     sources = [
         *sorted((CRAWLER / "application").rglob("*.py")),
         *sorted((CRAWLER / "adapters").rglob("*.py")),
-        ROOT / "src/app/worker/jobs/crawler.py",
     ]
 
     offenders = {

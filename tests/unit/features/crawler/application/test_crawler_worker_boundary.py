@@ -43,7 +43,7 @@ def _run_at_task_boundary(
 
 def _current_crawler_jobs():
     """Return the module instance left by worker-isolation reload tests."""
-    return importlib.import_module("app.worker.jobs.crawler")
+    return importlib.import_module("app.features.crawler.adapters.inbound.worker.tasks")
 
 
 def test_crawl_job_hands_the_boundary_provisioned_browser_into_the_job(
@@ -97,7 +97,7 @@ def test_a_running_owner_loop_refuses_the_sync_resource_accessor() -> None:
     with the capability-usage error — which is why the browser has to travel in
     from the task boundary instead.
     """
-    from app.worker.capabilities import crawler as capability
+    from app.features.crawler.adapters.inbound.worker import capabilities as capability
 
     async def _miswired() -> None:
         with pytest.raises(CapabilityUsageError, match="task boundary"):

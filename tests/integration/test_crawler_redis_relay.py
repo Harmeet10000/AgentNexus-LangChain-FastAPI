@@ -12,13 +12,13 @@ from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.config import Settings
+from app.features.crawler.adapters.inbound.worker import tasks as crawler_job
 from app.features.crawler.application.egress import (
     CrawlerEgressConfigError,
     CrawlerRedisRelaySettings,
     build_egress_policy,
     relay_redis_url,
 )
-from app.worker.jobs import crawler as crawler_job
 
 _BASE_SETTINGS: dict[str, object] = {
     "CRAWLER_EGRESS_ENABLED": True,

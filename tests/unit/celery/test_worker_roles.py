@@ -156,6 +156,7 @@ assert all(
     module.startswith("app.worker.jobs.")
     or module in {{
         "app.features.auth.adapters.inbound.worker.tasks",
+        "app.features.crawler.adapters.inbound.worker.tasks",
         "app.features.search.adapters.inbound.worker.tasks",
     }}
     for module in app.conf.include

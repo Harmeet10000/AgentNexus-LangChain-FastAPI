@@ -77,7 +77,7 @@ def test_the_refusal_message_carries_no_internal_detail() -> None:
 
 
 def test_a_boundary_outage_raises_a_retryable_infrastructure_failure() -> None:
-    from app.worker.jobs import crawler as crawler_jobs
+    from app.features.crawler.adapters.inbound.worker import tasks as crawler_jobs
 
     with pytest.raises(InfrastructureException) as raised:
         crawler_jobs._boundary_outage_failure("crawl-1")

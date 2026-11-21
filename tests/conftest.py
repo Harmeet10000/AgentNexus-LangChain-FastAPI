@@ -94,10 +94,10 @@ def _crawler_egress_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     here is inert: the proxy is never contacted and the process environment
     is left untouched, so no other test inherits a proxy.
     """
+    from app.features.crawler.adapters.inbound.worker import capabilities as worker_crawler
+    from app.features.crawler.adapters.inbound.worker import tasks as worker_crawler_jobs
     from app.features.crawler.adapters.proxy.preflight import EgressPreflightResult
     from app.features.crawler.application.egress import CrawlerEgressPolicy
-    from app.worker.capabilities import crawler as worker_crawler
-    from app.worker.jobs import crawler as worker_crawler_jobs
 
     policy = CrawlerEgressPolicy(
         proxy_url="http://crawler-egress-proxy.test:4750",
